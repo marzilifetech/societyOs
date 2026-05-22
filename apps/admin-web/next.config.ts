@@ -1,4 +1,5 @@
 import type { NextConfig } from 'next';
+import path from 'path';
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
 const apiOrigin = (() => {
@@ -35,6 +36,12 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // Standalone output bundles the real runtime deps (next, etc.) into
+  // .next/standalone. Required for Amplify SSR hosting: pnpm's symlinked
+  // node_modules don't survive the deploy packaging in a monorepo.
+  output: 'standalone',
+  // Trace from the monorepo root so workspace + .pnpm store deps are included.
+  outputFileTracingRoot: path.join(__dirname, '../../'),
   async rewrites() {
     return [
       {
