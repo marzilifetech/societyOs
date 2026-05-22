@@ -1,0 +1,38 @@
+# Keep the Docker build context small and secret-free.
+# (Build context is the repo root — see backend/Dockerfile.)
+
+# Dependencies & build output — reinstalled/rebuilt inside the image
+**/node_modules
+**/dist
+**/.next
+**/.expo
+**/.expo-shared
+**/.turbo
+**/build
+**/*.tsbuildinfo
+**/coverage
+
+# VCS, CI, local tooling
+.git
+.github
+.husky
+.logs
+.dev-pids
+.dev-logs
+.pnpm-store
+
+# Secrets & local env — never bake into an image
+**/.env
+**/.env.local
+**/.env.*.local
+creds.txt
+*.pem
+secrets.*
+
+# Native mobile build dirs (not needed for the backend image)
+**/ios
+**/android
+
+# Logs & OS cruft
+**/*.log
+**/.DS_Store

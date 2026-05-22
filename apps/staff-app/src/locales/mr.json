@@ -1,0 +1,79 @@
+{
+  "common": {
+    "loading": "लोड होत आहे...",
+    "error": "काहीतरी चूक झाली",
+    "retry": "पुन्हा प्रयत्न",
+    "cancel": "रद्द करा",
+    "save": "जतन करा",
+    "delete": "हटवा",
+    "edit": "संपादित करा",
+    "back": "मागे",
+    "done": "पूर्ण",
+    "yes": "होय",
+    "no": "नाही",
+    "ok": "ठीक आहे"
+  },
+  "profile": {
+    "title": "प्रोफाइल",
+    "designation": "पदनाम",
+    "team": "टीम",
+    "joinedAt": "रुजू दिनांक",
+    "employeeId": "कर्मचारी आयडी",
+    "phone": "फोन",
+    "society": "सोसायटी",
+    "earnings": "कमाई",
+    "thisMonth": "या महिन्यात",
+    "projectedPayout": "अंदाजित पगार",
+    "documents": "कागदपत्रे",
+    "salarySlips": "पगार पावती",
+    "emergencyContact": "आपत्कालीन संपर्क",
+    "settings": "सेटिंग्ज",
+    "help": "मदत",
+    "logout": "लॉगआउट",
+    "deleteAccount": "खाते हटवा",
+    "version": "आवृत्ती"
+  },
+  "settings": {
+    "title": "सेटिंग्ज",
+    "notifications": "सूचना",
+    "language": "भाषा",
+    "theme": "थीम",
+    "dataSaver": "डेटा सेव्हर",
+    "biometric": "बायोमेट्रिक लॉगिन",
+    "help": "मदत व FAQ",
+    "about": "बद्दल",
+    "system": "सिस्टम",
+    "light": "लाइट",
+    "dark": "डार्क",
+    "largeText": "मोठा मजकूर",
+    "tasks": "कार्ये",
+    "reviews": "पुनरावलोकने",
+    "leave": "रजा",
+    "announcements": "घोषणा",
+    "helpRequests": "मदत विनंत्या"
+  },
+  "documents": {
+    "title": "कागदपत्रे",
+    "upload": "कागदपत्र अपलोड करा",
+    "verified": "सत्यापित",
+    "pending": "प्रलंबित",
+    "type": "प्रकार",
+    "uploadedOn": "अपलोड दिनांक"
+  },
+  "salary": {
+    "title": "पगार पावती",
+    "gross": "एकूण",
+    "deductions": "वजावट",
+    "net": "निव्वळ पगार",
+    "viewPdf": "PDF पहा",
+    "totalEarned": "एकूण कमाई"
+  },
+  "helpRequests": {
+    "title": "मदत विनंत्या",
+    "active": "सक्रिय",
+    "completed": "पूर्ण",
+    "accept": "स्वीकारा",
+    "inProgress": "प्रगतीत",
+    "complete": "पूर्ण म्हणून चिन्हांकित करा"
+  }
+}

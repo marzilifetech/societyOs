@@ -1,0 +1,79 @@
+{
+  "common": {
+    "loading": "ಲೋಡ್ ಆಗುತ್ತಿದೆ...",
+    "error": "ಏನೋ ತಪ್ಪಾಗಿದೆ",
+    "retry": "ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ",
+    "cancel": "ರದ್ದುಮಾಡಿ",
+    "save": "ಉಳಿಸಿ",
+    "delete": "ಅಳಿಸಿ",
+    "edit": "ಸಂಪಾದಿಸಿ",
+    "back": "ಹಿಂದೆ",
+    "done": "ಮುಗಿದಿದೆ",
+    "yes": "ಹೌದು",
+    "no": "ಇಲ್ಲ",
+    "ok": "ಸರಿ"
+  },
+  "profile": {
+    "title": "ಪ್ರೊಫೈಲ್",
+    "designation": "ಹುದ್ದೆ",
+    "team": "ತಂಡ",
+    "joinedAt": "ಸೇರಿದ ದಿನಾಂಕ",
+    "employeeId": "ಉದ್ಯೋಗಿ ID",
+    "phone": "ಫೋನ್",
+    "society": "ಸೊಸೈಟಿ",
+    "earnings": "ಆದಾಯ",
+    "thisMonth": "ಈ ತಿಂಗಳು",
+    "projectedPayout": "ಅಂದಾಜು ಪಾವತಿ",
+    "documents": "ದಾಖಲೆಗಳು",
+    "salarySlips": "ಸಂಬಳ ಚೀಟಿಗಳು",
+    "emergencyContact": "ತುರ್ತು ಸಂಪರ್ಕ",
+    "settings": "ಸೆಟ್ಟಿಂಗ್‌ಗಳು",
+    "help": "ಸಹಾಯ",
+    "logout": "ಲಾಗ್‌ಔಟ್",
+    "deleteAccount": "ಖಾತೆ ಅಳಿಸಿ",
+    "version": "ಆವೃತ್ತಿ"
+  },
+  "settings": {
+    "title": "ಸೆಟ್ಟಿಂಗ್‌ಗಳು",
+    "notifications": "ಅಧಿಸೂಚನೆಗಳು",
+    "language": "ಭಾಷೆ",
+    "theme": "ಥೀಮ್",
+    "dataSaver": "ಡೇಟಾ ಸೇವರ್",
+    "biometric": "ಬಯೋಮೆಟ್ರಿಕ್ ಲಾಗಿನ್",
+    "help": "ಸಹಾಯ ಮತ್ತು FAQ",
+    "about": "ಬಗ್ಗೆ",
+    "system": "ಸಿಸ್ಟಮ್",
+    "light": "ಬೆಳಕು",
+    "dark": "ಡಾರ್ಕ್",
+    "largeText": "ದೊಡ್ಡ ಪಠ್ಯ",
+    "tasks": "ಕಾರ್ಯಗಳು",
+    "reviews": "ವಿಮರ್ಶೆಗಳು",
+    "leave": "ರಜೆ",
+    "announcements": "ಪ್ರಕಟಣೆಗಳು",
+    "helpRequests": "ಸಹಾಯ ವಿನಂತಿಗಳು"
+  },
+  "documents": {
+    "title": "ದಾಖಲೆಗಳು",
+    "upload": "ದಾಖಲೆ ಅಪ್ಲೋಡ್ ಮಾಡಿ",
+    "verified": "ಪರಿಶೀಲಿಸಲಾಗಿದೆ",
+    "pending": "ಬಾಕಿ",
+    "type": "ಪ್ರಕಾರ",
+    "uploadedOn": "ಅಪ್ಲೋಡ್ ದಿನಾಂಕ"
+  },
+  "salary": {
+    "title": "ಸಂಬಳ ಚೀಟಿಗಳು",
+    "gross": "ಒಟ್ಟು",
+    "deductions": "ಕಡಿತಗಳು",
+    "net": "ನಿವ್ವಳ ಪಾವತಿ",
+    "viewPdf": "PDF ನೋಡಿ",
+    "totalEarned": "ಒಟ್ಟು ಆದಾಯ"
+  },
+  "helpRequests": {
+    "title": "ಸಹಾಯ ವಿನಂತಿಗಳು",
+    "active": "ಸಕ್ರಿಯ",
+    "completed": "ಪೂರ್ಣಗೊಂಡಿದೆ",
+    "accept": "ಸ್ವೀಕರಿಸಿ",
+    "inProgress": "ಪ್ರಗತಿಯಲ್ಲಿ",
+    "complete": "ಪೂರ್ಣ ಎಂದು ಗುರುತಿಸಿ"
+  }
+}

@@ -1,0 +1,122 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`ThemedText caption variant snapshot 1`] = `
+<Text
+  style={
+    [
+      {
+        "color": "rgba(255,255,255,0.70)",
+        "fontSize": 14,
+        "fontWeight": "400",
+        "lineHeight": 19.599999999999998,
+      },
+      undefined,
+      undefined,
+      undefined,
+    ]
+  }
+>
+  Caption
+</Text>
+`;
+
+exports[`ThemedText default (body) variant snapshot 1`] = `
+<Text
+  style={
+    [
+      {
+        "color": "#FFFFFF",
+        "fontSize": 16,
+        "fontWeight": "400",
+        "lineHeight": 22.4,
+      },
+      undefined,
+      undefined,
+      undefined,
+    ]
+  }
+>
+  Body text
+</Text>
+`;
+
+exports[`ThemedText heading variant snapshot 1`] = `
+<Text
+  style={
+    [
+      {
+        "color": "#FFFFFF",
+        "fontSize": 30,
+        "fontWeight": "700",
+        "lineHeight": 36,
+      },
+      undefined,
+      undefined,
+      undefined,
+    ]
+  }
+>
+  Heading
+</Text>
+`;
+
+exports[`ThemedText label variant snapshot 1`] = `
+<Text
+  style={
+    [
+      {
+        "color": "rgba(255,255,255,0.70)",
+        "fontSize": 14,
+        "fontWeight": "600",
+        "letterSpacing": 0.8,
+        "textTransform": "uppercase",
+      },
+      undefined,
+      undefined,
+      undefined,
+    ]
+  }
+>
+  Label
+</Text>
+`;
+
+exports[`ThemedText muted variant snapshot 1`] = `
+<Text
+  style={
+    [
+      {
+        "color": "rgba(255,255,255,0.45)",
+        "fontSize": 14,
+        "fontWeight": "400",
+        "lineHeight": 22.400000000000002,
+      },
+      undefined,
+      undefined,
+      undefined,
+    ]
+  }
+>
+  Muted
+</Text>
+`;
+
+exports[`ThemedText subheading variant snapshot 1`] = `
+<Text
+  style={
+    [
+      {
+        "color": "#FFFFFF",
+        "fontSize": 24,
+        "fontWeight": "600",
+        "lineHeight": 33.599999999999994,
+      },
+      undefined,
+      undefined,
+      undefined,
+    ]
+  }
+>
+  Subheading
+</Text>
+`;

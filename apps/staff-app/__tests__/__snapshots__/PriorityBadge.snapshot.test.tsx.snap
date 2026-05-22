@@ -1,0 +1,61 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`PriorityBadge renders at-risk badge at 83% of SLA (20 / 24 hours) 1`] = `
+<View
+  className="bg-amber-100 dark:bg-amber-950/60 rounded-full px-2 py-0.5"
+>
+  <Text
+    className="text-[10px] font-semibold text-amber-700 dark:text-amber-400"
+  >
+    tasks.atRisk
+  </Text>
+</View>
+`;
+
+exports[`PriorityBadge renders at-risk badge just above 75% threshold 1`] = `
+<View
+  className="bg-amber-100 dark:bg-amber-950/60 rounded-full px-2 py-0.5"
+>
+  <Text
+    className="text-[10px] font-semibold text-amber-700 dark:text-amber-400"
+  >
+    tasks.atRisk
+  </Text>
+</View>
+`;
+
+exports[`PriorityBadge renders breached badge immediately past the SLA boundary 1`] = `
+<View
+  className="bg-red-100 dark:bg-red-950/60 rounded-full px-2 py-0.5"
+>
+  <Text
+    className="text-[10px] font-semibold text-red-700 dark:text-red-400"
+  >
+    tasks.slaBreach
+  </Text>
+</View>
+`;
+
+exports[`PriorityBadge renders breached badge when age exceeds slaHours 1`] = `
+<View
+  className="bg-red-100 dark:bg-red-950/60 rounded-full px-2 py-0.5"
+>
+  <Text
+    className="text-[10px] font-semibold text-red-700 dark:text-red-400"
+  >
+    tasks.slaBreach
+  </Text>
+</View>
+`;
+
+exports[`PriorityBadge respects a custom slaHours of 48 1`] = `
+<View
+  className="bg-amber-100 dark:bg-amber-950/60 rounded-full px-2 py-0.5"
+>
+  <Text
+    className="text-[10px] font-semibold text-amber-700 dark:text-amber-400"
+  >
+    tasks.atRisk
+  </Text>
+</View>
+`;

@@ -1,0 +1,39 @@
+{
+  "name": "societyos",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "format": "prettier --write \"**/*.{ts,tsx,md}\"",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@sentry/cli": "^2.39.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.2.10",
+    "prettier": "^3.3.3",
+    "prettier-plugin-tailwindcss": "^0.8.0",
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.2"
+  },
+  "lint-staged": {
+    "*.{json,md}": "prettier --write"
+  },
+  "packageManager": "pnpm@10.33.2",
+  "engines": {
+    "node": ">=20"
+  },
+  "pnpm": {
+    "overrides": {
+      "@types/react": "~18.3.12",
+      "react": "18.3.1",
+      "path-scurry>lru-cache": "^10.4.3"
+    },
+    "patchedDependencies": {
+      "react-native-css-interop@0.2.3": "patches/react-native-css-interop@0.2.3.patch"
+    }
+  }
+}

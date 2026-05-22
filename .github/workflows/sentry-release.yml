@@ -1,0 +1,104 @@
+name: Sentry Release
+
+on:
+  push:
+    branches: [main]
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  NODE_VERSION: '20'
+  PNPM_VERSION: '10'
+
+jobs:
+  release:
+    name: Sentry release (backend + admin-web)
+    runs-on: ubuntu-latest
+    if: github.repository == 'utkarshparcel/marzi-redesign'
+    env:
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+      SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+      SENTRY_PROJECT_BACKEND: ${{ secrets.SENTRY_PROJECT_BACKEND }}
+      SENTRY_PROJECT_ADMIN_WEB: ${{ secrets.SENTRY_PROJECT_ADMIN_WEB }}
+    steps:
+      - name: Skip if Sentry secrets are missing
+        id: guard
+        run: |
+          if [ -z "$SENTRY_AUTH_TOKEN" ] || [ -z "$SENTRY_ORG" ]; then
+            echo "Sentry secrets not configured — skipping release."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        if: steps.guard.outputs.skip != 'true'
+
+      - uses: pnpm/action-setup@v4
+        if: steps.guard.outputs.skip != 'true'
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        if: steps.guard.outputs.skip != 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Read backend version
+        if: steps.guard.outputs.skip != 'true'
+        id: backend-version
+        run: |
+          v=$(node -p "require('./backend/package.json').version")
+          echo "version=backend@${v}-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Read admin-web version
+        if: steps.guard.outputs.skip != 'true'
+        id: admin-version
+        run: |
+          v=$(node -p "require('./apps/admin-web/package.json').version")
+          echo "version=admin-web@${v}-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        if: steps.guard.outputs.skip != 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Build backend
+        if: steps.guard.outputs.skip != 'true'
+        working-directory: backend
+        run: |
+          pnpm exec prisma generate
+          pnpm build
+
+      - name: Build admin-web
+        if: steps.guard.outputs.skip != 'true'
+        working-directory: apps/admin-web
+        env:
+          NEXT_PUBLIC_API_URL: https://api.societyos.in/v1
+        run: pnpm build
+
+      - name: Sentry release (backend)
+        if: steps.guard.outputs.skip != 'true' && env.SENTRY_PROJECT_BACKEND != ''
+        uses: getsentry/action-release@v1
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT_BACKEND }}
+        with:
+          environment: production
+          version: ${{ steps.backend-version.outputs.version }}
+          sourcemaps: ./backend/dist
+
+      - name: Sentry release (admin-web)
+        if: steps.guard.outputs.skip != 'true' && env.SENTRY_PROJECT_ADMIN_WEB != ''
+        uses: getsentry/action-release@v1
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT_ADMIN_WEB }}
+        with:
+          environment: production
+          version: ${{ steps.admin-version.outputs.version }}
+          sourcemaps: ./apps/admin-web/.next

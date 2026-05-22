@@ -1,0 +1,12 @@
+{
+  "name": "@societyos/config",
+  "version": "0.0.0",
+  "private": true,
+  "exports": {
+    "./typescript": "./typescript/base.json",
+    "./typescript/nextjs": "./typescript/nextjs.json",
+    "./typescript/react-native": "./typescript/react-native.json",
+    "./eslint/base": "./eslint/base.js",
+    "./eslint/react": "./eslint/react.js"
+  }
+}

@@ -1,0 +1,16 @@
+# Auto-HTTPS reverse proxy for the SocietyOS API.
+#
+# Caddy obtains and renews a Let's Encrypt certificate automatically, the
+# moment this hostname's DNS points at the instance and ports 80/443 are open.
+# `backend:3000` resolves over the Docker Compose network.
+
+society-dev.marzitech.in {
+	reverse_proxy backend:3000
+	encode gzip
+
+	# Health probe stays cheap and unlogged.
+	@health path /v1/health
+	log {
+		output stdout
+	}
+}

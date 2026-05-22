@@ -1,0 +1,11 @@
+# Copy to terraform.tfvars and adjust if needed.
+# Everything has a sane default in variables.tf — usually you only touch sizing.
+
+aws_region  = "ap-south-1"
+aws_profile = "marzi"
+environment = "dev"
+
+# Lightsail instance size:
+#   small_3_0  → 2 GB RAM / 2 vCPU  (~$12/mo) — recommended
+#   micro_3_0  → 1 GB RAM / 2 vCPU  (~$7/mo)  — tight, only if cost is critical
+lightsail_bundle_id = "small_3_0"

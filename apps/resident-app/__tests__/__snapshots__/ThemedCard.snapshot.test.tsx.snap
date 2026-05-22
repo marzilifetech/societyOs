@@ -1,0 +1,101 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`ThemedCard glow="emergency" adds emergency shadow 1`] = `
+<View
+  style={
+    [
+      {
+        "backgroundColor": "rgba(255,255,255,0.06)",
+        "borderColor": "rgba(255,59,48,0.3)",
+        "borderRadius": 20,
+        "borderWidth": 1,
+        "elevation": 8,
+        "padding": 16,
+        "shadowColor": "rgba(255,59,48,0.4)",
+        "shadowOffset": {
+          "height": 4,
+          "width": 0,
+        },
+        "shadowOpacity": 1,
+        "shadowRadius": 20,
+      },
+      undefined,
+    ]
+  }
+>
+  <Text>
+    Alert
+  </Text>
+</View>
+`;
+
+exports[`ThemedCard glow="primary" adds primary shadow 1`] = `
+<View
+  style={
+    [
+      {
+        "backgroundColor": "rgba(255,255,255,0.06)",
+        "borderColor": "rgba(108,99,255,0.3)",
+        "borderRadius": 20,
+        "borderWidth": 1,
+        "elevation": 8,
+        "padding": 16,
+        "shadowColor": "rgba(108,99,255,0.3)",
+        "shadowOffset": {
+          "height": 4,
+          "width": 0,
+        },
+        "shadowOpacity": 1,
+        "shadowRadius": 20,
+      },
+      undefined,
+    ]
+  }
+>
+  <Text>
+    Glow
+  </Text>
+</View>
+`;
+
+exports[`ThemedCard renders children (default card) 1`] = `
+<View
+  style={
+    [
+      {
+        "backgroundColor": "rgba(255,255,255,0.06)",
+        "borderColor": "rgba(255,255,255,0.12)",
+        "borderRadius": 20,
+        "borderWidth": 1,
+        "padding": 16,
+      },
+      undefined,
+    ]
+  }
+>
+  <Text>
+    Hello
+  </Text>
+</View>
+`;
+
+exports[`ThemedCard strong prop uses stronger background 1`] = `
+<View
+  style={
+    [
+      {
+        "backgroundColor": "rgba(255,255,255,0.12)",
+        "borderColor": "rgba(255,255,255,0.12)",
+        "borderRadius": 20,
+        "borderWidth": 1,
+        "padding": 16,
+      },
+      undefined,
+    ]
+  }
+>
+  <Text>
+    Strong
+  </Text>
+</View>
+`;

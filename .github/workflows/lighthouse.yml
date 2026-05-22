@@ -1,0 +1,43 @@
+name: Lighthouse CI
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'apps/admin-web/**'
+
+concurrency:
+  group: lhci-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lhci:
+    name: Lighthouse (admin-web)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '10'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - name: Build admin-web
+        run: pnpm turbo build --filter=@societyos/admin-web
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:3000/v1
+      - name: Install LHCI
+        run: pnpm add -g @lhci/cli@0.14.x
+      - name: Run Lighthouse
+        working-directory: apps/admin-web
+        run: |
+          pnpm start &
+          npx wait-on http://localhost:3001 -t 60000
+          lhci autorun \
+            --collect.url=http://localhost:3001 \
+            --collect.numberOfRuns=1 \
+            --upload.target=temporary-public-storage \
+            --assert.assertions.categories:performance=warn \
+            --assert.assertions.categories:accessibility=warn || true

@@ -1,0 +1,40 @@
+diff --git a/dist/runtime/native/appearance-observables.js b/dist/runtime/native/appearance-observables.js
+index ff931dce43379e76cf62b75245bf0662a248e7c8..776fe9c9a7bfa74756db717eb30322c2f62532fb 100644
+--- a/dist/runtime/native/appearance-observables.js
++++ b/dist/runtime/native/appearance-observables.js
+@@ -20,6 +20,12 @@ exports.colorScheme = {
+         else {
+             appearance.setColorScheme(value);
+         }
++        const resolved = value === "system"
++            ? appearance.getColorScheme() === "dark"
++                ? "dark"
++                : "light"
++            : value;
++        exports.systemColorScheme.set(resolved);
+         if (process.env.NODE_ENV === "test") {
+             colorSchemeObservable.set(value === "system" ? "light" : value);
+         }
+diff --git a/src/runtime/native/appearance-observables.ts b/src/runtime/native/appearance-observables.ts
+index e0fb8a0d54817d09a325658e0f6e40974462c8c6..ae85d112b50c88d407b3a8299094b276a9a84bc3 100644
+--- a/src/runtime/native/appearance-observables.ts
++++ b/src/runtime/native/appearance-observables.ts
+@@ -32,6 +32,18 @@ export const colorScheme = {
+       appearance.setColorScheme(value);
+     }
+ 
++    // `Appearance.addChangeListener` often does not run synchronously after a
++    // programmatic `setColorScheme` (notably Android until configuration
++    // propagates). `dark:` / `prefers-color-scheme` reads `systemColorScheme`,
++    // so keep it in sync immediately.
++    const resolved: "light" | "dark" =
++      value === "system"
++        ? appearance.getColorScheme() === "dark"
++          ? "dark"
++          : "light"
++        : value;
++    systemColorScheme.set(resolved);
++
+     // Appearance.addChangeListener is not fired in a test environment
+     if (process.env.NODE_ENV === "test") {
+       colorSchemeObservable.set(value === "system" ? "light" : value);

@@ -1,0 +1,45 @@
+node_modules
+.turbo
+dist
+.next
+.expo
+*.tsbuildinfo
+.env
+.env.local
+.env.*.local
+coverage
+.DS_Store
+*.log
+prisma/migrations/dev
+.dev-pids
+
+# additional ignores
+.logs
+.dev-logs
+.pnpm-store
+ios/Pods
+ios/build
+android/build
+android/.gradle
+*.xcworkspace/xcuserdata
+*.xcodeproj/xcuserdata
+.expo-shared
+
+# editor / agent metadata
+.claude/
+.cursor/
+.copilot/
+
+# secrets / credentials — never commit
+creds.txt
+*.pem
+*creds*
+secrets.*
+
+# Terraform — state holds generated secrets in plaintext; tfvars holds tokens
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log

@@ -1,0 +1,46 @@
+# SocietyOS dev/staging — backend + Redis + Caddy on a single Lightsail instance.
+# Lives in /opt/societyos/ on the instance (alongside Caddyfile, backend.env,
+# and repo/ — the cloned source).
+
+services:
+  # ── NestJS backend ────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./repo # the cloned repository root
+      dockerfile: backend/Dockerfile
+    image: societyos-backend:dev
+    restart: unless-stopped
+    env_file: ./backend.env # materialised from the societyos/dev secret
+    depends_on:
+      - redis
+    expose:
+      - "3000" # internal only — reachable by Caddy, never from the internet
+
+  # ── Redis ─────────────────────────────────────────────────────────────────
+  # Co-located cache/queue store. Ephemeral by design — OTP state, sessions,
+  # the JWT denylist and BullMQ jobs are all transient; fine to lose on restart
+  # for a dev/staging environment (and it keeps cost at zero).
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+
+  # ── Caddy reverse proxy ───────────────────────────────────────────────────
+  # Terminates HTTPS on 443 and proxies to the backend. Fetches & auto-renews
+  # a Let's Encrypt certificate on its own — no certbot, no cron.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data # persists the issued TLS certificate
+      - caddy_config:/config
+    depends_on:
+      - backend
+
+volumes:
+  caddy_data:
+  caddy_config:

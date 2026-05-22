@@ -1,0 +1,513 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`ThemedButton danger variant snapshot 1`] = `
+<View
+  accessibilityLabel="Delete"
+  accessibilityRole="button"
+  accessibilityState={
+    {
+      "busy": undefined,
+      "checked": undefined,
+      "disabled": undefined,
+      "expanded": undefined,
+      "selected": undefined,
+    }
+  }
+  accessibilityValue={
+    {
+      "max": undefined,
+      "min": undefined,
+      "now": undefined,
+      "text": undefined,
+    }
+  }
+  accessible={true}
+  collapsable={false}
+  focusable={true}
+  onClick={[Function]}
+  onResponderGrant={[Function]}
+  onResponderMove={[Function]}
+  onResponderRelease={[Function]}
+  onResponderTerminate={[Function]}
+  onResponderTerminationRequest={[Function]}
+  onStartShouldSetResponder={[Function]}
+  style={
+    {
+      "alignItems": "center",
+      "backgroundColor": "#FF3B30",
+      "borderColor": "transparent",
+      "borderRadius": 16,
+      "borderWidth": 0,
+      "justifyContent": "center",
+      "minHeight": 52,
+      "opacity": 1,
+      "paddingHorizontal": 16,
+      "width": "100%",
+    }
+  }
+>
+  <Text
+    style={
+      [
+        {
+          "color": "#FFFFFF",
+          "fontSize": 16,
+          "fontWeight": "600",
+          "letterSpacing": 0.3,
+        },
+        undefined,
+      ]
+    }
+  >
+    Delete
+  </Text>
+</View>
+`;
+
+exports[`ThemedButton disabled danger renders with dimmed background 1`] = `
+<View
+  accessibilityLabel="Delete"
+  accessibilityRole="button"
+  accessibilityState={
+    {
+      "busy": undefined,
+      "checked": undefined,
+      "disabled": true,
+      "expanded": undefined,
+      "selected": undefined,
+    }
+  }
+  accessibilityValue={
+    {
+      "max": undefined,
+      "min": undefined,
+      "now": undefined,
+      "text": undefined,
+    }
+  }
+  accessible={true}
+  collapsable={false}
+  focusable={false}
+  onClick={[Function]}
+  onResponderGrant={[Function]}
+  onResponderMove={[Function]}
+  onResponderRelease={[Function]}
+  onResponderTerminate={[Function]}
+  onResponderTerminationRequest={[Function]}
+  onStartShouldSetResponder={[Function]}
+  style={
+    {
+      "alignItems": "center",
+      "backgroundColor": "rgba(255,59,48,0.35)",
+      "borderColor": "transparent",
+      "borderRadius": 16,
+      "borderWidth": 0,
+      "justifyContent": "center",
+      "minHeight": 52,
+      "opacity": 0.5,
+      "paddingHorizontal": 16,
+      "width": "100%",
+    }
+  }
+>
+  <Text
+    style={
+      [
+        {
+          "color": "#FFFFFF",
+          "fontSize": 16,
+          "fontWeight": "600",
+          "letterSpacing": 0.3,
+        },
+        undefined,
+      ]
+    }
+  >
+    Delete
+  </Text>
+</View>
+`;
+
+exports[`ThemedButton disabled primary renders with dimmed background 1`] = `
+<View
+  accessibilityLabel="Disabled"
+  accessibilityRole="button"
+  accessibilityState={
+    {
+      "busy": undefined,
+      "checked": undefined,
+      "disabled": true,
+      "expanded": undefined,
+      "selected": undefined,
+    }
+  }
+  accessibilityValue={
+    {
+      "max": undefined,
+      "min": undefined,
+      "now": undefined,
+      "text": undefined,
+    }
+  }
+  accessible={true}
+  collapsable={false}
+  focusable={false}
+  onClick={[Function]}
+  onResponderGrant={[Function]}
+  onResponderMove={[Function]}
+  onResponderRelease={[Function]}
+  onResponderTerminate={[Function]}
+  onResponderTerminationRequest={[Function]}
+  onStartShouldSetResponder={[Function]}
+  style={
+    {
+      "alignItems": "center",
+      "backgroundColor": "rgba(108,99,255,0.35)",
+      "borderColor": "transparent",
+      "borderRadius": 16,
+      "borderWidth": 0,
+      "justifyContent": "center",
+      "minHeight": 52,
+      "opacity": 0.5,
+      "paddingHorizontal": 16,
+      "width": "100%",
+    }
+  }
+>
+  <Text
+    style={
+      [
+        {
+          "color": "#FFFFFF",
+          "fontSize": 16,
+          "fontWeight": "600",
+          "letterSpacing": 0.3,
+        },
+        undefined,
+      ]
+    }
+  >
+    Disabled
+  </Text>
+</View>
+`;
+
+exports[`ThemedButton ghost variant snapshot 1`] = `
+<View
+  accessibilityLabel="Skip"
+  accessibilityRole="button"
+  accessibilityState={
+    {
+      "busy": undefined,
+      "checked": undefined,
+      "disabled": undefined,
+      "expanded": undefined,
+      "selected": undefined,
+    }
+  }
+  accessibilityValue={
+    {
+      "max": undefined,
+      "min": undefined,
+      "now": undefined,
+      "text": undefined,
+    }
+  }
+  accessible={true}
+  collapsable={false}
+  focusable={true}
+  onClick={[Function]}
+  onResponderGrant={[Function]}
+  onResponderMove={[Function]}
+  onResponderRelease={[Function]}
+  onResponderTerminate={[Function]}
+  onResponderTerminationRequest={[Function]}
+  onStartShouldSetResponder={[Function]}
+  style={
+    {
+      "alignItems": "center",
+      "backgroundColor": "transparent",
+      "borderColor": "#6C63FF",
+      "borderRadius": 16,
+      "borderWidth": 1,
+      "justifyContent": "center",
+      "minHeight": 52,
+      "opacity": 1,
+      "paddingHorizontal": 16,
+      "width": "100%",
+    }
+  }
+>
+  <Text
+    style={
+      [
+        {
+          "color": "#6C63FF",
+          "fontSize": 16,
+          "fontWeight": "600",
+          "letterSpacing": 0.3,
+        },
+        undefined,
+      ]
+    }
+  >
+    Skip
+  </Text>
+</View>
+`;
+
+exports[`ThemedButton lg size snapshot 1`] = `
+<View
+  accessibilityLabel="Large"
+  accessibilityRole="button"
+  accessibilityState={
+    {
+      "busy": undefined,
+      "checked": undefined,
+      "disabled": undefined,
+      "expanded": undefined,
+      "selected": undefined,
+    }
+  }
+  accessibilityValue={
+    {
+      "max": undefined,
+      "min": undefined,
+      "now": undefined,
+      "text": undefined,
+    }
+  }
+  accessible={true}
+  collapsable={false}
+  focusable={true}
+  onClick={[Function]}
+  onResponderGrant={[Function]}
+  onResponderMove={[Function]}
+  onResponderRelease={[Function]}
+  onResponderTerminate={[Function]}
+  onResponderTerminationRequest={[Function]}
+  onStartShouldSetResponder={[Function]}
+  style={
+    {
+      "alignItems": "center",
+      "backgroundColor": "#6C63FF",
+      "borderColor": "transparent",
+      "borderRadius": 16,
+      "borderWidth": 0,
+      "justifyContent": "center",
+      "minHeight": 60,
+      "opacity": 1,
+      "paddingHorizontal": 16,
+      "width": "100%",
+    }
+  }
+>
+  <Text
+    style={
+      [
+        {
+          "color": "#FFFFFF",
+          "fontSize": 18,
+          "fontWeight": "600",
+          "letterSpacing": 0.3,
+        },
+        undefined,
+      ]
+    }
+  >
+    Large
+  </Text>
+</View>
+`;
+
+exports[`ThemedButton primary variant (default) snapshot 1`] = `
+<View
+  accessibilityLabel="Pay"
+  accessibilityRole="button"
+  accessibilityState={
+    {
+      "busy": undefined,
+      "checked": undefined,
+      "disabled": undefined,
+      "expanded": undefined,
+      "selected": undefined,
+    }
+  }
+  accessibilityValue={
+    {
+      "max": undefined,
+      "min": undefined,
+      "now": undefined,
+      "text": undefined,
+    }
+  }
+  accessible={true}
+  collapsable={false}
+  focusable={true}
+  onClick={[Function]}
+  onResponderGrant={[Function]}
+  onResponderMove={[Function]}
+  onResponderRelease={[Function]}
+  onResponderTerminate={[Function]}
+  onResponderTerminationRequest={[Function]}
+  onStartShouldSetResponder={[Function]}
+  style={
+    {
+      "alignItems": "center",
+      "backgroundColor": "#6C63FF",
+      "borderColor": "transparent",
+      "borderRadius": 16,
+      "borderWidth": 0,
+      "justifyContent": "center",
+      "minHeight": 52,
+      "opacity": 1,
+      "paddingHorizontal": 16,
+      "width": "100%",
+    }
+  }
+>
+  <Text
+    style={
+      [
+        {
+          "color": "#FFFFFF",
+          "fontSize": 16,
+          "fontWeight": "600",
+          "letterSpacing": 0.3,
+        },
+        undefined,
+      ]
+    }
+  >
+    Pay
+  </Text>
+</View>
+`;
+
+exports[`ThemedButton secondary variant snapshot 1`] = `
+<View
+  accessibilityLabel="Cancel"
+  accessibilityRole="button"
+  accessibilityState={
+    {
+      "busy": undefined,
+      "checked": undefined,
+      "disabled": undefined,
+      "expanded": undefined,
+      "selected": undefined,
+    }
+  }
+  accessibilityValue={
+    {
+      "max": undefined,
+      "min": undefined,
+      "now": undefined,
+      "text": undefined,
+    }
+  }
+  accessible={true}
+  collapsable={false}
+  focusable={true}
+  onClick={[Function]}
+  onResponderGrant={[Function]}
+  onResponderMove={[Function]}
+  onResponderRelease={[Function]}
+  onResponderTerminate={[Function]}
+  onResponderTerminationRequest={[Function]}
+  onStartShouldSetResponder={[Function]}
+  style={
+    {
+      "alignItems": "center",
+      "backgroundColor": "rgba(255,255,255,0.12)",
+      "borderColor": "rgba(255,255,255,0.12)",
+      "borderRadius": 16,
+      "borderWidth": 1,
+      "justifyContent": "center",
+      "minHeight": 52,
+      "opacity": 1,
+      "paddingHorizontal": 16,
+      "width": "100%",
+    }
+  }
+>
+  <Text
+    style={
+      [
+        {
+          "color": "#FFFFFF",
+          "fontSize": 16,
+          "fontWeight": "600",
+          "letterSpacing": 0.3,
+        },
+        undefined,
+      ]
+    }
+  >
+    Cancel
+  </Text>
+</View>
+`;
+
+exports[`ThemedButton sm size snapshot 1`] = `
+<View
+  accessibilityLabel="Small"
+  accessibilityRole="button"
+  accessibilityState={
+    {
+      "busy": undefined,
+      "checked": undefined,
+      "disabled": undefined,
+      "expanded": undefined,
+      "selected": undefined,
+    }
+  }
+  accessibilityValue={
+    {
+      "max": undefined,
+      "min": undefined,
+      "now": undefined,
+      "text": undefined,
+    }
+  }
+  accessible={true}
+  collapsable={false}
+  focusable={true}
+  onClick={[Function]}
+  onResponderGrant={[Function]}
+  onResponderMove={[Function]}
+  onResponderRelease={[Function]}
+  onResponderTerminate={[Function]}
+  onResponderTerminationRequest={[Function]}
+  onStartShouldSetResponder={[Function]}
+  style={
+    {
+      "alignItems": "center",
+      "backgroundColor": "#6C63FF",
+      "borderColor": "transparent",
+      "borderRadius": 16,
+      "borderWidth": 0,
+      "justifyContent": "center",
+      "minHeight": 44,
+      "opacity": 1,
+      "paddingHorizontal": 16,
+      "width": "100%",
+    }
+  }
+>
+  <Text
+    style={
+      [
+        {
+          "color": "#FFFFFF",
+          "fontSize": 14,
+          "fontWeight": "600",
+          "letterSpacing": 0.2,
+        },
+        undefined,
+      ]
+    }
+  >
+    Small
+  </Text>
+</View>
+`;

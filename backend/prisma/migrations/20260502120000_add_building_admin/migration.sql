@@ -1,0 +1,5 @@
+-- AlterEnum
+ALTER TYPE "UserRole" ADD VALUE 'BUILDING_ADMIN';
+
+-- AlterTable
+ALTER TABLE "User" ADD COLUMN "managedBlocks" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];

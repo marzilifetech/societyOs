@@ -1,0 +1,58 @@
+{
+  "expo": {
+    "name": "SocietyOS",
+    "slug": "societyos-resident",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#3B3FBF"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.societyos.resident",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Used for visitor photo and proof of work",
+        "NSLocationWhenInUseUsageDescription": "Used for SOS location and geofencing",
+        "NSPhotoLibraryUsageDescription": "Used to upload photos"
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#3B3FBF"
+      },
+      "package": "com.societyos.resident",
+      "permissions": [
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "ACCESS_FINE_LOCATION",
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      "expo-secure-store",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#3B3FBF",
+          "sounds": []
+        }
+      ],
+      "@sentry/react-native"
+    ],
+    "scheme": "societyos",
+    "extra": {},
+    "newArchEnabled": true
+  }
+}

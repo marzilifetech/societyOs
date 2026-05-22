@@ -1,0 +1,79 @@
+{
+  "common": {
+    "loading": "ஏற்றப்படுகிறது...",
+    "error": "ஏதோ தவறு நடந்துவிட்டது",
+    "retry": "மீண்டும் முயற்சி",
+    "cancel": "ரத்து செய்",
+    "save": "சேமி",
+    "delete": "நீக்கு",
+    "edit": "திருத்து",
+    "back": "பின்",
+    "done": "முடிந்தது",
+    "yes": "ஆம்",
+    "no": "இல்லை",
+    "ok": "சரி"
+  },
+  "profile": {
+    "title": "சுயவிவரம்",
+    "designation": "பதவி",
+    "team": "குழு",
+    "joinedAt": "சேர்ந்த தேதி",
+    "employeeId": "ஊழியர் ID",
+    "phone": "தொலைபேசி",
+    "society": "சங்கம்",
+    "earnings": "வருமானம்",
+    "thisMonth": "இந்த மாதம்",
+    "projectedPayout": "எதிர்பார்க்கப்படும் பணம்",
+    "documents": "ஆவணங்கள்",
+    "salarySlips": "சம்பள ரசீது",
+    "emergencyContact": "அவசர தொடர்பு",
+    "settings": "அமைப்புகள்",
+    "help": "உதவி",
+    "logout": "வெளியேறு",
+    "deleteAccount": "கணக்கை நீக்கு",
+    "version": "பதிப்பு"
+  },
+  "settings": {
+    "title": "அமைப்புகள்",
+    "notifications": "அறிவிப்புகள்",
+    "language": "மொழி",
+    "theme": "தீம்",
+    "dataSaver": "டேட்டா சேவர்",
+    "biometric": "பயோமெட்ரிக் உள்நுழைவு",
+    "help": "உதவி & FAQ",
+    "about": "பற்றி",
+    "system": "சிஸ்டம்",
+    "light": "வெளிச்சம்",
+    "dark": "இருள்",
+    "largeText": "பெரிய உரை",
+    "tasks": "பணிகள்",
+    "reviews": "மதிப்புரைகள்",
+    "leave": "விடுப்பு",
+    "announcements": "அறிவிப்புகள்",
+    "helpRequests": "உதவி கோரிக்கைகள்"
+  },
+  "documents": {
+    "title": "ஆவணங்கள்",
+    "upload": "ஆவணம் பதிவேற்று",
+    "verified": "சரிபார்க்கப்பட்டது",
+    "pending": "நிலுவையில்",
+    "type": "வகை",
+    "uploadedOn": "பதிவேற்றப்பட்ட தேதி"
+  },
+  "salary": {
+    "title": "சம்பள ரசீது",
+    "gross": "மொத்தம்",
+    "deductions": "கழித்தல்",
+    "net": "நிகர சம்பளம்",
+    "viewPdf": "PDF காண்க",
+    "totalEarned": "மொத்த வருமானம்"
+  },
+  "helpRequests": {
+    "title": "உதவி கோரிக்கைகள்",
+    "active": "செயலில்",
+    "completed": "முடிந்தது",
+    "accept": "ஏற்க",
+    "inProgress": "நடைபெறுகிறது",
+    "complete": "முடிந்தது என குறி"
+  }
+}

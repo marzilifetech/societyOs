@@ -1,0 +1,63 @@
+{
+  "_comment": "Set submit secrets via EAS: eas secret:create --scope project --name APPLE_ID --value xxx ; same for ASC_APP_ID and APPLE_TEAM_ID. Place play-store-key.json at the path below (gitignored) before running eas submit.",
+  "cli": {
+    "version": ">= 12.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "channel": "development",
+      "ios": {
+        "simulator": true,
+        "resourceClass": "m-medium"
+      },
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "http://localhost:3000/v1"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "channel": "preview",
+      "ios": {
+        "resourceClass": "m-medium"
+      },
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://staging-api.societyos.app/v1"
+      }
+    },
+    "production": {
+      "channel": "production",
+      "autoIncrement": true,
+      "ios": {
+        "resourceClass": "m-medium"
+      },
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://api.societyos.app/v1"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "appleId": "$APPLE_ID",
+        "ascAppId": "$ASC_APP_ID",
+        "appleTeamId": "$APPLE_TEAM_ID"
+      },
+      "android": {
+        "serviceAccountKeyPath": "./play-store-key.json",
+        "track": "internal"
+      }
+    }
+  }
+}
