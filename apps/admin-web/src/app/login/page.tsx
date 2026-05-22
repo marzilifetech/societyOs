@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft } from 'lucide-react';
 import { api } from '@/lib/api';
@@ -22,7 +22,7 @@ type PendingAdminTotp = {
   societyId: string;
 };
 
-export default function LoginPage() {
+function LoginPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const sessionExpired = searchParams.get('reason') === 'session-expired';
@@ -262,5 +262,15 @@ export default function LoginPage() {
         )}
       </div>
     </div>
+  );
+}
+
+// Next.js 15 requires useSearchParams() to sit inside a Suspense boundary
+// so the rest of the page can still be prerendered at build time.
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginPageInner />
+    </Suspense>
   );
 }
