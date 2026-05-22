@@ -2,7 +2,12 @@
 # Amplify auto-detects this file at the repo root and uses it for every build.
 #
 # Monorepo: appRoot scopes the build to apps/admin-web. The Amplify build
-# container ships Node + npm but NOT pnpm, so preBuild installs it first.
+# container ships Node + npm but NOT pnpm, so preBuild installs it.
+#
+# IMPORTANT: --filter @societyos/admin-web... installs ONLY admin-web's
+# dependency closure — NOT the React Native / Expo / NestJS / Prisma deps of
+# the other workspace packages. A full-workspace install makes node_modules so
+# large that Next.js "Collecting build traces" OOMs the build container.
 version: 1
 applications:
   - appRoot: apps/admin-web
@@ -11,7 +16,7 @@ applications:
         preBuild:
           commands:
             - npm install -g pnpm@10.33.2
-            - pnpm install --frozen-lockfile
+            - pnpm install --frozen-lockfile --filter @societyos/admin-web...
         build:
           commands:
             - pnpm run build
