@@ -19,6 +19,8 @@ export interface ApiClientConfig {
   refreshUrl?: string;
   /** Called when authentication has hard-failed (refresh attempted and rejected). */
   onUnauthorized?: () => void;
+  /** Optional extra headers (e.g. super-admin tenant switch). */
+  getExtraHeaders?: () => Record<string, string>;
 }
 
 /**
@@ -85,6 +87,8 @@ export class ApiClient {
       'Content-Type': 'application/json',
     };
     if (token) headers['Authorization'] = `Bearer ${token}`;
+    const extra = this.config.getExtraHeaders?.() ?? {};
+    Object.assign(headers, extra);
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);

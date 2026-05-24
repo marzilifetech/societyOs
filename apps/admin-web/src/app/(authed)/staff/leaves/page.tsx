@@ -18,7 +18,8 @@ type LeaveRequest = {
   reason: string;
   status: LeaveStatus;
   adminNote?: string;
-  staff: { name: string; role: string };
+  staff: { id: string; name: string; role: string };
+  staffId?: string;
   createdAt: string;
 };
 
@@ -68,6 +69,15 @@ export default function StaffLeavesPage() {
     onError: (err: any) => toast.error(err?.message ?? 'Failed to reject leave'),
   });
 
+  const dismissMutation = useMutation({
+    mutationFn: (staffId: string) => api.patch(`/admin/staff/${staffId}/dismiss`, {}),
+    onSuccess: () => {
+      toast.success('Staff marked as left society');
+      qc.invalidateQueries({ queryKey: ['admin-leaves'] });
+    },
+    onError: (err: any) => toast.error(err?.message ?? 'Failed to dismiss staff'),
+  });
+
   const handleApprove = (id: string, staffName: string) => {
     if (!window.confirm(`Approve leave request for ${staffName}?`)) return;
     approveMutation.mutate(id);
@@ -77,6 +87,14 @@ export default function StaffLeavesPage() {
     if (!window.confirm(`Reject leave request for ${staffName}?`)) return;
     rejectMutation.mutate(id);
   };
+
+  const handleDismiss = (staffId: string, staffName: string) => {
+    if (!window.confirm(`Mark ${staffName} as left society? This will set today as their leaving date and suspend their account.`)) return;
+    dismissMutation.mutate(staffId);
+  };
+
+  const isResignationType = (leaveType: string) =>
+    ['RESIGNATION', 'TERMINATION', 'EMERGENCY', 'LEAVE_REQUESTED'].includes(leaveType?.toUpperCase());
 
   const filtered = (leaves ?? []).filter((l) => tab === 'ALL' || l.status === tab);
 
@@ -150,7 +168,7 @@ export default function StaffLeavesPage() {
               {filtered.map((leave) => {
                 const meta = STATUS_META[leave.status];
                 const isPending = leave.status === 'PENDING';
-                const isMutating = approveMutation.isPending || rejectMutation.isPending;
+                const isMutating = approveMutation.isPending || rejectMutation.isPending || dismissMutation.isPending;
                 return (
                   <tr key={leave.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50/50">
                     <td className="px-5 py-3">
@@ -176,29 +194,40 @@ export default function StaffLeavesPage() {
                       </span>
                     </td>
                     <td className="px-5 py-3">
-                      {isPending && (
-                        <div className="flex gap-2">
+                      <div className="flex flex-col gap-1.5">
+                        {isPending && (
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => handleApprove(leave.id, leave.staff.name)}
+                              disabled={isMutating}
+                              className="text-xs bg-green-500 hover:bg-green-600 text-white px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap"
+                            >
+                              Approve
+                            </button>
+                            <button
+                              onClick={() => handleReject(leave.id, leave.staff.name)}
+                              disabled={isMutating}
+                              className="text-xs bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap"
+                            >
+                              Reject
+                            </button>
+                          </div>
+                        )}
+                        {isResignationType(leave.leaveType) && (leave.staff.id || leave.staffId) && (
                           <button
-                            onClick={() => handleApprove(leave.id, leave.staff.name)}
-                            disabled={isMutating}
-                            className="text-xs bg-green-500 hover:bg-green-600 text-white px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap"
+                            onClick={() => handleDismiss((leave.staff.id || leave.staffId)!, leave.staff.name)}
+                            disabled={dismissMutation.isPending}
+                            className="text-xs bg-orange-500 hover:bg-orange-600 text-white px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap"
                           >
-                            Approve
+                            Mark as Left Society
                           </button>
-                          <button
-                            onClick={() => handleReject(leave.id, leave.staff.name)}
-                            disabled={isMutating}
-                            className="text-xs bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap"
-                          >
-                            Reject
-                          </button>
-                        </div>
-                      )}
-                      {!isPending && leave.adminNote && (
-                        <p className="text-xs text-gray-400 truncate max-w-[120px]" title={leave.adminNote}>
-                          {leave.adminNote}
-                        </p>
-                      )}
+                        )}
+                        {!isPending && leave.adminNote && (
+                          <p className="text-xs text-gray-400 truncate max-w-[120px]" title={leave.adminNote}>
+                            {leave.adminNote}
+                          </p>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );

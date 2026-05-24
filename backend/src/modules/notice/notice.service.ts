@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, ForbiddenException,
 import { PrismaService } from '../../prisma/prisma.service';
 import { RealtimeGateway } from '../../common/realtime/realtime.gateway';
 import { PushService } from '../../common/notification/push.service';
+import { WhatsAppService } from '../../common/notification/whatsapp.service';
 import { requireResidentByUserId } from '../../common/utils/resident-context';
 import { BroadcastDto, UpdateNoticeDto } from './dto/notice.dto';
 
@@ -11,6 +12,7 @@ export class NoticeService {
     private prisma: PrismaService,
     private realtime: RealtimeGateway,
     private push: PushService,
+    private whatsapp: WhatsAppService,
   ) {}
 
   async getNotices(societyId: string) {
@@ -23,9 +25,23 @@ export class NoticeService {
   async createNotice(societyId: string, data: any) {
     const { category, ...rest } = data;
 
-    return this.prisma.notice.create({
+    const notice = await this.prisma.notice.create({
       data: { societyId, category, ...rest, publishedAt: new Date() },
     });
+
+    // WhatsApp side-effect: notify all residents with phone numbers
+    // TODO: enable once WhatsApp/Twilio is configured (TWILIO_ACCOUNT_SID etc.)
+    void this.prisma.user
+      .findMany({ where: { societyId, role: 'RESIDENT' }, select: { phone: true } })
+      .then((users) => {
+        const phones = users.map((u) => u.phone).filter(Boolean) as string[];
+        if (phones.length > 0) {
+          const body = `[${category ?? 'Notice'}] ${notice.title}: ${notice.body ?? ''}`.slice(0, 1000);
+          void this.whatsapp.broadcastToSociety(phones, body);
+        }
+      });
+
+    return notice;
   }
 
   async broadcastEmergency(societyId: string, dto: BroadcastDto) {

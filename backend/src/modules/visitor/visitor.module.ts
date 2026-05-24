@@ -6,5 +6,6 @@ import { VisitorGateway } from './visitor.gateway';
 @Module({
   controllers: [VisitorController],
   providers: [VisitorService, VisitorGateway],
+  exports: [VisitorService],
 })
 export class VisitorModule {}

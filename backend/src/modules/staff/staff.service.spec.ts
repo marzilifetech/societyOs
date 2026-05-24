@@ -1,13 +1,20 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, ForbiddenException } from '@nestjs/common';
 import { StaffService } from './staff.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { S3Service } from '../../common/storage/s3.service';
 import { RealtimeGateway } from '../../common/realtime/realtime.gateway';
+import { VisitorService } from '../visitor/visitor.service';
 
 const mockPrisma = {
   staffMember: { findUnique: jest.fn() },
   leaveRequest: { findMany: jest.fn(), findFirst: jest.fn(), create: jest.fn() },
+};
+
+const mockVisitorService = {
+  listForSociety: jest.fn(),
+  approveVisitor: jest.fn(),
+  rejectVisitor: jest.fn(),
 };
 
 describe('StaffService', () => {
@@ -20,6 +27,7 @@ describe('StaffService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: S3Service, useValue: {} },
         { provide: RealtimeGateway, useValue: { emit: jest.fn() } },
+        { provide: VisitorService, useValue: mockVisitorService },
       ],
     }).compile();
 
@@ -83,6 +91,55 @@ describe('StaffService', () => {
         response: expect.objectContaining({ code: 'LEAVE_OVERLAP', conflictingId: 'existing-leave' }),
       });
       expect(mockPrisma.leaveRequest.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('visitor gate (security staff)', () => {
+    it('isSecurityStaff detects SECURITY category', () => {
+      expect(service.isSecurityStaff({ categories: ['SECURITY'], department: null })).toBe(true);
+      expect(service.isSecurityStaff({ categories: [], department: 'SECURITY' })).toBe(true);
+      expect(service.isSecurityStaff({ categories: ['PLUMBING'], department: 'MAINTENANCE' })).toBe(false);
+    });
+
+    it('getVisitorsForGate rejects non-security staff', async () => {
+      mockPrisma.staffMember.findUnique.mockResolvedValue({
+        id: 's1',
+        categories: ['PLUMBING'],
+        department: 'MAINTENANCE',
+      });
+
+      await expect(service.getVisitorsForGate('user-1', 'soc-1')).rejects.toBeInstanceOf(ForbiddenException);
+      expect(mockVisitorService.listForSociety).not.toHaveBeenCalled();
+    });
+
+    it('getVisitorsForGate lists pending visitors for security staff', async () => {
+      mockPrisma.staffMember.findUnique.mockResolvedValue({
+        id: 's1',
+        categories: ['SECURITY'],
+        department: 'SECURITY',
+      });
+      mockVisitorService.listForSociety.mockResolvedValue([{ id: 'v1' }]);
+
+      const rows = await service.getVisitorsForGate('user-1', 'soc-1', 'PENDING');
+
+      expect(rows).toHaveLength(1);
+      expect(mockVisitorService.listForSociety).toHaveBeenCalledWith('soc-1', {
+        approvalStatus: 'PENDING',
+        date: 'today',
+      });
+    });
+
+    it('approveVisitorAsSecurity delegates to visitor service', async () => {
+      mockPrisma.staffMember.findUnique.mockResolvedValue({
+        id: 's1',
+        categories: ['SECURITY'],
+        department: 'SECURITY',
+      });
+      mockVisitorService.approveVisitor.mockResolvedValue({ id: 'v1', approvalStatus: 'APPROVED' });
+
+      await service.approveVisitorAsSecurity('user-1', 'soc-1', 'v1');
+
+      expect(mockVisitorService.approveVisitor).toHaveBeenCalledWith('v1', 'soc-1', 'user-1');
     });
   });
 });

@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { Users, X } from 'lucide-react';
-import { api } from '@/lib/api';
+import { Users, X, UserPlus, Upload } from 'lucide-react';
+import { api, downloadAdminFile } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { ErrorState } from '@/components/ui/ErrorState';
 
@@ -22,8 +22,9 @@ const DOC_STATUS_META: Record<string, { label: string; color: string }> = {
   VERIFIED: { label: 'Docs Verified', color: 'bg-green-100 text-green-700' },
 };
 
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000/v1';
+
 async function downloadResidentsCSV() {
-  const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000/v1';
   const token = typeof window !== 'undefined' ? localStorage.getItem('admin_token') : null;
   const res = await fetch(`${BASE_URL}/admin/residents/export`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -51,6 +52,20 @@ export default function ResidentsPage() {
   const [bulkTarget, setBulkTarget] = useState<'ALL' | 'SELECTED'>('ALL');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [exportLoading, setExportLoading] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [addForm, setAddForm] = useState({ name: '', email: '', phone: '', flatId: '', type: 'TENANT' as 'OWNER' | 'TENANT' });
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importResult, setImportResult] = useState<{ created: number; skipped: number; errors: { row: number; reason: string }[] } | null>(null);
+  const [importPreview, setImportPreview] = useState<{ valid: unknown[]; errors: { row: number; reason: string }[]; created: number; skipped: number } | null>(null);
+  const [pendingImportCsv, setPendingImportCsv] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const closeImportModal = () => {
+    setShowImportModal(false);
+    setImportResult(null);
+    setImportPreview(null);
+    setPendingImportCsv('');
+  };
 
   const bulkMutation = useMutation({
     mutationFn: (residentIds: string[]) =>
@@ -63,6 +78,48 @@ export default function ResidentsPage() {
     },
     onError: (err: any) => toast.error(err?.message ?? 'Failed to send bulk message'),
   });
+
+  const addMutation = useMutation({
+    mutationFn: (dto: typeof addForm) => api.post('/admin/residents', dto),
+    onSuccess: () => {
+      toast.success('Resident created');
+      qc.invalidateQueries({ queryKey: ['residents'] });
+      setShowAddModal(false);
+      setAddForm({ name: '', email: '', phone: '', flatId: '', type: 'TENANT' });
+    },
+    onError: (err: any) => toast.error(err?.message ?? 'Failed to create resident'),
+  });
+
+  const previewImportMutation = useMutation({
+    mutationFn: (csv: string) => api.post<any>('/admin/residents/import/preview', { csv }),
+    onSuccess: (data) => setImportPreview(data),
+    onError: (err: any) => toast.error(err?.message ?? 'Preview failed'),
+  });
+
+  const importMutation = useMutation({
+    mutationFn: (csv: string) => api.post<{ created: number; skipped: number; errors: { row: number; reason: string }[] }>('/admin/residents/import', { csv }),
+    onSuccess: (data) => {
+      setImportResult(data);
+      setImportPreview(null);
+      setPendingImportCsv('');
+      qc.invalidateQueries({ queryKey: ['residents'] });
+      toast.success(`Import done: ${data.created} created, ${data.skipped} skipped`);
+    },
+    onError: (err: any) => toast.error(err?.message ?? 'Import failed'),
+  });
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const csv = ev.target?.result as string;
+      setPendingImportCsv(csv);
+      previewImportMutation.mutate(csv);
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  }
 
   function handleBulkSend(allResidents: any[]) {
     const ids = bulkTarget === 'ALL'
@@ -89,6 +146,12 @@ export default function ResidentsPage() {
     queryKey: ['residents-pending'],
     queryFn: () => api.get<any[]>('/admin/residents/pending'),
     enabled: activeTab === 'Pending Approval',
+  });
+
+  const { data: flats } = useQuery({
+    queryKey: ['flats'],
+    queryFn: () => api.get<any[]>('/admin/flats').catch(() => []),
+    enabled: showAddModal,
   });
 
   const invalidateBoth = () => {
@@ -119,15 +182,18 @@ export default function ResidentsPage() {
 
   // Close modals on Escape
   useEffect(() => {
-    if (!showBulkModal && !rejectTarget) return;
+    const anyOpen = showBulkModal || !!rejectTarget || showAddModal || showImportModal;
+    if (!anyOpen) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       if (showBulkModal) setShowBulkModal(false);
       if (rejectTarget) { setRejectTarget(null); setRejectReason(''); }
+      if (showAddModal) setShowAddModal(false);
+      if (showImportModal) closeImportModal();
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [showBulkModal, rejectTarget]);
+  }, [showBulkModal, rejectTarget, showAddModal, showImportModal]);
 
   const pendingCount = residents?.filter(r => r.status === 'PENDING').length ?? 0;
 
@@ -157,7 +223,7 @@ export default function ResidentsPage() {
           <h1 className="text-2xl font-bold text-gray-900">Residents</h1>
           <p className="text-gray-500 text-sm mt-1">{residents?.length ?? 0} total</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap justify-end">
           <button
             className="bg-white border border-gray-200 text-gray-700 px-4 py-2 rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
             disabled={exportLoading}
@@ -171,10 +237,24 @@ export default function ResidentsPage() {
             {exportLoading ? 'Exporting…' : 'Export CSV'}
           </button>
           <button
-            className="bg-primary-500 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-primary-600 transition-colors"
+            className="bg-white border border-gray-200 text-gray-700 px-4 py-2 rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors flex items-center gap-1.5"
+            onClick={() => { setImportResult(null); setShowImportModal(true); }}
+          >
+            <Upload className="w-4 h-4" />
+            Import CSV
+          </button>
+          <button
+            className="bg-white border border-gray-200 text-gray-700 px-4 py-2 rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors"
             onClick={() => setShowBulkModal(true)}
           >
             Bulk Message
+          </button>
+          <button
+            className="bg-primary-500 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-primary-600 transition-colors flex items-center gap-1.5"
+            onClick={() => setShowAddModal(true)}
+          >
+            <UserPlus className="w-4 h-4" />
+            Add Resident
           </button>
         </div>
       </div>
@@ -245,7 +325,7 @@ export default function ResidentsPage() {
                   'Name', 'Phone', 'Flat', 'Tower', 'Status',
                   ...(activeTab === 'Pending Approval'
                     ? ['Type', 'Documents', 'Actions']
-                    : ['Joined']
+                    : ['App', 'Joined']
                   ),
                 ].map((h) => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
@@ -262,6 +342,7 @@ export default function ResidentsPage() {
                   : (r.unit?.flatNumber ?? '—');
                 const towerLabel = r.flat?.block ?? r.unit?.tower ?? '—';
                 const docMeta = DOC_STATUS_META[r.documentsStatus] ?? DOC_STATUS_META.PENDING;
+                const appActivated = !!r.appActivatedAt;
 
                 return (
                   <tr
@@ -351,11 +432,23 @@ export default function ResidentsPage() {
                         </td>
                       </>
                     ) : (
-                      <td className="px-4 py-3 text-xs text-gray-400">
-                        {r.createdAt
-                          ? new Date(r.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
-                          : '—'}
-                      </td>
+                      <>
+                        <td className="px-4 py-3">
+                          <span className={cn(
+                            'text-xs font-medium px-2 py-0.5 rounded-full',
+                            appActivated
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : 'bg-gray-100 text-gray-400',
+                          )}>
+                            {appActivated ? 'App Active' : 'Not Activated'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-xs text-gray-400">
+                          {r.createdAt
+                            ? new Date(r.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+                            : '—'}
+                        </td>
+                      </>
                     )}
                   </tr>
                 );
@@ -366,7 +459,196 @@ export default function ResidentsPage() {
         )}
       </div>
 
-      {/* Reject Modal */}
+      {/* Add Resident Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowAddModal(false)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-gray-900">Add Resident</h2>
+              <button aria-label="Close" className="text-gray-400 hover:text-gray-600" onClick={() => setShowAddModal(false)}>
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Full Name *</label>
+                <input
+                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-primary-400"
+                  placeholder="e.g. Priya Sharma"
+                  value={addForm.name}
+                  onChange={(e) => setAddForm(f => ({ ...f, name: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Phone *</label>
+                <input
+                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-primary-400"
+                  placeholder="e.g. +919876543210"
+                  value={addForm.phone}
+                  onChange={(e) => setAddForm(f => ({ ...f, phone: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Email</label>
+                <input
+                  type="email"
+                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-primary-400"
+                  placeholder="Optional"
+                  value={addForm.email}
+                  onChange={(e) => setAddForm(f => ({ ...f, email: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Flat *</label>
+                {flats && flats.length > 0 ? (
+                  <select
+                    className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-700 outline-none focus:border-primary-400 bg-white"
+                    value={addForm.flatId}
+                    onChange={(e) => setAddForm(f => ({ ...f, flatId: e.target.value }))}
+                  >
+                    <option value="">Select flat…</option>
+                    {flats.map((flat: any) => (
+                      <option key={flat.id} value={flat.id}>
+                        {flat.block}-{flat.number}{flat.floor ? ` (Floor ${flat.floor})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-primary-400"
+                    placeholder="Flat ID"
+                    value={addForm.flatId}
+                    onChange={(e) => setAddForm(f => ({ ...f, flatId: e.target.value }))}
+                  />
+                )}
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Type *</label>
+                <select
+                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-700 outline-none focus:border-primary-400 bg-white"
+                  value={addForm.type}
+                  onChange={(e) => setAddForm(f => ({ ...f, type: e.target.value as 'OWNER' | 'TENANT' }))}
+                >
+                  <option value="TENANT">Tenant</option>
+                  <option value="OWNER">Owner</option>
+                </select>
+              </div>
+              <div className="flex gap-2 justify-end pt-1">
+                <button
+                  className="px-4 py-2.5 rounded-xl text-sm border border-gray-200 text-gray-600 hover:border-gray-300 transition-colors"
+                  onClick={() => setShowAddModal(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="px-6 py-2.5 rounded-xl text-sm font-semibold bg-primary-500 text-white hover:bg-primary-600 disabled:opacity-40 transition-colors"
+                  disabled={!addForm.name.trim() || !addForm.phone.trim() || !addForm.flatId || addMutation.isPending}
+                  onClick={() => addMutation.mutate(addForm)}
+                >
+                  {addMutation.isPending ? 'Creating…' : 'Create Resident'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Import CSV Modal */}
+      {showImportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={closeImportModal}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-gray-900">Import Residents CSV</h2>
+              <button aria-label="Close" className="text-gray-400 hover:text-gray-600" onClick={closeImportModal}>
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 mb-4">
+              CSV format: <code className="bg-gray-100 px-1 rounded">name, phone, email, block, flatNumber, type</code>
+            </p>
+            <button
+              type="button"
+              onClick={() => downloadAdminFile('/admin/residents/import/template', 'residents-import-template.csv').catch((e: Error) => toast.error(e.message))}
+              className="text-xs text-primary-600 mb-3 inline-block"
+            >
+              Download template
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={handleFileChange}
+            />
+            {importResult ? (
+              <div className="space-y-3">
+                <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-sm">
+                  <p className="font-medium text-green-700">{importResult.created} residents created, {importResult.skipped} skipped</p>
+                </div>
+                {importResult.errors.length > 0 && (
+                  <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-xs max-h-40 overflow-y-auto">
+                    <p className="font-medium text-red-700 mb-2">Errors ({importResult.errors.length} rows):</p>
+                    {importResult.errors.map((e, i) => (
+                      <p key={i} className="text-red-600">Row {e.row}: {e.reason}</p>
+                    ))}
+                  </div>
+                )}
+                <div className="flex justify-end gap-2">
+                  <button
+                    className="px-4 py-2 rounded-xl text-sm border border-gray-200 text-gray-600 hover:border-gray-300 transition-colors"
+                    onClick={() => { setImportResult(null); }}
+                  >
+                    Import Another
+                  </button>
+                  <button
+                    className="px-4 py-2 rounded-xl text-sm bg-primary-500 text-white hover:bg-primary-600 transition-colors"
+                    onClick={closeImportModal}
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            ) : importPreview ? (
+              <div className="space-y-3">
+                <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-sm">
+                  <p className="font-medium text-blue-800">{importPreview.valid?.length ?? 0} valid rows, {importPreview.errors?.length ?? 0} errors, {importPreview.skipped ?? 0} will be skipped</p>
+                </div>
+                {importPreview.errors?.length > 0 && (
+                  <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-xs max-h-32 overflow-y-auto">
+                    {importPreview.errors.map((e, i) => (
+                      <p key={i} className="text-red-600">Row {e.row}: {e.reason}</p>
+                    ))}
+                  </div>
+                )}
+                <div className="flex justify-end gap-2">
+                  <button className="px-4 py-2 rounded-xl text-sm border border-gray-200" onClick={() => { setImportPreview(null); setPendingImportCsv(''); }}>Back</button>
+                  <button
+                    className="px-4 py-2 rounded-xl text-sm bg-primary-500 text-white disabled:opacity-50"
+                    disabled={importMutation.isPending || !pendingImportCsv}
+                    onClick={() => importMutation.mutate(pendingImportCsv)}
+                  >
+                    {importMutation.isPending ? 'Importing…' : 'Confirm Import'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-4">
+                <button
+                  className="w-full border-2 border-dashed border-gray-200 rounded-xl px-6 py-10 flex flex-col items-center gap-2 hover:border-primary-400 hover:bg-primary-50 transition-colors disabled:opacity-50"
+                  disabled={previewImportMutation.isPending}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <Upload className="w-6 h-6 text-gray-400" />
+                  <span className="text-sm text-gray-500">
+                    {previewImportMutation.isPending ? 'Previewing…' : 'Click to select CSV file'}
+                  </span>
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Bulk Message Modal */}
       {showBulkModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowBulkModal(false)}>

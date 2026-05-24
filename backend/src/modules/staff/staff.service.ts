@@ -9,6 +9,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { S3Service } from '../../common/storage/s3.service';
 import { RealtimeGateway } from '../../common/realtime/realtime.gateway';
 import { requireLeavePendingInSociety } from '../../common/utils/leave-admin.util';
+import { VisitorService } from '../visitor/visitor.service';
+import type { StaffMember } from '@prisma/client';
 
 const LEAVE_ENTITLEMENTS: Record<string, number> = {
   CASUAL: 12,
@@ -25,6 +27,7 @@ export class StaffService {
     private prisma: PrismaService,
     private s3: S3Service,
     private realtime: RealtimeGateway,
+    private visitorService: VisitorService,
   ) {}
 
   private async resolveStaffId(userId: string): Promise<string> {
@@ -339,12 +342,15 @@ export class StaffService {
     const staffId = await this.resolveStaffId(userId);
     const sr = await this.prisma.serviceRequest.findUnique({ where: { id: requestId } });
     if (!sr) throw new NotFoundException('Service request not found');
-    if (sr.assignedToId && sr.assignedToId !== staffId) {
+    if (sr.assignedToIds?.length && !sr.assignedToIds.includes(staffId)) {
       throw new ForbiddenException('Not assigned to you');
     }
+    const assignedToIds = sr.assignedToIds?.includes(staffId)
+      ? sr.assignedToIds
+      : [...(sr.assignedToIds ?? []), staffId];
     return this.prisma.serviceRequest.update({
       where: { id: requestId },
-      data: { status: 'IN_PROGRESS', acceptedAt: new Date(), assignedToId: staffId },
+      data: { status: 'IN_PROGRESS', acceptedAt: new Date(), assignedToIds },
     });
   }
 
@@ -352,12 +358,12 @@ export class StaffService {
     const staffId = await this.resolveStaffId(userId);
     const sr = await this.prisma.serviceRequest.findUnique({ where: { id: requestId } });
     if (!sr) throw new NotFoundException('Service request not found');
-    if (sr.assignedToId && sr.assignedToId !== staffId) {
+    if (sr.assignedToIds?.length && !sr.assignedToIds.includes(staffId)) {
       throw new ForbiddenException('Not assigned to you');
     }
     const updated = await this.prisma.serviceRequest.update({
       where: { id: requestId },
-      data: { status: 'PENDING', rejectedReason: reason, assignedToId: null },
+      data: { status: 'PENDING', rejectedReason: reason, assignedToIds: [] },
     });
     this.realtime.emit(`society:${sr.societyId}:admin`, 'task:rejected', { requestId, reason, staffId });
     return updated;
@@ -397,7 +403,7 @@ export class StaffService {
   async getMyTaskHistory(userId: string, status?: string, page = 1, pageSize = 20) {
     const staffId = await this.resolveStaffId(userId);
     const skip = (page - 1) * pageSize;
-    const where: any = { assignedToId: staffId };
+    const where: any = { assignedToIds: { has: staffId } };
     if (status) where.status = status;
     const [items, total] = await Promise.all([
       this.prisma.serviceRequest.findMany({
@@ -528,11 +534,11 @@ export class StaffService {
     const [serviceRequests, reviews, attendance] = await Promise.all([
       this.prisma.serviceRequest.findMany({
         where: {
-          assignedToId: { in: staffIds },
+          assignedToIds: { hasSome: staffIds },
           status: 'COMPLETED',
           updatedAt: { gte: since },
         },
-        select: { assignedToId: true, resolvedAt: true, slaDeadline: true },
+        select: { assignedToIds: true, resolvedAt: true, slaDeadline: true },
       }),
       this.prisma.staffReview.findMany({
         where: { staffId: { in: staffIds }, createdAt: { gte: since } },
@@ -546,12 +552,14 @@ export class StaffService {
 
     const tasksByStaff = new Map<string, { count: number; onTime: number }>();
     for (const sr of serviceRequests) {
-      if (!sr.assignedToId) continue;
-      const cur = tasksByStaff.get(sr.assignedToId) ?? { count: 0, onTime: 0 };
-      cur.count += 1;
-      const completedOn = sr.resolvedAt ?? new Date();
-      if (!sr.slaDeadline || completedOn <= sr.slaDeadline) cur.onTime += 1;
-      tasksByStaff.set(sr.assignedToId, cur);
+      for (const staffId of sr.assignedToIds) {
+        if (!staffIds.includes(staffId)) continue;
+        const cur = tasksByStaff.get(staffId) ?? { count: 0, onTime: 0 };
+        cur.count += 1;
+        const completedOn = sr.resolvedAt ?? new Date();
+        if (!sr.slaDeadline || completedOn <= sr.slaDeadline) cur.onTime += 1;
+        tasksByStaff.set(staffId, cur);
+      }
     }
 
     const ratingsByStaff = new Map<string, { sum: number; n: number }>();
@@ -627,21 +635,17 @@ export class StaffService {
 
   async getMyDocuments(userId: string) {
     const staffId = await this.resolveStaffId(userId);
-    const staff = await this.prisma.staffMember.findUnique({
-      where: { id: staffId },
-      include: { user: true },
+    const docs = await this.prisma.staffDocument.findMany({
+      where: { staffMemberId: staffId },
+      orderBy: { uploadedAt: 'desc' },
     });
-    const docs: Array<{ id: string; type: string; url: string; uploadedAt: Date; status: string }> = [];
-    if (staff?.salaryStructure) {
-      const ss = staff.salaryStructure as Record<string, any>;
-      if (ss['idProofUrl']) {
-        docs.push({ id: `${staffId}_idproof`, type: 'ID_PROOF', url: ss['idProofUrl'], uploadedAt: staff.createdAt, status: 'UPLOADED' });
-      }
-      if (ss['addressProofUrl']) {
-        docs.push({ id: `${staffId}_addressproof`, type: 'ADDRESS_PROOF', url: ss['addressProofUrl'], uploadedAt: staff.createdAt, status: 'UPLOADED' });
-      }
-    }
-    return docs;
+    return docs.map((d) => ({
+      id: d.id,
+      type: d.documentType,
+      url: d.fileUrl,
+      uploadedAt: d.uploadedAt,
+      status: d.verifiedAt ? 'VERIFIED' : 'UPLOADED',
+    }));
   }
 
   async getDocumentUploadUrl(userId: string, dto: { type: string; contentType?: string }) {
@@ -708,9 +712,18 @@ export class StaffService {
     userId: string,
     body: { documentId?: string; key: string; type?: string },
   ) {
-    // TODO: persist document metadata once StaffDocument model lands.
-    await this.resolveStaffId(userId);
-    return { ok: true, key: body.key, documentId: body.documentId ?? null };
+    const staffId = await this.resolveStaffId(userId);
+    const documentType = (body.type ?? 'OTHER').toUpperCase().replace(/AADHAAR/g, 'AADHAR');
+    const fileUrl = this.s3.getPublicUrl(body.key);
+    const doc = await this.prisma.staffDocument.create({
+      data: {
+        staffMemberId: staffId,
+        documentType,
+        fileUrl,
+        uploadedBy: 'staff',
+      },
+    });
+    return { ok: true, key: body.key, documentId: doc.id };
   }
 
   async registerDevice(userId: string, token: string, _platform: 'ios' | 'android') {
@@ -732,5 +745,42 @@ export class StaffService {
       geofence: (staff.society as any).geofence,
       geofenceRadius: (staff.society as any).geofenceRadius,
     };
+  }
+
+  /** Gate/security staff: categories or department includes SECURITY. */
+  isSecurityStaff(staff: Pick<StaffMember, 'categories' | 'department'>): boolean {
+    const dept = staff.department?.toUpperCase() ?? '';
+    if (dept === 'SECURITY') return true;
+    return staff.categories.some((c) => c.toUpperCase() === 'SECURITY');
+  }
+
+  private async requireSecurityStaff(userId: string) {
+    const staff = await this.prisma.staffMember.findUnique({ where: { userId } });
+    if (!staff) throw new NotFoundException('Staff profile not found');
+    if (!this.isSecurityStaff(staff)) {
+      throw new ForbiddenException({
+        code: 'SECURITY_STAFF_ONLY',
+        message: 'Only security staff can manage visitor approvals',
+      });
+    }
+    return staff;
+  }
+
+  async getVisitorsForGate(userId: string, societyId: string, approvalStatus?: string) {
+    await this.requireSecurityStaff(userId);
+    return this.visitorService.listForSociety(societyId, {
+      approvalStatus,
+      date: 'today',
+    });
+  }
+
+  async approveVisitorAsSecurity(userId: string, societyId: string, visitorId: string) {
+    await this.requireSecurityStaff(userId);
+    return this.visitorService.approveVisitor(visitorId, societyId, userId);
+  }
+
+  async rejectVisitorAsSecurity(userId: string, societyId: string, visitorId: string) {
+    await this.requireSecurityStaff(userId);
+    return this.visitorService.rejectVisitor(visitorId, societyId);
   }
 }

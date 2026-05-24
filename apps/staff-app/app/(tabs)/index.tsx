@@ -24,6 +24,7 @@ import { getUnwrapped, getUnwrappedArray } from '../../src/lib/unwrapped-get';
 import { unwrapApiEnvelope } from '@societyos/api-client';
 import { SkeletonCard, SkeletonRow } from '../../src/components/attendance/SkeletonCard';
 import { ErrorCard } from '../../src/components/ErrorCard';
+import { isSecurityStaff } from '../../src/lib/security-staff';
 
 type StaffHomeSummary = {
   checkedIn?: boolean;
@@ -59,14 +60,22 @@ export default function StaffHomeScreen() {
     refetchOnMount: true,
   });
 
-  const { data: staffProfile } = useQuery<{ designation?: string }>({
+  const { data: staffProfile } = useQuery<{ designation?: string; categories?: string[]; department?: string }>({
     queryKey: ['staff-profile-brief'],
-    queryFn: () => getUnwrapped<{ designation?: string }>('/staff/profile'),
+    queryFn: () => getUnwrapped<{ designation?: string; categories?: string[]; department?: string }>('/staff/profile'),
     enabled: !!user,
     staleTime: 1000 * 60 * 5,
   });
 
   const isDoctor = staffProfile?.designation === 'DOCTOR';
+  const isSecurity = isSecurityStaff(staffProfile);
+
+  const { data: pendingVisitors = [] } = useQuery<{ id: string }[]>({
+    queryKey: ['staff-visitors-pending-count'],
+    queryFn: () => getUnwrappedArray<{ id: string }>('/staff/visitors?approvalStatus=PENDING'),
+    enabled: !!user && isSecurity,
+    refetchInterval: 60_000,
+  });
 
   const { data: myTasks = [], isLoading: loadingTasks, isError: tasksError, isFetching: fetchingTasks, refetch: refetchTasks } = useQuery({
     queryKey: ['my-tasks'],
@@ -285,6 +294,13 @@ export default function StaffHomeScreen() {
             <QuickAction icon="🕐" label={t('home.actionCheckIn')} onPress={() => router.push('/(tabs)/attendance' as any)} />
             <QuickAction icon="🔧" label={t('home.actionViewTasks')} onPress={() => router.push('/(tabs)/tasks' as any)} />
             <QuickAction icon="📷" label={t('home.actionGateScan')} onPress={() => router.push('/scan/qr' as any)} />
+            {isSecurity && (
+              <QuickAction
+                icon="🛡️"
+                label={`Visitors${pendingVisitors.length ? ` (${pendingVisitors.length})` : ''}`}
+                onPress={() => router.push('/visitors' as any)}
+              />
+            )}
             <QuickAction icon="📅" label={t('home.actionApplyLeave')} onPress={() => router.push('/leave/new' as any)} />
             <QuickAction icon="⭐" label={t('home.actionMyReviews')} onPress={() => router.push('/reviews' as any)} />
             <QuickAction icon="📢" label="Notices" onPress={() => router.push('/welfare' as any)} />

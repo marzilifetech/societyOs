@@ -174,7 +174,12 @@ export class ServiceRequestController {
     @SocietyId() societyId: string,
     @Body() dto: AssignWithScheduleDto,
   ) {
-    return this.srService.assignStaffWithSchedule(id, societyId, dto.staffId, dto.scheduledTime);
+    const staffIds = dto.staffIds?.length
+      ? dto.staffIds
+      : dto.staffId
+        ? [dto.staffId]
+        : [];
+    return this.srService.assignStaffWithSchedule(id, societyId, staffIds, dto.scheduledTime);
   }
 
   @Post(':id/auto-assign')

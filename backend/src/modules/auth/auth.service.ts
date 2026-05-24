@@ -88,6 +88,16 @@ export class AuthService {
 
     await this.bumpActivity(user.id);
 
+    if (user.role === UserRole.RESIDENT) {
+      const resident = await this.prisma.resident.findUnique({ where: { userId: user.id } });
+      if (resident && !resident.appActivatedAt) {
+        await this.prisma.resident.update({
+          where: { id: resident.id },
+          data: { appActivatedAt: new Date() },
+        });
+      }
+    }
+
     return {
       // Backwards compat: existing clients read `token`
       token: pair.accessToken,

@@ -4,6 +4,7 @@ import { NoticeService } from './notice.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RealtimeGateway } from '../../common/realtime/realtime.gateway';
 import { PushService } from '../../common/notification/push.service';
+import { WhatsAppService } from '../../common/notification/whatsapp.service';
 
 const mockPrisma = {
   notice: {
@@ -13,6 +14,7 @@ const mockPrisma = {
   poll: { findMany: jest.fn(), findUnique: jest.fn() },
   pollVote: { upsert: jest.fn(), findMany: jest.fn() },
   resident: { findUnique: jest.fn() },
+  user: { findMany: jest.fn().mockResolvedValue([]) },
 };
 
 const mockRealtime = {
@@ -22,6 +24,9 @@ const mockRealtime = {
 const mockPush = {
   sendToUser: jest.fn(),
   sendToSociety: jest.fn(),
+};
+const mockWhatsapp = {
+  broadcastToSociety: jest.fn().mockResolvedValue({ sent: true }),
 };
 
 describe('NoticeService', () => {
@@ -34,6 +39,7 @@ describe('NoticeService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: RealtimeGateway, useValue: mockRealtime },
         { provide: PushService, useValue: mockPush },
+        { provide: WhatsAppService, useValue: mockWhatsapp },
       ],
     }).compile();
 
@@ -63,6 +69,7 @@ describe('NoticeService', () => {
       const dto = { title: 'New Notice', content: 'Content', category: 'GENERAL', isPinned: false };
       const created = { id: 'notice-1', societyId: 'society-1', ...dto };
       mockPrisma.notice.create.mockResolvedValue(created);
+      mockPrisma.user.findMany.mockResolvedValue([{ phone: '+919999999999' }]);
 
       const result = await service.createNotice('society-1', dto);
 
@@ -74,6 +81,8 @@ describe('NoticeService', () => {
           publishedAt: expect.any(Date),
         }),
       });
+      await new Promise((r) => setImmediate(r));
+      expect(mockWhatsapp.broadcastToSociety).toHaveBeenCalled();
     });
   });
 

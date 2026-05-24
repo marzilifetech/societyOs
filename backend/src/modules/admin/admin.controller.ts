@@ -2,6 +2,12 @@ import { Controller, Get, Post, Patch, Delete, Param, Query, Body, UseGuards, He
 import type { Request } from 'express';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
+import { ServiceRequestService } from '../service-request/service-request.service';
+import {
+  AdminCreateServiceRequestDto,
+  AdminUpdateServiceRequestDto,
+  UpdateServiceRequestTagsDto,
+} from '../service-request/dto/service-request.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -15,7 +21,10 @@ import { UserRole } from '@prisma/client';
 @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
 @Controller('admin')
 export class AdminController {
-  constructor(private adminService: AdminService) {}
+  constructor(
+    private adminService: AdminService,
+    private srService: ServiceRequestService,
+  ) {}
 
   @Get('dashboard/stats')
   getDashboardStats(@SocietyId() societyId: string) {
@@ -48,6 +57,7 @@ export class AdminController {
       pincode?: string;
       contactEmail?: string;
       contactPhone?: string;
+      showInDirectory?: boolean;
       config?: Record<string, unknown>;
     },
   ) {
@@ -131,11 +141,39 @@ export class AdminController {
       phone: string;
       name: string;
       designation: string;
+      department?: string;
       categories: string[];
       salary?: number;
+      gender?: string;
+      dateOfBirth?: string;
+      emergencyContact?: { name: string; phone: string; relation?: string };
     },
   ) {
     return this.adminService.createStaff(societyId, dto);
+  }
+
+  @Get('staff/import/template')
+  @Header('Content-Type', 'text/csv')
+  @Header('Content-Disposition', 'attachment; filename="staff-import-template.csv"')
+  staffImportTemplate(): StreamableFile {
+    const csv = this.adminService.staffImportTemplate();
+    return new StreamableFile(Buffer.from(csv, 'utf8'));
+  }
+
+  @Post('staff/import/preview')
+  previewStaffImport(
+    @SocietyId() societyId: string,
+    @Body('csv') csv: string,
+  ) {
+    return this.adminService.previewStaffCsv(societyId, csv);
+  }
+
+  @Post('staff/import')
+  importStaff(
+    @SocietyId() societyId: string,
+    @Body('csv') csv: string,
+  ) {
+    return this.adminService.importStaffCsv(societyId, csv, false);
   }
 
   @Patch('staff/:id/transfer')
@@ -194,7 +232,19 @@ export class AdminController {
 
   @Patch('staff/:id')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  updateStaff(@Param('id') id: string, @Body() body: { salaryStructure?: Record<string, any> }) {
+  updateStaff(
+    @Param('id') id: string,
+    @Body() body: {
+      salaryStructure?: Record<string, any>;
+      department?: string;
+      designation?: string;
+      leavingDate?: string | null;
+      familyDetails?: any;
+      gender?: string;
+      dateOfBirth?: string | null;
+      emergencyContact?: { name: string; phone: string; relation?: string } | null;
+    },
+  ) {
     return this.adminService.updateStaff(id, body);
   }
 
@@ -204,10 +254,61 @@ export class AdminController {
     return this.adminService.getStaffDocuments(id);
   }
 
+  @Post('staff/:id/documents')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  addStaffDocument(
+    @Param('id') id: string,
+    @Body() body: { documentType: string; fileUrl: string },
+  ) {
+    return this.adminService.addStaffDocument(id, body.documentType, body.fileUrl, 'admin');
+  }
+
+  @Delete('staff/:id/documents/:docId')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  deleteStaffDocument(
+    @Param('id') id: string,
+    @Param('docId') docId: string,
+    @SocietyId() societyId: string,
+  ) {
+    return this.adminService.deleteStaffDocument(id, docId, societyId);
+  }
+
+  @Patch('staff/:id/documents/:docId/verify')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  verifyStaffDocument(
+    @Param('id') id: string,
+    @Param('docId') docId: string,
+    @CurrentUser() user: JwtPayload,
+    @SocietyId() societyId: string,
+  ) {
+    return this.adminService.verifyStaffDocument(id, docId, user.sub, societyId);
+  }
+
+  @Patch('staff/:id/dismiss')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  dismissStaff(@Param('id') id: string) {
+    return this.adminService.dismissStaff(id);
+  }
+
   @Get('staff/:id/salary-slips')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   getStaffSalarySlips(@Param('id') id: string) {
     return this.adminService.getStaffSalarySlips(id);
+  }
+
+  @Get('staff/:id/loans')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  getStaffLoans(@Param('id') id: string) {
+    return this.adminService.getStaffLoans(id);
+  }
+
+  @Post('staff/:id/loans')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  createStaffLoan(
+    @Param('id') id: string,
+    @Body() body: { amount: number; reason?: string; status?: string },
+  ) {
+    return this.adminService.createStaffLoan(id, body.amount, body.reason, body.status);
   }
 
   @Get('residents/:id/documents')
@@ -237,6 +338,23 @@ export class AdminController {
     @Query('date') date?: string,
   ) {
     return this.adminService.getVisitors(societyId, status, date);
+  }
+
+  @Patch('visitors/:id/approve')
+  approveVisitor(
+    @Param('id') id: string,
+    @SocietyId() societyId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.adminService.approveVisitor(id, societyId, user.sub);
+  }
+
+  @Patch('visitors/:id/reject')
+  rejectVisitor(
+    @Param('id') id: string,
+    @SocietyId() societyId: string,
+  ) {
+    return this.adminService.rejectVisitor(id, societyId);
   }
 
   @Get('complaints')
@@ -436,7 +554,226 @@ export class AdminController {
     return this.adminService.bulkMessageResidents(societyId, dto);
   }
 
+  @Post('residents')
+  createResident(
+    @SocietyId() societyId: string,
+    @Body() dto: { name: string; email?: string; phone: string; flatId: string; type: 'OWNER' | 'TENANT' },
+  ) {
+    return this.adminService.createResident(societyId, dto);
+  }
+
+  @Post('residents/import')
+  importResidents(
+    @SocietyId() societyId: string,
+    @Body('csv') csv: string,
+  ) {
+    return this.adminService.importResidentsCsv(societyId, csv);
+  }
+
+  @Post('residents/import/preview')
+  previewResidentsImport(
+    @SocietyId() societyId: string,
+    @Body('csv') csv: string,
+  ) {
+    return this.adminService.previewResidentsCsv(societyId, csv);
+  }
+
+  @Get('residents/import/template')
+  @Header('Content-Type', 'text/csv')
+  @Header('Content-Disposition', 'attachment; filename="residents-import-template.csv"')
+  residentsImportTemplate(): StreamableFile {
+    const csv = this.adminService.residentsImportTemplate();
+    return new StreamableFile(Buffer.from(csv, 'utf8'));
+  }
+
+  @Get('residents/:id')
+  getResidentDetail(@SocietyId() societyId: string, @Param('id') id: string) {
+    return this.adminService.getResidentDetail(societyId, id);
+  }
+
+  @Patch('residents/:id/dismiss')
+  dismissResident(@SocietyId() societyId: string, @Param('id') id: string) {
+    return this.adminService.dismissResident(id, societyId);
+  }
+
+  @Patch('residents/:id')
+  updateResident(
+    @SocietyId() societyId: string,
+    @Param('id') id: string,
+    @Body() body: {
+      dateOfBirth?: string | null;
+      roleNote?: string | null;
+      emergencyContact?: { name?: string; phone?: string } | null;
+    },
+  ) {
+    return this.adminService.updateResident(id, societyId, body);
+  }
+
+  @Delete('residents/:id')
+  deleteResident(
+    @SocietyId() societyId: string,
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.adminService.deleteResident(id, societyId, user.role);
+  }
+
+  @Patch('maintenance/bills/:id/status')
+  updateBillStatus(
+    @SocietyId() societyId: string,
+    @Param('id') id: string,
+    @Body('status') status: string,
+    @Body('paymentMethod') paymentMethod?: string,
+  ) {
+    return this.adminService.updateBillStatus(id, societyId, status, paymentMethod);
+  }
+
   // ── Building Admins ──────────────────────────────────────────────────────────
+
+  // ── Society CRUD (SUPER_ADMIN) ───────────────────────────────────────────────
+
+  @Get('societies')
+  @Roles(UserRole.SUPER_ADMIN)
+  listSocieties(
+    @Query('search') search?: string,
+    @Query('includeArchived') includeArchived?: string,
+  ) {
+    return this.adminService.listAllSocieties({
+      search,
+      includeArchived: includeArchived === 'true',
+    });
+  }
+
+  @Post('societies')
+  @Roles(UserRole.SUPER_ADMIN)
+  createSociety(
+    @Body()
+    dto: {
+      name: string;
+      address: string;
+      city: string;
+      pincode: string;
+      showInDirectory?: boolean;
+      adminName: string;
+      adminPhone: string;
+      adminEmail?: string;
+      config?: Record<string, unknown>;
+      flatsCsv?: string;
+      residentsCsv?: string;
+    },
+  ) {
+    return this.adminService.createSociety(dto);
+  }
+
+  @Get('societies/:id')
+  @Roles(UserRole.SUPER_ADMIN)
+  getSocietyDetail(@Param('id') id: string) {
+    return this.adminService.getSocietyDetail(id);
+  }
+
+  @Patch('societies/:id')
+  @Roles(UserRole.SUPER_ADMIN)
+  updateSocietyAdmin(
+    @Param('id') id: string,
+    @Body()
+    dto: {
+      name?: string;
+      address?: string;
+      city?: string;
+      pincode?: string;
+      showInDirectory?: boolean;
+      config?: Record<string, unknown>;
+    },
+  ) {
+    return this.adminService.updateSocietyAdmin(id, dto);
+  }
+
+  @Delete('societies/:id')
+  @Roles(UserRole.SUPER_ADMIN)
+  archiveSociety(@Param('id') id: string) {
+    return this.adminService.archiveSociety(id);
+  }
+
+  @Patch('societies/:id/restore')
+  @Roles(UserRole.SUPER_ADMIN)
+  restoreSociety(@Param('id') id: string) {
+    return this.adminService.restoreSociety(id);
+  }
+
+  // ── Flats / structure ────────────────────────────────────────────────────────
+
+  @Get('flats')
+  listFlats(
+    @SocietyId() societyId: string,
+    @Query('block') block?: string,
+    @Query('search') search?: string,
+  ) {
+    return this.adminService.listFlats(societyId, { block, search });
+  }
+
+  @Get('blocks')
+  listBlocks(@SocietyId() societyId: string) {
+    return this.adminService.listBlocks(societyId);
+  }
+
+  @Get('flats/export')
+  @Header('Content-Type', 'text/csv')
+  @Header('Content-Disposition', 'attachment; filename="flats.csv"')
+  async exportFlats(@SocietyId() societyId: string): Promise<StreamableFile> {
+    const csv = await this.adminService.exportFlatsCsv(societyId);
+    return new StreamableFile(Buffer.from(csv, 'utf8'));
+  }
+
+  @Get('flats/import/template')
+  @Header('Content-Type', 'text/csv')
+  @Header('Content-Disposition', 'attachment; filename="flats-import-template.csv"')
+  flatsImportTemplate(): StreamableFile {
+    const csv = this.adminService.flatsImportTemplate();
+    return new StreamableFile(Buffer.from(csv, 'utf8'));
+  }
+
+  @Post('flats/import/preview')
+  previewFlatsImport(
+    @SocietyId() societyId: string,
+    @Body('csv') csv: string,
+  ) {
+    return this.adminService.previewFlatsCsv(societyId, csv);
+  }
+
+  @Post('flats/import')
+  importFlats(
+    @SocietyId() societyId: string,
+    @Body('csv') csv: string,
+  ) {
+    return this.adminService.importFlatsCsv(societyId, csv, false);
+  }
+
+  @Get('flats/:id')
+  getFlat(@SocietyId() societyId: string, @Param('id') id: string) {
+    return this.adminService.getFlat(societyId, id);
+  }
+
+  @Post('flats')
+  createFlat(
+    @SocietyId() societyId: string,
+    @Body() dto: { block: string; floor: number; number: string; areaSqft?: number },
+  ) {
+    return this.adminService.createFlat(societyId, dto);
+  }
+
+  @Patch('flats/:id')
+  updateFlat(
+    @SocietyId() societyId: string,
+    @Param('id') id: string,
+    @Body() dto: { block?: string; floor?: number; number?: string; areaSqft?: number | null },
+  ) {
+    return this.adminService.updateFlat(societyId, id, dto);
+  }
+
+  @Delete('flats/:id')
+  deleteFlat(@SocietyId() societyId: string, @Param('id') id: string) {
+    return this.adminService.deleteFlat(societyId, id);
+  }
 
   @Get('building-admins')
   @Roles(UserRole.SUPER_ADMIN)
@@ -466,5 +803,35 @@ export class AdminController {
   @Roles(UserRole.SUPER_ADMIN)
   removeBuildingAdmin(@Param('id') id: string) {
     return this.adminService.removeBuildingAdmin(id);
+  }
+
+  // ─── Service Requests (admin) ─────────────────────────────────────────────
+
+  @Post('service-requests')
+  adminCreateServiceRequest(
+    @SocietyId() societyId: string,
+    @Body() dto: AdminCreateServiceRequestDto,
+  ) {
+    return this.srService.adminCreate(societyId, dto);
+  }
+
+  @Patch('service-requests/:id')
+  adminUpdateServiceRequest(
+    @Param('id') id: string,
+    @SocietyId() societyId: string,
+    @Body() dto: AdminUpdateServiceRequestDto | UpdateServiceRequestTagsDto,
+  ) {
+    if ('tags' in dto && Object.keys(dto).length === 1 && dto.tags) {
+      return this.srService.updateTags(id, societyId, dto.tags);
+    }
+    return this.srService.adminUpdate(id, societyId, dto as AdminUpdateServiceRequestDto);
+  }
+
+  @Delete('service-requests/:id')
+  adminDeleteServiceRequest(
+    @Param('id') id: string,
+    @SocietyId() societyId: string,
+  ) {
+    return this.srService.softDelete(id, societyId);
   }
 }

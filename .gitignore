@@ -30,6 +30,11 @@ android/.gradle
 .cursor/
 .copilot/
 
+# Playwright — local auth state and run artifacts
+apps/admin-web/e2e/.auth/
+apps/admin-web/test-results/
+apps/admin-web/playwright-report/
+
 # secrets / credentials — never commit
 creds.txt
 *.pem
