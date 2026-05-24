@@ -13,6 +13,7 @@ import {
   ScrollText, UserCog, type LucideIcon,
   ChevronRight, LogOut,
 } from 'lucide-react';
+import { SocietySwitcher } from '@/components/layout/SocietySwitcher';
 import { useAuthStore } from '@/store/auth.store';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/cn';
@@ -22,6 +23,7 @@ type Item = { href: string; icon: LucideIcon; label: string };
 const NAV_ITEMS: Item[] = [
   { href: '/dashboard',         icon: LayoutDashboard,      label: 'Dashboard' },
   { href: '/residents',         icon: Users,                label: 'Residents' },
+  { href: '/flats',             icon: Building2,            label: 'Flats & Blocks' },
   { href: '/staff',             icon: UserCircle,           label: 'Staff' },
   { href: '/staff/leaderboard', icon: Trophy,               label: 'Leaderboard' },
   { href: '/staff/leaves',      icon: CalendarOff,          label: 'Staff Leaves' },
@@ -74,6 +76,7 @@ const NAV_SECTIONS: { label: string; items: Item[] }[] = [
   {
     label: 'System',
     items: [
+      { href: '/societies',       icon: Building2,        label: 'Societies' },
       { href: '/building-admins', icon: UserCog,        label: 'Building Admins' },
       { href: '/audit',          icon: ScrollText,      label: 'Audit Log' },
       { href: '/settings',       icon: Settings,        label: 'Settings' },
@@ -135,6 +138,8 @@ export function Sidebar() {
         </div>
       </div>
 
+      <SocietySwitcher />
+
       {/* Nav */}
       <nav className="flex-1 px-3 py-3 overflow-y-auto space-y-0.5">
         {NAV_ITEMS.map((item) => (
@@ -150,7 +155,10 @@ export function Sidebar() {
             <p className="px-3 mb-1.5 text-[10px] font-semibold tracking-widest uppercase text-gray-400">
               {section.label}
             </p>
-            {section.items.map((item) => (
+            {section.items
+              .filter((item) => item.href !== '/societies' || user?.role === 'SUPER_ADMIN')
+              .filter((item) => item.href !== '/building-admins' || user?.role === 'SUPER_ADMIN')
+              .map((item) => (
               <NavItem key={item.href} {...item} />
             ))}
           </div>

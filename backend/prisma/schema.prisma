@@ -426,6 +426,7 @@ model Society {
   vendors              Vendor[]
   vendorOrders         VendorOrder[]
   showInDirectory      Boolean               @default(false)
+  archivedAt           DateTime?
 
   @@map("societies")
 }
@@ -591,8 +592,11 @@ model StaffDocument {
   documentType  String
   fileUrl       String
   uploadedAt    DateTime  @default(now())
+  uploadedBy    String?
+  verifiedAt    DateTime?
+  verifiedById  String?
 
-  staffMember StaffMember @relation(fields: [staffMemberId], references: [id])
+  staffMember StaffMember @relation(fields: [staffMemberId], references: [id], onDelete: Cascade)
 
   @@index([staffMemberId])
   @@map("staff_documents")

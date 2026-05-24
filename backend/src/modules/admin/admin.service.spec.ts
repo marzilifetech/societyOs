@@ -12,19 +12,26 @@ import { NotificationService } from '../notification/notification.service';
 import { PushService } from '../../common/notification/push.service';
 import { ComplianceService } from '../compliance/compliance.service';
 import { AuditService } from '../../common/audit/audit.service';
+import { SocietySeederService } from '../society/society-seeder.service';
 
-const mockPrisma = {
+const mockPrisma: Record<string, any> = {
   complaint: { findUnique: jest.fn(), update: jest.fn() },
   leaveRequest: { findUnique: jest.fn(), update: jest.fn() },
   visitor: { findUnique: jest.fn(), update: jest.fn(), findMany: jest.fn() },
-  resident: { findFirst: jest.fn(), findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
-  user: { findFirst: jest.fn(), findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
-  flat: { findFirst: jest.fn() },
-  staffMember: { findUnique: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(), update: jest.fn() },
-  staffDocument: { findMany: jest.fn(), create: jest.fn() },
+  resident: { findFirst: jest.fn(), findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), count: jest.fn(), findMany: jest.fn() },
+  user: { findFirst: jest.fn(), findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), updateMany: jest.fn(), findMany: jest.fn() },
+  flat: { findFirst: jest.fn(), findMany: jest.fn(), create: jest.fn(), update: jest.fn(), delete: jest.fn(), count: jest.fn() },
+  society: { findUnique: jest.fn(), findMany: jest.fn(), create: jest.fn(), update: jest.fn() },
+  staffMember: { findUnique: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(), update: jest.fn(), create: jest.fn(), count: jest.fn() },
+  staffDocument: { findMany: jest.fn(), create: jest.fn(), findFirst: jest.fn(), delete: jest.fn(), update: jest.fn() },
   staffLoan: { findMany: jest.fn(), create: jest.fn(), count: jest.fn() },
   maintenanceBill: { findUnique: jest.fn(), update: jest.fn() },
 };
+mockPrisma.$transaction = jest.fn((arg: unknown) => {
+  if (typeof arg === 'function') return (arg as (tx: typeof mockPrisma) => unknown)(mockPrisma);
+  if (Array.isArray(arg)) return Promise.all(arg);
+  return arg;
+});
 
 describe('AdminService', () => {
   let service: AdminService;
@@ -38,6 +45,7 @@ describe('AdminService', () => {
         { provide: PushService, useValue: { send: jest.fn() } },
         { provide: ComplianceService, useValue: { dataExport: jest.fn() } },
         { provide: AuditService, useValue: { write: jest.fn() } },
+        { provide: SocietySeederService, useValue: { buildDefaultConfig: jest.fn(() => ({})) } },
       ],
     }).compile();
 
@@ -671,7 +679,7 @@ describe('AdminService', () => {
 
   describe('importResidentsCsv', () => {
     it('throws BadRequestException for empty CSV', async () => {
-      await expect(service.importResidentsCsv('soc-1', 'Name,Email,Phone,Flat')).rejects.toThrow(
+      await expect(service.importResidentsCsv('soc-1', 'name,email,phone,flatNumber')).rejects.toThrow(
         BadRequestException,
       );
     });
@@ -681,24 +689,24 @@ describe('AdminService', () => {
       mockPrisma.flat.findFirst.mockResolvedValue(null);
       mockPrisma.user.create.mockResolvedValue({ id: 'u-new' });
 
-      const csv = 'Name,Email,Phone,Flat\nAlice,,9876543210,';
+      const csv = 'name,email,phone,flatNumber\nAlice,,9876543210,';
       const result = await service.importResidentsCsv('soc-1', csv);
 
-      expect(result).toEqual({ created: 1, skipped: 0, errors: [] });
+      expect(result).toMatchObject({ created: 1, skipped: 0, errors: [], preview: false });
     });
 
     it('skips rows whose phone already exists', async () => {
       mockPrisma.user.findFirst.mockResolvedValue({ id: 'u-existing' });
 
-      const csv = 'Name,Email,Phone,Flat\nBob,,9876543210,';
+      const csv = 'name,email,phone,flatNumber\nBob,,9876543210,';
       const result = await service.importResidentsCsv('soc-1', csv);
 
-      expect(result).toEqual({ created: 0, skipped: 1, errors: [] });
+      expect(result).toMatchObject({ created: 0, skipped: 1, errors: [], preview: false });
       expect(mockPrisma.user.create).not.toHaveBeenCalled();
     });
 
     it('records error row when name or phone missing', async () => {
-      const csv = 'Name,Email,Phone,Flat\n,,9876543210,';
+      const csv = 'name,email,phone,flatNumber\n,,9876543210,';
       const result = await service.importResidentsCsv('soc-1', csv);
 
       expect(result.errors).toHaveLength(1);
@@ -711,13 +719,138 @@ describe('AdminService', () => {
       mockPrisma.user.create.mockResolvedValue({ id: 'u-new' });
       mockPrisma.resident.create.mockResolvedValue({ id: 'res-new' });
 
-      const csv = 'Name,Email,Phone,Flat\nCharlie,,1234567890,101';
+      const csv = 'name,email,phone,block,flatNumber,type\nCharlie,,1234567890,A,101,OWNER';
       const result = await service.importResidentsCsv('soc-1', csv);
 
       expect(result.created).toBe(1);
       expect(mockPrisma.resident.create).toHaveBeenCalledWith({
-        data: { userId: 'u-new', flatId: 'flat-1', type: 'TENANT' },
+        data: { userId: 'u-new', flatId: 'flat-1', type: 'OWNER' },
       });
+    });
+  });
+
+  describe('createSociety', () => {
+    it('throws BadRequestException when society fields missing', async () => {
+      await expect(
+        service.createSociety({
+          name: '',
+          address: 'Addr',
+          city: 'City',
+          pincode: '123456',
+          adminName: 'Admin',
+          adminPhone: '+919999999999',
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException when admin fields missing', async () => {
+      await expect(
+        service.createSociety({
+          name: 'Test Society',
+          address: 'Addr',
+          city: 'City',
+          pincode: '123456',
+          adminName: '',
+          adminPhone: '',
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('importFlatsCsv', () => {
+    it('creates flats from valid csv', async () => {
+      mockPrisma.flat.findFirst.mockResolvedValue(null);
+      mockPrisma.flat.create.mockResolvedValue({ id: 'flat-new' });
+
+      const csv = 'block,floor,number,areaSqft\nA,1,101,1200';
+      const result = await service.importFlatsCsv('soc-1', csv);
+
+      expect(result.created).toBe(1);
+      expect(result.errors).toHaveLength(0);
+      expect(mockPrisma.flat.create).toHaveBeenCalled();
+    });
+
+    it('skips duplicate flats', async () => {
+      mockPrisma.flat.findFirst.mockResolvedValue({ id: 'existing' });
+
+      const csv = 'block,floor,number\nA,1,101';
+      const result = await service.importFlatsCsv('soc-1', csv);
+
+      expect(result.skipped).toBe(1);
+      expect(mockPrisma.flat.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('deleteFlat', () => {
+    it('throws when flat has active residents', async () => {
+      mockPrisma.flat.findFirst.mockResolvedValue({
+        id: 'flat-1',
+        societyId: 'soc-1',
+        residents: [{ id: 'res-1' }],
+      });
+
+      await expect(service.deleteFlat('soc-1', 'flat-1')).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('archiveSociety', () => {
+    it('throws NotFoundException when society missing', async () => {
+      mockPrisma.society.findUnique.mockResolvedValue(null);
+      await expect(service.archiveSociety('missing')).rejects.toThrow(NotFoundException);
+    });
+
+    it('archives society and deactivates users', async () => {
+      mockPrisma.society.findUnique.mockResolvedValue({ id: 'soc-1', archivedAt: null });
+      mockPrisma.society.update.mockResolvedValue({});
+      mockPrisma.user.updateMany.mockResolvedValue({ count: 1 });
+
+      const result = await service.archiveSociety('soc-1');
+
+      expect(result.archived).toBe(true);
+      expect(mockPrisma.society.update).toHaveBeenCalled();
+      expect(mockPrisma.user.updateMany).toHaveBeenCalled();
+    });
+  });
+
+  describe('createStaff society scoping', () => {
+    it('rejects when phone already used in society', async () => {
+      mockPrisma.user.findFirst.mockResolvedValue({ id: 'u-res', role: UserRole.RESIDENT });
+      mockPrisma.staffMember.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.createStaff('soc-1', {
+          phone: '+919876543210',
+          name: 'Staff',
+          designation: 'Guard',
+          categories: ['SECURITY'],
+        }),
+      ).rejects.toThrow(ConflictException);
+      expect(mockPrisma.user.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('importStaffCsv', () => {
+    it('creates staff from valid csv row', async () => {
+      mockPrisma.staffMember.findFirst.mockResolvedValue(null);
+      mockPrisma.user.findFirst.mockResolvedValue(null);
+      mockPrisma.user.create.mockResolvedValue({ id: 'u-staff' });
+      mockPrisma.staffMember.create.mockResolvedValue({ id: 'sm-1' });
+
+      const csv = 'name,phone,designation,department,categories,salary\nJohn,+919876543210,Guard,SECURITY,SECURITY,18000';
+      const result = await service.importStaffCsv('soc-1', csv);
+
+      expect(result.created).toBe(1);
+    });
+  });
+
+  describe('staff document security', () => {
+    it('deleteStaffDocument rejects cross-society access', async () => {
+      mockPrisma.staffMember.findUnique.mockResolvedValue({ id: 'sm-1', societyId: 'soc-other' });
+
+      await expect(service.deleteStaffDocument('sm-1', 'doc-1', 'soc-1')).rejects.toThrow(
+        ForbiddenException,
+      );
     });
   });
 });

@@ -632,21 +632,17 @@ export class StaffService {
 
   async getMyDocuments(userId: string) {
     const staffId = await this.resolveStaffId(userId);
-    const staff = await this.prisma.staffMember.findUnique({
-      where: { id: staffId },
-      include: { user: true },
+    const docs = await this.prisma.staffDocument.findMany({
+      where: { staffMemberId: staffId },
+      orderBy: { uploadedAt: 'desc' },
     });
-    const docs: Array<{ id: string; type: string; url: string; uploadedAt: Date; status: string }> = [];
-    if (staff?.salaryStructure) {
-      const ss = staff.salaryStructure as Record<string, any>;
-      if (ss['idProofUrl']) {
-        docs.push({ id: `${staffId}_idproof`, type: 'ID_PROOF', url: ss['idProofUrl'], uploadedAt: staff.createdAt, status: 'UPLOADED' });
-      }
-      if (ss['addressProofUrl']) {
-        docs.push({ id: `${staffId}_addressproof`, type: 'ADDRESS_PROOF', url: ss['addressProofUrl'], uploadedAt: staff.createdAt, status: 'UPLOADED' });
-      }
-    }
-    return docs;
+    return docs.map((d) => ({
+      id: d.id,
+      type: d.documentType,
+      url: d.fileUrl,
+      uploadedAt: d.uploadedAt,
+      status: d.verifiedAt ? 'VERIFIED' : 'UPLOADED',
+    }));
   }
 
   async getDocumentUploadUrl(userId: string, dto: { type: string; contentType?: string }) {
@@ -713,9 +709,18 @@ export class StaffService {
     userId: string,
     body: { documentId?: string; key: string; type?: string },
   ) {
-    // TODO: persist document metadata once StaffDocument model lands.
-    await this.resolveStaffId(userId);
-    return { ok: true, key: body.key, documentId: body.documentId ?? null };
+    const staffId = await this.resolveStaffId(userId);
+    const documentType = (body.type ?? 'OTHER').toUpperCase().replace(/AADHAAR/g, 'AADHAR');
+    const fileUrl = this.s3.getPublicUrl(body.key);
+    const doc = await this.prisma.staffDocument.create({
+      data: {
+        staffMemberId: staffId,
+        documentType,
+        fileUrl,
+        uploadedBy: 'staff',
+      },
+    });
+    return { ok: true, key: body.key, documentId: doc.id };
   }
 
   async registerDevice(userId: string, token: string, _platform: 'ios' | 'android') {

@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { Users, X, UserPlus, Upload } from 'lucide-react';
-import { api } from '@/lib/api';
+import { api, downloadAdminFile } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { ErrorState } from '@/components/ui/ErrorState';
 
@@ -56,7 +56,16 @@ export default function ResidentsPage() {
   const [addForm, setAddForm] = useState({ name: '', email: '', phone: '', flatId: '', type: 'TENANT' as 'OWNER' | 'TENANT' });
   const [showImportModal, setShowImportModal] = useState(false);
   const [importResult, setImportResult] = useState<{ created: number; skipped: number; errors: { row: number; reason: string }[] } | null>(null);
+  const [importPreview, setImportPreview] = useState<{ valid: unknown[]; errors: { row: number; reason: string }[]; created: number; skipped: number } | null>(null);
+  const [pendingImportCsv, setPendingImportCsv] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const closeImportModal = () => {
+    setShowImportModal(false);
+    setImportResult(null);
+    setImportPreview(null);
+    setPendingImportCsv('');
+  };
 
   const bulkMutation = useMutation({
     mutationFn: (residentIds: string[]) =>
@@ -81,10 +90,18 @@ export default function ResidentsPage() {
     onError: (err: any) => toast.error(err?.message ?? 'Failed to create resident'),
   });
 
+  const previewImportMutation = useMutation({
+    mutationFn: (csv: string) => api.post<any>('/admin/residents/import/preview', { csv }),
+    onSuccess: (data) => setImportPreview(data),
+    onError: (err: any) => toast.error(err?.message ?? 'Preview failed'),
+  });
+
   const importMutation = useMutation({
     mutationFn: (csv: string) => api.post<{ created: number; skipped: number; errors: { row: number; reason: string }[] }>('/admin/residents/import', { csv }),
     onSuccess: (data) => {
       setImportResult(data);
+      setImportPreview(null);
+      setPendingImportCsv('');
       qc.invalidateQueries({ queryKey: ['residents'] });
       toast.success(`Import done: ${data.created} created, ${data.skipped} skipped`);
     },
@@ -97,10 +114,10 @@ export default function ResidentsPage() {
     const reader = new FileReader();
     reader.onload = (ev) => {
       const csv = ev.target?.result as string;
-      importMutation.mutate(csv);
+      setPendingImportCsv(csv);
+      previewImportMutation.mutate(csv);
     };
     reader.readAsText(file);
-    // Reset so same file can be selected again
     e.target.value = '';
   }
 
@@ -172,7 +189,7 @@ export default function ResidentsPage() {
       if (showBulkModal) setShowBulkModal(false);
       if (rejectTarget) { setRejectTarget(null); setRejectReason(''); }
       if (showAddModal) setShowAddModal(false);
-      if (showImportModal) setShowImportModal(false);
+      if (showImportModal) closeImportModal();
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
@@ -538,17 +555,24 @@ export default function ResidentsPage() {
 
       {/* Import CSV Modal */}
       {showImportModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowImportModal(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={closeImportModal}>
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 p-6" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold text-gray-900">Import Residents CSV</h2>
-              <button aria-label="Close" className="text-gray-400 hover:text-gray-600" onClick={() => setShowImportModal(false)}>
+              <button aria-label="Close" className="text-gray-400 hover:text-gray-600" onClick={closeImportModal}>
                 <X className="w-4 h-4" />
               </button>
             </div>
             <p className="text-xs text-gray-500 mb-4">
-              CSV format: <code className="bg-gray-100 px-1 rounded">name, email, phone, flatNumber</code> (header row required, email and flatNumber optional).
+              CSV format: <code className="bg-gray-100 px-1 rounded">name, phone, email, block, flatNumber, type</code>
             </p>
+            <button
+              type="button"
+              onClick={() => downloadAdminFile('/admin/residents/import/template', 'residents-import-template.csv').catch((e: Error) => toast.error(e.message))}
+              className="text-xs text-primary-600 mb-3 inline-block"
+            >
+              Download template
+            </button>
             <input
               ref={fileInputRef}
               type="file"
@@ -578,9 +602,32 @@ export default function ResidentsPage() {
                   </button>
                   <button
                     className="px-4 py-2 rounded-xl text-sm bg-primary-500 text-white hover:bg-primary-600 transition-colors"
-                    onClick={() => setShowImportModal(false)}
+                    onClick={closeImportModal}
                   >
                     Done
+                  </button>
+                </div>
+              </div>
+            ) : importPreview ? (
+              <div className="space-y-3">
+                <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-sm">
+                  <p className="font-medium text-blue-800">{importPreview.valid?.length ?? 0} valid rows, {importPreview.errors?.length ?? 0} errors, {importPreview.skipped ?? 0} will be skipped</p>
+                </div>
+                {importPreview.errors?.length > 0 && (
+                  <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-xs max-h-32 overflow-y-auto">
+                    {importPreview.errors.map((e, i) => (
+                      <p key={i} className="text-red-600">Row {e.row}: {e.reason}</p>
+                    ))}
+                  </div>
+                )}
+                <div className="flex justify-end gap-2">
+                  <button className="px-4 py-2 rounded-xl text-sm border border-gray-200" onClick={() => { setImportPreview(null); setPendingImportCsv(''); }}>Back</button>
+                  <button
+                    className="px-4 py-2 rounded-xl text-sm bg-primary-500 text-white disabled:opacity-50"
+                    disabled={importMutation.isPending || !pendingImportCsv}
+                    onClick={() => importMutation.mutate(pendingImportCsv)}
+                  >
+                    {importMutation.isPending ? 'Importing…' : 'Confirm Import'}
                   </button>
                 </div>
               </div>
@@ -588,12 +635,12 @@ export default function ResidentsPage() {
               <div className="flex flex-col items-center gap-4">
                 <button
                   className="w-full border-2 border-dashed border-gray-200 rounded-xl px-6 py-10 flex flex-col items-center gap-2 hover:border-primary-400 hover:bg-primary-50 transition-colors disabled:opacity-50"
-                  disabled={importMutation.isPending}
+                  disabled={previewImportMutation.isPending}
                   onClick={() => fileInputRef.current?.click()}
                 >
                   <Upload className="w-6 h-6 text-gray-400" />
                   <span className="text-sm text-gray-500">
-                    {importMutation.isPending ? 'Importing…' : 'Click to select CSV file'}
+                    {previewImportMutation.isPending ? 'Previewing…' : 'Click to select CSV file'}
                   </span>
                 </button>
               </div>

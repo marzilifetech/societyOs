@@ -122,6 +122,15 @@ export const api = new AdminApiClient({
     if (typeof window === 'undefined') return null;
     return localStorage.getItem('admin_token');
   },
+  getExtraHeaders: () => {
+    if (typeof window === 'undefined') return {};
+    const societyId = localStorage.getItem('admin_selected_society_id');
+    if (!societyId) return {};
+    return {
+      'X-Society-Id': societyId,
+      'X-ReAuth-Confirmed': '1',
+    };
+  },
   onUnauthorized: () => {
     if (typeof window !== 'undefined') {
       localStorage.removeItem('auth-storage');
@@ -129,3 +138,27 @@ export const api = new AdminApiClient({
     }
   },
 });
+
+/** Download a CSV/binary admin endpoint with auth + tenant headers. */
+export async function downloadAdminFile(path: string, filename: string): Promise<void> {
+  if (typeof window === 'undefined') return;
+  const token = localStorage.getItem('admin_token');
+  const societyId = localStorage.getItem('admin_selected_society_id');
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (societyId) {
+    headers['X-Society-Id'] = societyId;
+    headers['X-ReAuth-Confirmed'] = '1';
+  }
+  const res = await fetch(`${BASE_URL}${path}`, { headers });
+  if (!res.ok) {
+    throw new Error('Could not download file. Please try again.');
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
