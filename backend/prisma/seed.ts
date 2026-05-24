@@ -430,7 +430,7 @@ async function main() {
       {
         societyId: society.id,
         residentId: priyaRes.id,
-        assignedToId: plumberStaff.id,
+        assignedToIds: [plumberStaff.id],
         category: 'ELECTRICAL',
         description: 'Living room ceiling fan making loud noise.',
         status: 'IN_PROGRESS',
@@ -441,7 +441,7 @@ async function main() {
       {
         societyId: society.id,
         residentId: amitRes.id,
-        assignedToId: housekeepingStaff.id,
+        assignedToIds: [housekeepingStaff.id],
         category: 'CLEANING',
         description: 'Common corridor near 201 needs deep cleaning.',
         status: 'COMPLETED',
@@ -463,7 +463,7 @@ async function main() {
       {
         societyId: society.id,
         residentId: rahulRes.id,
-        assignedToId: securityStaff.id,
+        assignedToIds: [securityStaff.id],
         category: 'SECURITY',
         description: 'Main gate intercom not working.',
         status: 'ASSIGNED',

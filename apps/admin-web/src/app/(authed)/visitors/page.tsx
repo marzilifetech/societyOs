@@ -17,10 +17,17 @@ const STATUS_META: Record<VisitorStatus, { label: string; color: string }> = {
   EXPIRED: { label: 'Expired', color: 'bg-amber-100 text-amber-700' },
 };
 
+const APPROVAL_META: Record<string, { label: string; color: string }> = {
+  PENDING: { label: 'Needs Approval', color: 'bg-amber-100 text-amber-700' },
+  APPROVED: { label: 'Approved', color: 'bg-green-100 text-green-700' },
+  REJECTED: { label: 'Rejected', color: 'bg-red-100 text-red-700' },
+};
+
 const STATUS_FILTERS = ['ALL', 'PENDING', 'CHECKED_IN', 'CHECKED_OUT', 'DENIED'] as const;
 type StatusFilter = typeof STATUS_FILTERS[number];
 
 type DateFilter = 'TODAY' | 'WEEK' | 'ALL';
+type ApprovalFilter = 'ALL' | 'NEEDS_APPROVAL';
 
 const DATE_TABS: Array<{ key: DateFilter; label: string }> = [
   { key: 'TODAY', label: 'Today' },
@@ -28,7 +35,10 @@ const DATE_TABS: Array<{ key: DateFilter; label: string }> = [
   { key: 'ALL', label: 'All' },
 ];
 
-type VisitorWithResident = Visitor & { resident?: { name: string; unit?: { flatNumber: string } } };
+type VisitorWithResident = Visitor & {
+  resident?: { name: string; unit?: { flatNumber: string } };
+  approvalStatus?: string;
+};
 
 function formatTime(iso?: string) {
   if (!iso) return '—';
@@ -48,6 +58,7 @@ export default function VisitorsPage() {
   const qc = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
   const [dateFilter, setDateFilter] = useState<DateFilter>('TODAY');
+  const [approvalFilter, setApprovalFilter] = useState<ApprovalFilter>('ALL');
   const [search, setSearch] = useState('');
 
   const queryParams = new URLSearchParams();
@@ -79,7 +90,28 @@ export default function VisitorsPage() {
     onError: (err: any) => toast.error(err?.message ?? 'Failed to check out visitor'),
   });
 
+  const approveMutation = useMutation({
+    mutationFn: (id: string) => api.patch(`/admin/visitors/${id}/approve`, {}),
+    onSuccess: () => {
+      toast.success('Visitor approved');
+      qc.invalidateQueries({ queryKey: ['admin-visitors'] });
+    },
+    onError: (err: any) => toast.error(err?.message ?? 'Failed to approve visitor'),
+  });
+
+  const rejectMutation = useMutation({
+    mutationFn: (id: string) => api.patch(`/admin/visitors/${id}/reject`, {}),
+    onSuccess: () => {
+      toast.success('Visitor rejected');
+      qc.invalidateQueries({ queryKey: ['admin-visitors'] });
+    },
+    onError: (err: any) => toast.error(err?.message ?? 'Failed to reject visitor'),
+  });
+
+  const needsApprovalCount = visitors?.filter((v) => v.approvalStatus === 'PENDING').length ?? 0;
+
   const filtered = (visitors ?? []).filter((v) => {
+    if (approvalFilter === 'NEEDS_APPROVAL' && v.approvalStatus !== 'PENDING') return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return (
@@ -121,6 +153,40 @@ export default function VisitorsPage() {
             {label}
           </button>
         ))}
+      </div>
+
+      {/* Approval filter */}
+      <div className="flex gap-2 mb-4">
+        <button
+          onClick={() => setApprovalFilter('ALL')}
+          className={cn(
+            'px-3 py-1.5 rounded-full text-xs font-medium border transition-colors',
+            approvalFilter === 'ALL'
+              ? 'bg-primary-500 border-primary-500 text-white'
+              : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300',
+          )}
+        >
+          All Visitors
+        </button>
+        <button
+          onClick={() => setApprovalFilter('NEEDS_APPROVAL')}
+          className={cn(
+            'px-3 py-1.5 rounded-full text-xs font-medium border transition-colors flex items-center gap-1.5',
+            approvalFilter === 'NEEDS_APPROVAL'
+              ? 'bg-amber-500 border-amber-500 text-white'
+              : 'bg-white border-amber-200 text-amber-700 hover:border-amber-300',
+          )}
+        >
+          Pending Approval
+          {needsApprovalCount > 0 && (
+            <span className={cn(
+              'text-xs rounded-full px-1.5 py-0.5 font-semibold',
+              approvalFilter === 'NEEDS_APPROVAL' ? 'bg-white text-amber-600' : 'bg-amber-100 text-amber-700',
+            )}>
+              {needsApprovalCount}
+            </span>
+          )}
+        </button>
       </div>
 
       {/* Search + status filters */}
@@ -172,7 +238,7 @@ export default function VisitorsPage() {
           <table className="w-full">
             <thead className="bg-gray-50">
               <tr>
-                {['Visitor', 'Phone', 'Purpose', 'Host', 'Flat', 'Entry', 'Exit', 'Valid', 'Status', ''].map((h) => (
+                {['Visitor', 'Phone', 'Purpose', 'Host', 'Flat', 'Entry', 'Exit', 'Valid', 'Approval', 'Status', ''].map((h) => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
                     {h}
                   </th>
@@ -182,8 +248,10 @@ export default function VisitorsPage() {
             <tbody className="divide-y divide-gray-50">
               {filtered.map((v) => {
                 const meta = STATUS_META[v.status];
+                const approvalMeta = APPROVAL_META[v.approvalStatus ?? 'APPROVED'];
                 const isPending = v.status === 'PENDING';
                 const isInside = v.status === 'CHECKED_IN';
+                const needsApproval = v.approvalStatus === 'PENDING';
                 return (
                   <tr key={v.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3">
@@ -204,29 +272,56 @@ export default function VisitorsPage() {
                       {new Date(v.validTill).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
                     </td>
                     <td className="px-4 py-3">
+                      {approvalMeta && (
+                        <span className={cn('text-xs font-medium px-2.5 py-1 rounded-full', approvalMeta.color)}>
+                          {approvalMeta.label}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
                       <span className={cn('text-xs font-medium px-2.5 py-1 rounded-full', meta.color)}>
                         {meta.label}
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      {isPending && (
-                        <button
-                          onClick={() => checkInMutation.mutate(v.qrToken)}
-                          disabled={checkInMutation.isPending}
-                          className="text-xs bg-green-100 hover:bg-green-200 text-green-700 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap"
-                        >
-                          Check In
-                        </button>
-                      )}
-                      {isInside && (
-                        <button
-                          onClick={() => checkOutMutation.mutate(v.id)}
-                          disabled={checkOutMutation.isPending}
-                          className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap"
-                        >
-                          Check Out
-                        </button>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {needsApproval && (
+                          <>
+                            <button
+                              onClick={() => approveMutation.mutate(v.id)}
+                              disabled={approveMutation.isPending}
+                              className="text-xs bg-green-100 hover:bg-green-200 text-green-700 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap font-medium"
+                            >
+                              Approve
+                            </button>
+                            <button
+                              onClick={() => rejectMutation.mutate(v.id)}
+                              disabled={rejectMutation.isPending}
+                              className="text-xs bg-red-100 hover:bg-red-200 text-red-700 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap font-medium"
+                            >
+                              Reject
+                            </button>
+                          </>
+                        )}
+                        {isPending && !needsApproval && (
+                          <button
+                            onClick={() => checkInMutation.mutate(v.qrToken)}
+                            disabled={checkInMutation.isPending}
+                            className="text-xs bg-green-100 hover:bg-green-200 text-green-700 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap"
+                          >
+                            Check In
+                          </button>
+                        )}
+                        {isInside && (
+                          <button
+                            onClick={() => checkOutMutation.mutate(v.id)}
+                            disabled={checkOutMutation.isPending}
+                            className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap"
+                          >
+                            Check Out
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );

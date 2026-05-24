@@ -9,6 +9,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { ServiceRequestStatus, ServicePhase } from '@prisma/client';
 import {
   CreateServiceRequestDto,
+  AdminCreateServiceRequestDto,
+  AdminUpdateServiceRequestDto,
   UpdateServiceRequestStatusDto,
   RateServiceRequestDto,
 } from './dto/service-request.dto';
@@ -16,6 +18,7 @@ import { requireResidentByUserId } from '../../common/utils/resident-context';
 import { SERVICE_REQUEST_TRANSITIONS } from './service-request.transitions';
 import { S3Service } from '../../common/storage/s3.service';
 import { ServiceRequestGateway } from './service-request.gateway';
+import { NotificationService } from '../notification/notification.service';
 
 const SOCIETY_MISMATCH = { code: 'SERVICE_REQUEST_SOCIETY_MISMATCH', message: 'Service request belongs to another society' };
 
@@ -25,7 +28,44 @@ export class ServiceRequestService {
     private prisma: PrismaService,
     private s3: S3Service,
     private serviceRequestGateway: ServiceRequestGateway,
+    private notificationService: NotificationService,
   ) {}
+
+  private async findOneRaw(id: string) {
+    return this.prisma.serviceRequest.findUnique({
+      where: { id },
+      include: {
+        resident: { include: { user: true, flat: true } },
+        photos: true,
+      },
+    });
+  }
+
+  private async enrichWithAssignedStaff<T extends { assignedToIds?: string[] }>(req: T) {
+    const ids = req.assignedToIds ?? [];
+    if (!ids.length) return { ...req, assignedTo: null, assignedStaff: [] };
+    const staff = await this.prisma.staffMember.findMany({
+      where: { id: { in: ids } },
+      include: { user: true },
+    });
+    const byId = new Map(staff.map((s) => [s.id, s]));
+    const ordered = ids.map((id) => byId.get(id)).filter(Boolean);
+    return { ...req, assignedTo: ordered[0] ?? null, assignedStaff: ordered };
+  }
+
+  private async enrichManyWithAssignedStaff<T extends { assignedToIds?: string[] }>(rows: T[]) {
+    const allIds = [...new Set(rows.flatMap((r) => r.assignedToIds ?? []))];
+    if (!allIds.length) return rows.map((r) => ({ ...r, assignedTo: null, assignedStaff: [] }));
+    const staff = await this.prisma.staffMember.findMany({
+      where: { id: { in: allIds } },
+      include: { user: true },
+    });
+    const byId = new Map(staff.map((s) => [s.id, s]));
+    return rows.map((r) => {
+      const ordered = (r.assignedToIds ?? []).map((id) => byId.get(id)).filter(Boolean);
+      return { ...r, assignedTo: ordered[0] ?? null, assignedStaff: ordered };
+    });
+  }
 
   private async resolveStaffId(userId: string): Promise<string> {
     const staff = await this.prisma.staffMember.findUnique({ where: { userId } });
@@ -45,15 +85,15 @@ export class ServiceRequestService {
   }
 
   private assertStaffCanAccessTask(
-    sr: { societyId: string; assignedToId: string | null; status: ServiceRequestStatus },
+    sr: { societyId: string; assignedToIds: string[]; status: ServiceRequestStatus },
     staffId: string,
     jwtSocietyId: string,
   ) {
     this.assertSocietyMatch(sr.societyId, jwtSocietyId);
-    if (!sr.assignedToId) {
+    if (!sr.assignedToIds?.length) {
       throw new ForbiddenException({ code: 'NOT_ASSIGNED_STAFF', message: 'Task is not assigned to a staff member' });
     }
-    if (sr.assignedToId !== staffId) {
+    if (!sr.assignedToIds.includes(staffId)) {
       throw new ForbiddenException({ code: 'NOT_ASSIGNED_STAFF', message: 'Not assigned to you' });
     }
   }
@@ -70,9 +110,12 @@ export class ServiceRequestService {
 
     const slaDeadline = await this.computeSlaDeadline(societyId, dto.category);
 
-    return this.prisma.serviceRequest.create({
-      data: { residentId: resident.id, societyId, ...dto, ...(slaDeadline && { slaDeadline }) },
-    });
+    return this.enrichWithAssignedStaff(
+      await this.prisma.serviceRequest.create({
+        data: { residentId: resident.id, societyId, ...dto, ...(slaDeadline && { slaDeadline }) },
+        include: { photos: true },
+      }),
+    );
   }
 
   private async computeSlaDeadline(societyId: string, category: string): Promise<Date | null> {
@@ -100,26 +143,93 @@ export class ServiceRequestService {
       });
     }
 
-    return this.prisma.serviceRequest.findMany({
-      where: { residentId: resident.id, societyId },
-      include: { photos: true, assignedTo: { include: { user: true } } },
+    const rows = await this.prisma.serviceRequest.findMany({
+      where: { residentId: resident.id, societyId, deletedAt: null },
+      include: { photos: true },
       orderBy: { createdAt: 'desc' },
     });
+    return this.enrichManyWithAssignedStaff(rows);
+  }
+
+  async adminCreate(societyId: string, dto: AdminCreateServiceRequestDto) {
+    const resident = await this.prisma.resident.findFirst({
+      where: { id: dto.residentId, flat: { societyId } },
+      include: { flat: true },
+    });
+    if (!resident) throw new NotFoundException('Resident not found in this society');
+
+    const slaDeadline = await this.computeSlaDeadline(societyId, dto.category);
+    return this.enrichWithAssignedStaff(
+      await this.prisma.serviceRequest.create({
+        data: {
+          societyId,
+          residentId: dto.residentId,
+          category: dto.category,
+          description: dto.description,
+          ...(dto.scheduledTime && { scheduledTime: new Date(dto.scheduledTime) }),
+          ...(dto.tags && { tags: dto.tags }),
+          ...(dto.isPaid !== undefined && { isPaid: dto.isPaid }),
+          ...(dto.reminderMinutes !== undefined && { reminderMinutes: dto.reminderMinutes }),
+          ...(slaDeadline && { slaDeadline }),
+        },
+        include: {
+          resident: { include: { user: true, flat: true } },
+        },
+      }),
+    );
+  }
+
+  async adminUpdate(id: string, societyId: string, dto: AdminUpdateServiceRequestDto) {
+    const existing = await this.prisma.serviceRequest.findUnique({ where: { id } });
+    if (!existing || existing.deletedAt) throw new NotFoundException('Service request not found');
+    this.assertSocietyMatch(existing.societyId, societyId);
+
+    const data: Record<string, unknown> = {};
+    if (dto.category !== undefined) data.category = dto.category;
+    if (dto.description !== undefined) data.description = dto.description;
+    if (dto.scheduledTime !== undefined) data.scheduledTime = dto.scheduledTime ? new Date(dto.scheduledTime) : null;
+    if (dto.tags !== undefined) data.tags = dto.tags;
+    if (dto.isPaid !== undefined) data.isPaid = dto.isPaid;
+    if (dto.reminderMinutes !== undefined) {
+      data.reminderMinutes = dto.reminderMinutes;
+      data.reminderSentAt = null;
+    }
+
+    const updated = await this.prisma.serviceRequest.update({
+      where: { id },
+      data: data as any,
+      include: { resident: { include: { user: true, flat: true } }, photos: true },
+    });
+    return this.enrichWithAssignedStaff(updated);
+  }
+
+  async updateTags(id: string, societyId: string, tags: string[]) {
+    const existing = await this.prisma.serviceRequest.findUnique({ where: { id } });
+    if (!existing || existing.deletedAt) throw new NotFoundException('Service request not found');
+    this.assertSocietyMatch(existing.societyId, societyId);
+    return this.prisma.serviceRequest.update({ where: { id }, data: { tags } });
+  }
+
+  async softDelete(id: string, societyId: string) {
+    const existing = await this.prisma.serviceRequest.findUnique({ where: { id } });
+    if (!existing || existing.deletedAt) throw new NotFoundException('Service request not found');
+    this.assertSocietyMatch(existing.societyId, societyId);
+    return this.prisma.serviceRequest.update({ where: { id }, data: { deletedAt: new Date() } });
   }
 
   async findBySociety(societyId: string, status?: ServiceRequestStatus, managedBlocks?: string[]) {
     const blockWhere = managedBlocks?.length
       ? { resident: { flat: { block: { in: managedBlocks } } } }
       : {};
-    return this.prisma.serviceRequest.findMany({
-      where: { societyId, ...(status && { status }), ...blockWhere },
+    const rows = await this.prisma.serviceRequest.findMany({
+      where: { societyId, deletedAt: null, ...(status && { status }), ...blockWhere },
       include: {
         resident: { include: { user: true, flat: true } },
-        assignedTo: { include: { user: true } },
         photos: true,
       },
       orderBy: { createdAt: 'desc' },
     });
+    return this.enrichManyWithAssignedStaff(rows);
   }
 
   async findByStaff(userId: string, societyId: string) {
@@ -129,26 +239,20 @@ export class ServiceRequestService {
       throw new ForbiddenException({ code: 'STAFF_SOCIETY_MISMATCH', message: 'Staff profile society mismatch' });
     }
 
-    return this.prisma.serviceRequest.findMany({
-      where: { assignedToId: staffId, societyId },
+    const rows = await this.prisma.serviceRequest.findMany({
+      where: { assignedToIds: { has: staffId }, societyId, deletedAt: null },
       include: {
         resident: { include: { user: true, flat: true } },
         photos: true,
       },
       orderBy: { createdAt: 'desc' },
     });
+    return this.enrichManyWithAssignedStaff(rows);
   }
 
   async findOne(id: string, opts?: { residentUserId?: string; societyId?: string }) {
-    const req = await this.prisma.serviceRequest.findUnique({
-      where: { id },
-      include: {
-        resident: { include: { user: true, flat: true } },
-        assignedTo: { include: { user: true } },
-        photos: true,
-      },
-    });
-    if (!req) throw new NotFoundException('Service request not found');
+    const req = await this.findOneRaw(id);
+    if (!req || req.deletedAt) throw new NotFoundException('Service request not found');
 
     if (opts?.residentUserId) {
       const resident = await requireResidentByUserId(this.prisma, opts.residentUserId);
@@ -161,13 +265,17 @@ export class ServiceRequestService {
       this.assertSocietyMatch(req.societyId, opts.societyId);
     }
 
-    return req;
+    return this.enrichWithAssignedStaff(req);
   }
 
   async updateStatus(id: string, societyId: string, dto: UpdateServiceRequestStatusDto) {
     const existing = await this.prisma.serviceRequest.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Service request not found');
     this.assertSocietyMatch(existing.societyId, societyId);
+
+    const assignedIds =
+      dto.assignedToIds ??
+      (dto.assignedToId !== undefined ? (dto.assignedToId ? [dto.assignedToId] : []) : undefined);
 
     const current = existing.status;
     const next = dto.status;
@@ -183,7 +291,7 @@ export class ServiceRequestService {
       return this.prisma.serviceRequest.update({
         where: { id },
         data: {
-          ...(dto.assignedToId !== undefined && { assignedToId: dto.assignedToId }),
+          ...(assignedIds !== undefined && { assignedToIds: assignedIds }),
           ...(dto.adminNote !== undefined && { adminNote: dto.adminNote }),
         },
       });
@@ -202,7 +310,7 @@ export class ServiceRequestService {
 
     const data: Record<string, unknown> = {
       status: next,
-      ...(dto.assignedToId !== undefined && { assignedToId: dto.assignedToId }),
+      ...(assignedIds !== undefined && { assignedToIds: assignedIds }),
       ...(dto.adminNote !== undefined && { adminNote: dto.adminNote }),
     };
 
@@ -228,14 +336,35 @@ export class ServiceRequestService {
     });
   }
 
-  async assignStaff(id: string, societyId: string, staffMemberId: string) {
-    const staff = await this.prisma.staffMember.findFirst({
-      where: { id: staffMemberId, societyId },
+  private async countActiveAssignments(staffMemberId: string): Promise<number> {
+    return this.prisma.serviceRequest.count({
+      where: {
+        assignedToIds: { has: staffMemberId },
+        status: { in: [ServiceRequestStatus.ASSIGNED, ServiceRequestStatus.IN_PROGRESS] },
+        deletedAt: null,
+      },
     });
-    if (!staff) {
+  }
+
+  private emitAssignedToStaff(staffIds: string[], payload: { taskId: string; title: string; address: string; urgency: string | null }) {
+    const assignedAt = new Date().toISOString();
+    for (const staffId of staffIds) {
+      this.serviceRequestGateway.emitTaskAssigned(staffId, { ...payload, assignedAt });
+    }
+  }
+
+  async assignStaff(id: string, societyId: string, staffMemberIds: string[]) {
+    if (!staffMemberIds.length) {
+      throw new BadRequestException({ code: 'NO_STAFF', message: 'At least one staff member is required' });
+    }
+
+    const staffMembers = await this.prisma.staffMember.findMany({
+      where: { id: { in: staffMemberIds }, societyId, deletedAt: null },
+    });
+    if (staffMembers.length !== staffMemberIds.length) {
       throw new BadRequestException({
         code: 'STAFF_NOT_IN_SOCIETY',
-        message: 'Staff member not found in this society',
+        message: 'One or more staff members were not found in this society',
       });
     }
 
@@ -243,17 +372,14 @@ export class ServiceRequestService {
     if (!existing) throw new NotFoundException('Service request not found');
     this.assertSocietyMatch(existing.societyId, societyId);
 
-    const activeCount = await this.prisma.serviceRequest.count({
-      where: {
-        assignedToId: staffMemberId,
-        status: { in: [ServiceRequestStatus.ASSIGNED, ServiceRequestStatus.IN_PROGRESS] },
-      },
-    });
-    if (activeCount >= 3) {
-      throw new ConflictException({
-        code: 'STAFF_OVERLOADED',
-        message: 'Staff member already has 3 or more active assignments. Please choose another staff member.',
-      });
+    for (const staffMemberId of staffMemberIds) {
+      const activeCount = await this.countActiveAssignments(staffMemberId);
+      if (activeCount >= 3) {
+        throw new ConflictException({
+          code: 'STAFF_OVERLOADED',
+          message: 'Staff member already has 3 or more active assignments. Please choose another staff member.',
+        });
+      }
     }
 
     if (existing.status === ServiceRequestStatus.COMPLETED || existing.status === ServiceRequestStatus.CLOSED) {
@@ -269,21 +395,20 @@ export class ServiceRequestService {
     const updated = await this.prisma.serviceRequest.update({
       where: { id },
       data: {
-        assignedToId: staffMemberId,
+        assignedToIds: staffMemberIds,
         status: ServiceRequestStatus.ASSIGNED,
         rejectedReason: null,
       },
     });
 
-    this.serviceRequestGateway.emitTaskAssigned(staffMemberId, {
+    this.emitAssignedToStaff(staffMemberIds, {
       taskId: updated.id,
       title: updated.category,
       address: updated.description,
       urgency: null,
-      assignedAt: new Date().toISOString(),
     });
 
-    return updated;
+    return this.enrichWithAssignedStaff(updated);
   }
 
   async rate(id: string, userId: string, societyId: string, dto: RateServiceRequestDto) {
@@ -335,13 +460,12 @@ export class ServiceRequestService {
       where: { id },
       data: { status: ServiceRequestStatus.IN_PROGRESS, disputeReason: reason, resolvedAt: null },
     });
-    if (updated.assignedToId) {
-      this.serviceRequestGateway.emitTaskAssigned(updated.assignedToId, {
+    if (updated.assignedToIds?.length) {
+      this.emitAssignedToStaff(updated.assignedToIds, {
         taskId: updated.id,
         title: `DISPUTE: ${updated.category}`,
         address: reason,
         urgency: 'HIGH',
-        assignedAt: new Date().toISOString(),
       });
     }
     return updated;
@@ -355,54 +479,110 @@ export class ServiceRequestService {
       throw new BadRequestException({ code: 'NOT_PENDING', message: 'Only PENDING requests can be auto-assigned' });
     }
 
-    // Find all active staff in society, pick the one with fewest active tasks
+    const categoryKey = req.category.toUpperCase();
     const allStaff = await this.prisma.staffMember.findMany({ where: { societyId, deletedAt: null } });
     if (!allStaff.length) throw new BadRequestException({ code: 'NO_STAFF', message: 'No active staff available' });
 
+    const categoryMatched = allStaff.filter((s) =>
+      s.categories.some((c) => c.toUpperCase() === categoryKey || c.toUpperCase() === req.category.toUpperCase()),
+    );
+    const pool = categoryMatched.length ? categoryMatched : allStaff;
+
     const counts = await Promise.all(
-      allStaff.map(async (s) => ({
+      pool.map(async (s) => ({
         staff: s,
-        count: await this.prisma.serviceRequest.count({
-          where: { assignedToId: s.id, status: { in: [ServiceRequestStatus.ASSIGNED, ServiceRequestStatus.IN_PROGRESS] } },
-        }),
+        count: await this.countActiveAssignments(s.id),
       })),
     );
 
-    // Filter to staff with < 3 active tasks, sort by load
     const eligible = counts.filter((c) => c.count < 3).sort((a, b) => a.count - b.count);
-    if (!eligible.length) throw new ConflictException({ code: 'ALL_STAFF_OVERLOADED', message: 'All staff are at capacity (3 active tasks)' });
+    if (!eligible.length) {
+      throw new ConflictException({ code: 'ALL_STAFF_OVERLOADED', message: 'All staff are at capacity (3 active tasks)' });
+    }
 
     const chosen = eligible[0].staff;
     const updated = await this.prisma.serviceRequest.update({
       where: { id },
       data: {
-        assignedToId: chosen.id,
+        assignedToIds: [chosen.id],
         status: ServiceRequestStatus.ASSIGNED,
+        autoAssigned: true,
         ...(scheduledTime ? { scheduledTime: new Date(scheduledTime) } : {}),
         rejectedReason: null,
       },
     });
 
-    this.serviceRequestGateway.emitTaskAssigned(chosen.id, {
+    this.emitAssignedToStaff([chosen.id], {
       taskId: updated.id,
       title: updated.category,
       address: updated.description,
       urgency: null,
-      assignedAt: new Date().toISOString(),
     });
 
-    return updated;
+    return this.enrichWithAssignedStaff(updated);
   }
 
-  async assignStaffWithSchedule(id: string, societyId: string, staffMemberId: string, scheduledTime?: string) {
-    const updated = await this.assignStaff(id, societyId, staffMemberId);
+  async assignStaffWithSchedule(
+    id: string,
+    societyId: string,
+    staffMemberIds: string[],
+    scheduledTime?: string,
+  ) {
+    const updated = await this.assignStaff(id, societyId, staffMemberIds);
     if (scheduledTime) {
-      return this.prisma.serviceRequest.update({
+      const withSchedule = await this.prisma.serviceRequest.update({
         where: { id },
         data: { scheduledTime: new Date(scheduledTime) },
       });
+      return this.enrichWithAssignedStaff(withSchedule);
     }
     return updated;
+  }
+
+  /** Sends push reminders for scheduled requests whose reminder window has arrived. */
+  async sendDueReminders() {
+    const now = new Date();
+    const candidates = await this.prisma.serviceRequest.findMany({
+      where: {
+        deletedAt: null,
+        reminderSentAt: null,
+        scheduledTime: { not: null },
+        reminderMinutes: { not: null },
+        status: { in: [ServiceRequestStatus.ASSIGNED, ServiceRequestStatus.IN_PROGRESS] },
+      },
+      include: { resident: { include: { user: true } } },
+    });
+
+    for (const req of candidates) {
+      if (!req.scheduledTime || req.reminderMinutes == null) continue;
+      const remindAt = new Date(req.scheduledTime.getTime() - req.reminderMinutes * 60_000);
+      if (now < remindAt) continue;
+
+      const residentUserId = req.resident.userId;
+      await this.notificationService.notifyUser(
+        residentUserId,
+        'Service visit reminder',
+        `Your ${req.category} service is scheduled at ${req.scheduledTime.toLocaleString('en-IN')}`,
+        { category: 'SERVICE_REQUEST', data: { serviceRequestId: req.id } },
+      );
+
+      for (const staffId of req.assignedToIds) {
+        const staff = await this.prisma.staffMember.findUnique({ where: { id: staffId } });
+        if (staff) {
+          await this.notificationService.notifyUser(
+            staff.userId,
+            'Upcoming service task',
+            `${req.category} at ${req.scheduledTime.toLocaleString('en-IN')}`,
+            { category: 'SERVICE_REQUEST', data: { serviceRequestId: req.id } },
+          );
+        }
+      }
+
+      await this.prisma.serviceRequest.update({
+        where: { id: req.id },
+        data: { reminderSentAt: now },
+      });
+    }
   }
 
   async getPhotoUploadUrl(

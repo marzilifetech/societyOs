@@ -20,6 +20,7 @@ enum UserRole {
 enum UserStatus {
   PENDING
   ACTIVE
+  INACTIVE
   SUSPENDED
   REJECTED
 }
@@ -79,6 +80,7 @@ enum PaymentStatus {
   SUCCESS
   FAILED
   REFUNDED
+  WAIVED
 }
 
 enum AttendanceStatus {
@@ -435,6 +437,8 @@ model User {
   phone             String
   name              String?
   email             String?
+  gender            String?
+  dateOfBirth       DateTime?
   fcmToken          String?
   deviceToken       String?
   notificationPrefs Json?
@@ -493,6 +497,9 @@ model Resident {
   walletBalance      Decimal             @default(0)
   /** Optional: { name, phone } for resident emergency contact (BRD resident profile). */
   emergencyContact   Json?
+  dateOfBirth        DateTime?
+  roleNote           String?
+  appActivatedAt     DateTime?
   walletTxns         WalletTransaction[]
   familyMembers      FamilyMember[]
   healthVitals       HealthVital[]
@@ -548,9 +555,12 @@ model StaffMember {
   userId           String    @unique
   societyId        String
   designation      String
+  department       String?
   categories       String[]
   salaryStructure  Json?
   joiningDate      DateTime?
+  leavingDate      DateTime?
+  familyDetails    Json?
   emergencyContact Json?
   deletedAt        DateTime?
   createdAt        DateTime  @default(now())
@@ -558,7 +568,6 @@ model StaffMember {
 
   user                User              @relation(fields: [userId], references: [id])
   society             Society           @relation(fields: [societyId], references: [id])
-  assignedRequests    ServiceRequest[]  @relation("AssignedStaff")
   attendance          StaffAttendance[]
   leaveRequests       LeaveRequest[]
   reviews             StaffReview[]
@@ -569,9 +578,39 @@ model StaffMember {
   awardedRecognitions Recognition[]     @relation("AwardedRecognitions")
   staffMessages       StaffMessage[]
   securityRounds      SecurityRound[]
+  documents           StaffDocument[]
+  staffLoans          StaffLoan[]
 
   @@index([societyId])
   @@map("staff_members")
+}
+
+model StaffDocument {
+  id            String    @id @default(uuid())
+  staffMemberId String
+  documentType  String
+  fileUrl       String
+  uploadedAt    DateTime  @default(now())
+
+  staffMember StaffMember @relation(fields: [staffMemberId], references: [id])
+
+  @@index([staffMemberId])
+  @@map("staff_documents")
+}
+
+model StaffLoan {
+  id            String      @id @default(uuid())
+  staffMemberId String
+  amount        Decimal     @db.Decimal(10, 2)
+  reason        String?
+  status        String      @default("PENDING")
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  staffMember StaffMember @relation(fields: [staffMemberId], references: [id])
+
+  @@index([staffMemberId])
+  @@map("staff_loans")
 }
 
 // ─── Visitor Management ───────────────────────────────────────────────────────
@@ -593,6 +632,9 @@ model Visitor {
   checkedInBy       String?
   isRecurring       Boolean       @default(false)
   recurringSchedule Json?
+  approvalStatus    String        @default("PENDING")
+  approvedById      String?
+  approvedAt        DateTime?
   createdAt         DateTime      @default(now())
 
   resident Resident @relation(fields: [residentId], references: [id])
@@ -609,7 +651,7 @@ model ServiceRequest {
   id            String               @id @default(uuid())
   societyId     String
   residentId    String
-  assignedToId  String?
+  assignedToIds String[]             @default([])
   category      String
   description   String
   adminNote     String?
@@ -623,17 +665,22 @@ model ServiceRequest {
   rating        Decimal?             @db.Decimal(3, 2)
   ratingText    String?
   ratedAt       DateTime?
-  proofPhotos   Json?
-  ratingNote    String?
-  createdAt     DateTime             @default(now())
-  updatedAt     DateTime             @updatedAt
+  proofPhotos     Json?
+  ratingNote      String?
+  tags            String[]
+  isPaid          Boolean              @default(false)
+  autoAssigned    Boolean              @default(false)
+  reminderMinutes Int?
+  reminderSentAt  DateTime?
+  deletedAt       DateTime?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
 
   acceptedAt     DateTime?
   rejectedReason String?
 
   society    Society        @relation(fields: [societyId], references: [id])
   resident   Resident       @relation(fields: [residentId], references: [id])
-  assignedTo StaffMember?   @relation("AssignedStaff", fields: [assignedToId], references: [id])
   photos     ServicePhoto[]
   notes      TaskNote[]
 
@@ -826,8 +873,9 @@ model MaintenanceBill {
   breakdown  Json
   total      Decimal       @db.Decimal(10, 2)
   dueDate    DateTime
-  status     PaymentStatus @default(PENDING)
-  createdAt  DateTime      @default(now())
+  status        PaymentStatus @default(PENDING)
+  paymentMethod String?
+  createdAt     DateTime      @default(now())
 
   flat     Flat      @relation(fields: [flatId], references: [id])
   resident Resident  @relation(fields: [residentId], references: [id])

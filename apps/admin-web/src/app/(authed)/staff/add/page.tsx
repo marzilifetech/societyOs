@@ -26,6 +26,14 @@ const CATEGORIES = [
   { id: 'MEDICAL', label: 'Medical' },
 ];
 
+const DEPARTMENTS = [
+  { id: 'SECURITY', label: 'Security' },
+  { id: 'HOUSEKEEPING', label: 'Housekeeping' },
+  { id: 'MAINTENANCE', label: 'Maintenance' },
+  { id: 'ADMIN', label: 'Admin' },
+  { id: 'MEDICAL', label: 'Medical' },
+];
+
 export default function AddStaffPage() {
   const router = useRouter();
   const qc = useQueryClient();
@@ -36,6 +44,9 @@ export default function AddStaffPage() {
     designation: '',
     categories: [] as string[],
     salary: '',
+    department: '',
+    gender: '',
+    dateOfBirth: '',
   });
 
   const mutation = useMutation({
@@ -48,6 +59,9 @@ export default function AddStaffPage() {
         designation: form.designation,
         categories: form.categories,
         salary: form.salary ? parseFloat(form.salary) : undefined,
+        department: form.department || undefined,
+        gender: form.gender || undefined,
+        dateOfBirth: form.dateOfBirth || undefined,
       });
     },
     onSuccess: () => {
@@ -87,7 +101,7 @@ export default function AddStaffPage() {
         <button
           onClick={() => {
             setStep('form');
-            setForm({ name: '', phone: '', designation: '', categories: [], salary: '' });
+            setForm({ name: '', phone: '', designation: '', categories: [], salary: '', department: '', gender: '', dateOfBirth: '' });
           }}
           className="mt-4 text-gray-500 hover:text-gray-700 text-sm"
         >
@@ -171,6 +185,44 @@ export default function AddStaffPage() {
             onChange={e => setForm(prev => ({ ...prev, salary: e.target.value }))}
             className="w-full border border-gray-200 rounded-xl px-4 py-3"
             placeholder="e.g. 25000"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
+          <select
+            value={form.department}
+            onChange={e => setForm(prev => ({ ...prev, department: e.target.value }))}
+            className="w-full border border-gray-200 rounded-xl px-4 py-3"
+          >
+            <option value="">Select department (optional)</option>
+            {DEPARTMENTS.map(d => (
+              <option key={d.id} value={d.id}>{d.label}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Gender</label>
+          <select
+            value={form.gender}
+            onChange={e => setForm(prev => ({ ...prev, gender: e.target.value }))}
+            className="w-full border border-gray-200 rounded-xl px-4 py-3"
+          >
+            <option value="">Not specified</option>
+            <option value="MALE">Male</option>
+            <option value="FEMALE">Female</option>
+            <option value="OTHER">Other</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Date of Birth</label>
+          <input
+            type="date"
+            value={form.dateOfBirth}
+            onChange={e => setForm(prev => ({ ...prev, dateOfBirth: e.target.value }))}
+            className="w-full border border-gray-200 rounded-xl px-4 py-3"
           />
         </div>
 

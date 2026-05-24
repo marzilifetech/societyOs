@@ -37,24 +37,33 @@ const STATUS_META = {
   PAID: { label: 'Paid', color: 'bg-green-100 text-green-700' },
   OVERDUE: { label: 'Overdue', color: 'bg-red-100 text-red-700' },
   PARTIAL: { label: 'Partial', color: 'bg-amber-100 text-amber-700' },
+  WAIVED: { label: 'Waived', color: 'bg-purple-100 text-purple-700' },
 } as const;
 
 type BillWithResident = MaintenanceBill & {
   resident?: { name: string; unit?: { flatNumber: string; tower?: string } };
+  paymentMethod?: string | null;
 };
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+type StatusTab = 'ALL' | 'PENDING' | 'PAID' | 'OVERDUE' | 'WAIVED';
 
 export default function MaintenancePage() {
   const qc = useQueryClient();
   const currentDate = new Date();
   const [selectedYear, setSelectedYear] = useState(currentDate.getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(currentDate.getMonth() + 1);
-  const [statusFilter, setStatusFilter] = useState<'ALL' | 'PENDING' | 'PAID' | 'OVERDUE'>('ALL');
+  const [statusFilter, setStatusFilter] = useState<StatusTab>('ALL');
   const [showGenerateForm, setShowGenerateForm] = useState(false);
   const [genYear, setGenYear] = useState(String(currentDate.getFullYear()));
   const [genMonth, setGenMonth] = useState(String(currentDate.getMonth() + 1));
   const [genMessage, setGenMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Update status modal
+  const [statusModalBill, setStatusModalBill] = useState<BillWithResident | null>(null);
+  const [newStatus, setNewStatus] = useState<'PENDING' | 'PAID' | 'WAIVED'>('PAID');
+  const [paymentMethod, setPaymentMethod] = useState('');
 
   const { data: bills, isLoading, isError, refetch } = useQuery({
     queryKey: ['admin-maintenance', selectedYear, selectedMonth],
@@ -91,6 +100,18 @@ export default function MaintenancePage() {
     },
   });
 
+  const updateStatusMutation = useMutation({
+    mutationFn: ({ id, status, pm }: { id: string; status: string; pm?: string }) =>
+      api.patch(`/admin/maintenance/bills/${id}/status`, { status, paymentMethod: pm || undefined }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-maintenance'] });
+      toast.success('Bill status updated.');
+      setStatusModalBill(null);
+      setPaymentMethod('');
+    },
+    onError: (err: Error) => toast.error(err?.message ?? 'Failed to update status.'),
+  });
+
   const generateBillsMutation = useMutation({
     mutationFn: ({ year, month }: { year: number; month: number }) =>
       api.post('/admin/maintenance/bills/generate', { year, month }),
@@ -116,11 +137,25 @@ export default function MaintenancePage() {
     generateBillsMutation.mutate({ year, month });
   }
 
-  const filtered = bills?.filter((b) => statusFilter === 'ALL' || b.status === statusFilter) ?? [];
+  function openStatusModal(bill: BillWithResident) {
+    setStatusModalBill(bill);
+    setNewStatus('PAID');
+    setPaymentMethod(bill.paymentMethod ?? '');
+  }
+
+  const now = new Date();
+
+  const filtered = (bills ?? []).filter((b) => {
+    if (statusFilter === 'OVERDUE') {
+      return b.status === 'PENDING' && new Date(b.dueDate) < now;
+    }
+    return statusFilter === 'ALL' || b.status === statusFilter;
+  });
 
   const totalAmount = bills?.reduce((sum, b) => sum + b.amount, 0) ?? 0;
   const paidAmount = bills?.filter((b) => b.status === 'PAID').reduce((sum, b) => sum + b.amount, 0) ?? 0;
   const pendingCount = bills?.filter((b) => b.status !== 'PAID').length ?? 0;
+  const overdueCount = bills?.filter((b) => b.status === 'PENDING' && new Date(b.dueDate) < now).length ?? 0;
 
   const paidCount = bills?.filter(b => b.status === 'PAID').length ?? 0;
   const totalCount = bills?.length ?? 0;
@@ -189,7 +224,7 @@ export default function MaintenancePage() {
       )}
 
       {/* Summary cards */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-4 gap-4 mb-6">
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
           <p className="text-sm text-gray-500 mb-1">Total Billed</p>
           <p className="text-2xl font-bold text-gray-900">₹{totalAmount.toLocaleString('en-IN')}</p>
@@ -201,6 +236,10 @@ export default function MaintenancePage() {
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
           <p className="text-sm text-gray-500 mb-1">Pending Units</p>
           <p className="text-2xl font-bold text-amber-600">{pendingCount}</p>
+        </div>
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+          <p className="text-sm text-gray-500 mb-1">Overdue</p>
+          <p className="text-2xl font-bold text-red-600">{overdueCount}</p>
         </div>
       </div>
 
@@ -253,8 +292,8 @@ export default function MaintenancePage() {
             </button>
           ))}
         </div>
-        <div className="flex gap-2 ml-auto">
-          {(['ALL', 'PENDING', 'PAID', 'OVERDUE'] as const).map((s) => (
+        <div className="flex gap-2 ml-auto flex-wrap">
+          {(['ALL', 'PENDING', 'OVERDUE', 'PAID', 'WAIVED'] as const).map((s) => (
             <button
               key={s}
               onClick={() => setStatusFilter(s)}
@@ -265,7 +304,7 @@ export default function MaintenancePage() {
                   : 'bg-white border-gray-200 text-gray-600',
               )}
             >
-              {s === 'ALL' ? 'All' : STATUS_META[s]?.label ?? s}
+              {s === 'ALL' ? 'All' : s === 'OVERDUE' ? `Overdue${overdueCount > 0 ? ` (${overdueCount})` : ''}` : (STATUS_META as any)[s]?.label ?? s}
             </button>
           ))}
         </div>
@@ -286,7 +325,7 @@ export default function MaintenancePage() {
           <div className="overflow-x-auto"><table className="w-full">
             <thead className="bg-gray-50">
               <tr>
-                {['Resident', 'Flat', 'Amount', 'Due Date', 'Paid On', 'Status', 'Actions'].map((h) => (
+                {['Resident', 'Flat', 'Amount', 'Due Date', 'Paid On', 'Method', 'Status', 'Actions'].map((h) => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
                     {h}
                   </th>
@@ -295,10 +334,11 @@ export default function MaintenancePage() {
             </thead>
             <tbody className="divide-y divide-gray-50">
               {filtered.map((b) => {
-                const meta = STATUS_META[b.status];
-                const isOverdue = b.status === 'OVERDUE';
+                const isActuallyOverdue = b.status === 'PENDING' && new Date(b.dueDate) < now;
+                const displayStatus = isActuallyOverdue ? 'OVERDUE' : b.status;
+                const meta = (STATUS_META as any)[displayStatus] ?? STATUS_META.PENDING;
                 return (
-                  <tr key={b.id} className={cn('hover:bg-gray-50', isOverdue && 'border-l-4 border-red-400')}>
+                  <tr key={b.id} className={cn('hover:bg-gray-50', isActuallyOverdue && 'border-l-4 border-red-400')}>
                     <td className="px-4 py-3 text-sm font-medium text-gray-900">{b.resident?.name ?? '—'}</td>
                     <td className="px-4 py-3 text-sm text-gray-600">
                       {b.resident?.unit?.flatNumber ?? '—'}
@@ -315,21 +355,34 @@ export default function MaintenancePage() {
                         ? new Date(b.paidAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
                         : '—'}
                     </td>
+                    <td className="px-4 py-3 text-xs text-gray-500">
+                      {b.paymentMethod ?? '—'}
+                    </td>
                     <td className="px-4 py-3">
                       <span className={cn('text-xs font-medium px-2.5 py-1 rounded-full', meta.color)}>
                         {meta.label}
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      {b.status !== 'PAID' && (
-                        <button
-                          className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-2.5 py-1 rounded-lg transition-colors disabled:opacity-50"
-                          disabled={sendReminderMutation.isPending}
-                          onClick={() => sendReminderMutation.mutate(b.id)}
-                        >
-                          Send Reminder
-                        </button>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {b.status !== 'PAID' && b.status !== 'WAIVED' && (
+                          <button
+                            className="text-xs bg-primary-50 hover:bg-primary-100 text-primary-700 px-2.5 py-1 rounded-lg transition-colors border border-primary-200 font-medium"
+                            onClick={() => openStatusModal(b)}
+                          >
+                            Update Status
+                          </button>
+                        )}
+                        {b.status !== 'PAID' && (
+                          <button
+                            className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-2.5 py-1 rounded-lg transition-colors disabled:opacity-50"
+                            disabled={sendReminderMutation.isPending}
+                            onClick={() => sendReminderMutation.mutate(b.id)}
+                          >
+                            Send Reminder
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -338,6 +391,66 @@ export default function MaintenancePage() {
           </table></div>
         )}
       </div>
+
+      {/* Update Status Modal */}
+      {statusModalBill && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setStatusModalBill(null)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-semibold text-gray-900 mb-1">Update Bill Status</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              {statusModalBill.resident?.name ?? 'Resident'} — ₹{statusModalBill.amount.toLocaleString('en-IN')}
+            </p>
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5 block">New Status</label>
+                <div className="flex gap-2">
+                  {(['PAID', 'WAIVED', 'PENDING'] as const).map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => setNewStatus(s)}
+                      className={cn(
+                        'px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors',
+                        newStatus === s
+                          ? 'bg-primary-500 border-primary-500 text-white'
+                          : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300',
+                      )}
+                    >
+                      {s === 'PAID' ? 'Paid' : s === 'WAIVED' ? 'Waived' : 'Pending'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5 block">
+                  Payment Method <span className="font-normal text-gray-400">(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-primary-400"
+                  placeholder="e.g. Cash, UPI, Bank Transfer…"
+                  value={paymentMethod}
+                  onChange={(e) => setPaymentMethod(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                className="px-4 py-2 rounded-xl text-sm font-medium border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors"
+                onClick={() => setStatusModalBill(null)}
+              >
+                Cancel
+              </button>
+              <button
+                className="px-4 py-2 rounded-xl text-sm font-medium bg-primary-600 hover:bg-primary-700 text-white transition-colors disabled:opacity-50"
+                disabled={updateStatusMutation.isPending}
+                onClick={() => updateStatusMutation.mutate({ id: statusModalBill.id, status: newStatus, pm: paymentMethod })}
+              >
+                {updateStatusMutation.isPending ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

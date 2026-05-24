@@ -190,6 +190,19 @@ export class VisitorService {
 
     this.assertQrGateEligible(visitor);
 
+    if (visitor.approvalStatus === 'PENDING') {
+      throw new ForbiddenException({
+        code: 'VISITOR_PENDING_APPROVAL',
+        message: 'Visitor entry requires admin approval before check-in',
+      });
+    }
+    if (visitor.approvalStatus === 'REJECTED') {
+      throw new ForbiddenException({
+        code: 'VISITOR_REJECTED',
+        message: 'This visitor entry was rejected',
+      });
+    }
+
     const updated = await this.prisma.visitor.update({
       where: { id: visitor.id },
       data: {

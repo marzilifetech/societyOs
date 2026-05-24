@@ -339,12 +339,15 @@ export class StaffService {
     const staffId = await this.resolveStaffId(userId);
     const sr = await this.prisma.serviceRequest.findUnique({ where: { id: requestId } });
     if (!sr) throw new NotFoundException('Service request not found');
-    if (sr.assignedToId && sr.assignedToId !== staffId) {
+    if (sr.assignedToIds?.length && !sr.assignedToIds.includes(staffId)) {
       throw new ForbiddenException('Not assigned to you');
     }
+    const assignedToIds = sr.assignedToIds?.includes(staffId)
+      ? sr.assignedToIds
+      : [...(sr.assignedToIds ?? []), staffId];
     return this.prisma.serviceRequest.update({
       where: { id: requestId },
-      data: { status: 'IN_PROGRESS', acceptedAt: new Date(), assignedToId: staffId },
+      data: { status: 'IN_PROGRESS', acceptedAt: new Date(), assignedToIds },
     });
   }
 
@@ -352,12 +355,12 @@ export class StaffService {
     const staffId = await this.resolveStaffId(userId);
     const sr = await this.prisma.serviceRequest.findUnique({ where: { id: requestId } });
     if (!sr) throw new NotFoundException('Service request not found');
-    if (sr.assignedToId && sr.assignedToId !== staffId) {
+    if (sr.assignedToIds?.length && !sr.assignedToIds.includes(staffId)) {
       throw new ForbiddenException('Not assigned to you');
     }
     const updated = await this.prisma.serviceRequest.update({
       where: { id: requestId },
-      data: { status: 'PENDING', rejectedReason: reason, assignedToId: null },
+      data: { status: 'PENDING', rejectedReason: reason, assignedToIds: [] },
     });
     this.realtime.emit(`society:${sr.societyId}:admin`, 'task:rejected', { requestId, reason, staffId });
     return updated;
@@ -397,7 +400,7 @@ export class StaffService {
   async getMyTaskHistory(userId: string, status?: string, page = 1, pageSize = 20) {
     const staffId = await this.resolveStaffId(userId);
     const skip = (page - 1) * pageSize;
-    const where: any = { assignedToId: staffId };
+    const where: any = { assignedToIds: { has: staffId } };
     if (status) where.status = status;
     const [items, total] = await Promise.all([
       this.prisma.serviceRequest.findMany({
@@ -528,11 +531,11 @@ export class StaffService {
     const [serviceRequests, reviews, attendance] = await Promise.all([
       this.prisma.serviceRequest.findMany({
         where: {
-          assignedToId: { in: staffIds },
+          assignedToIds: { hasSome: staffIds },
           status: 'COMPLETED',
           updatedAt: { gte: since },
         },
-        select: { assignedToId: true, resolvedAt: true, slaDeadline: true },
+        select: { assignedToIds: true, resolvedAt: true, slaDeadline: true },
       }),
       this.prisma.staffReview.findMany({
         where: { staffId: { in: staffIds }, createdAt: { gte: since } },
@@ -546,12 +549,14 @@ export class StaffService {
 
     const tasksByStaff = new Map<string, { count: number; onTime: number }>();
     for (const sr of serviceRequests) {
-      if (!sr.assignedToId) continue;
-      const cur = tasksByStaff.get(sr.assignedToId) ?? { count: 0, onTime: 0 };
-      cur.count += 1;
-      const completedOn = sr.resolvedAt ?? new Date();
-      if (!sr.slaDeadline || completedOn <= sr.slaDeadline) cur.onTime += 1;
-      tasksByStaff.set(sr.assignedToId, cur);
+      for (const staffId of sr.assignedToIds) {
+        if (!staffIds.includes(staffId)) continue;
+        const cur = tasksByStaff.get(staffId) ?? { count: 0, onTime: 0 };
+        cur.count += 1;
+        const completedOn = sr.resolvedAt ?? new Date();
+        if (!sr.slaDeadline || completedOn <= sr.slaDeadline) cur.onTime += 1;
+        tasksByStaff.set(staffId, cur);
+      }
     }
 
     const ratingsByStaff = new Map<string, { sum: number; n: number }>();

@@ -152,17 +152,26 @@ export class AdminService {
   async getResidents(societyId: string, managedBlocks?: string[]) {
     const blockWhere = managedBlocks?.length ? { flat: { block: { in: managedBlocks } } } : {};
     const residents = await this.prisma.resident.findMany({
-      where: { user: { societyId }, ...blockWhere },
+      where: { user: { societyId }, deletedAt: null, ...blockWhere },
       include: { user: true, flat: true },
       orderBy: { createdAt: 'desc' },
     });
     return residents.map((r) => ({
       id: r.id,
+      userId: r.userId,
       name: r.user.name,
       phone: r.user.phone,
       email: r.user.email,
       status: r.user.status,
+      type: r.type,
+      flat: r.flat ? { id: r.flat.id, block: r.flat.block, number: r.flat.number, floor: r.flat.floor } : null,
       unit: { flatNumber: r.flat?.number, tower: r.flat?.block },
+      moveInDate: r.moveInDate,
+      moveOutDate: r.moveOutDate,
+      dateOfBirth: (r as any).dateOfBirth ?? null,
+      roleNote: (r as any).roleNote ?? null,
+      appActivatedAt: (r as any).appActivatedAt ?? null,
+      emergencyContact: r.emergencyContact ?? null,
       createdAt: r.createdAt,
     }));
   }
@@ -232,8 +241,11 @@ export class AdminService {
       name: sm.user.name,
       phone: sm.user.phone,
       role: sm.designation,
+      designation: sm.designation,
+      department: sm.department ?? null,
       categories: sm.categories,
       joiningDate: sm.joiningDate,
+      leavingDate: sm.leavingDate ?? null,
       createdAt: sm.createdAt,
     }));
   }
@@ -255,17 +267,25 @@ export class AdminService {
       reason: leave.reason,
       status: leave.status,
       adminNote: leave.adminNote,
-      staff: { name: leave.staff.user.name, role: leave.staff.designation },
+      staff: { id: leave.staff.id, name: leave.staff.user.name, role: leave.staff.designation },
+      staffId: leave.staff.id,
       createdAt: leave.createdAt,
     }));
   }
 
   async approveLeave(leaveId: string, societyId: string, adminNote?: string) {
-    await requireLeavePendingInSociety(this.prisma, leaveId, societyId);
-    return this.prisma.leaveRequest.update({
+    const leave = await requireLeavePendingInSociety(this.prisma, leaveId, societyId);
+    const updated = await this.prisma.leaveRequest.update({
       where: { id: leaveId },
       data: { status: 'APPROVED', ...(adminNote ? { adminNote } : {}) },
     });
+
+    const resignationTypes = ['RESIGNATION', 'TERMINATION', 'EMERGENCY', 'LEAVE_REQUESTED'];
+    if (resignationTypes.includes(leave.type?.toUpperCase?.() ?? leave.type)) {
+      await this.dismissStaff(leave.staffId);
+    }
+
+    return updated;
   }
 
   async rejectLeave(leaveId: string, societyId: string, adminNote?: string) {
@@ -298,7 +318,10 @@ export class AdminService {
       purpose: v.purpose,
       vehicleNumber: v.vehicleNo,
       status: v.status === 'EXPECTED' ? 'PENDING' : v.status,
+      approvalStatus: v.approvalStatus,
+      validFrom: v.validFrom,
       validTill: v.validUntil,
+      qrToken: v.qrToken,
       checkedInAt: v.entryAt,
       checkedOutAt: v.exitAt,
       resident: {
@@ -399,7 +422,10 @@ export class AdminService {
           ? 'PAID'
           : bill.status === 'FAILED'
           ? 'OVERDUE'
+          : bill.status === 'WAIVED'
+          ? 'WAIVED'
           : 'PENDING',
+      paymentMethod: (bill as any).paymentMethod ?? null,
       resident: {
         name: bill.resident.user.name,
         unit: { flatNumber: bill.resident.flat?.number, tower: bill.resident.flat?.block },
@@ -829,30 +855,43 @@ async createStaff(
       phone: string;
       name: string;
       designation: string;
+      department?: string;
       categories: string[];
       salary?: number;
+      gender?: string;
+      dateOfBirth?: string;
     },
   ) {
     const existing = await this.prisma.user.findFirst({ where: { phone: dto.phone } });
-    
+
     if (existing) {
       const existingStaff = await this.prisma.staffMember.findUnique({ where: { userId: existing.id } });
       if (existingStaff) {
         throw new ConflictException('User is already a staff member');
+      }
+      if (dto.gender || dto.dateOfBirth) {
+        await this.prisma.user.update({
+          where: { id: existing.id },
+          data: {
+            ...(dto.gender ? { gender: dto.gender } : {}),
+            ...(dto.dateOfBirth ? { dateOfBirth: new Date(dto.dateOfBirth) } : {}),
+          } as any,
+        });
       }
       return this.prisma.staffMember.create({
         data: {
           userId: existing.id,
           societyId,
           designation: dto.designation,
+          department: dto.department,
           categories: dto.categories,
-          salaryStructure: dto.salary ? { base: dto.salary } as any : undefined,
+          salaryStructure: dto.salary ? { base: dto.salary } : undefined,
           joiningDate: new Date(),
         },
         include: { user: true },
       });
     }
-    
+
     const user = await this.prisma.user.create({
       data: {
         phone: dto.phone,
@@ -860,16 +899,19 @@ async createStaff(
         role: 'STAFF',
         status: 'ACTIVE',
         societyId,
-      },
+        ...(dto.gender ? { gender: dto.gender } : {}),
+        ...(dto.dateOfBirth ? { dateOfBirth: new Date(dto.dateOfBirth) } : {}),
+      } as any,
     });
-    
+
     return this.prisma.staffMember.create({
       data: {
         userId: user.id,
         societyId,
         designation: dto.designation,
+        department: dto.department,
         categories: dto.categories,
-        salaryStructure: dto.salary ? { base: dto.salary } as any : undefined,
+        salaryStructure: dto.salary ? { base: dto.salary } : undefined,
         joiningDate: new Date(),
       },
       include: { user: true },
@@ -899,7 +941,7 @@ async createStaff(
     
     await this.prisma.user.update({
       where: { id: staff.userId },
-      data: { status: 'INACTIVE' as any },
+      data: { status: UserStatus.INACTIVE },
     });
     
     return { success: true, message: 'Staff deactivated successfully' };
@@ -911,47 +953,158 @@ async createStaff(
       include: { user: true },
     });
     if (!staff) throw new NotFoundException('Staff member not found');
-    
+
+    const pendingLoansCount = await this.prisma.staffLoan.count({
+      where: { staffMemberId: staffId, status: 'PENDING' },
+    });
+
+    const user = staff.user;
     return {
       id: staff.id,
-      name: staff.user.name,
-      phone: staff.user.phone,
+      name: user.name,
+      phone: user.phone,
+      gender: (user as any).gender ?? null,
+      dateOfBirth: (user as any).dateOfBirth ?? null,
       role: staff.designation,
       designation: staff.designation,
+      department: staff.department ?? null,
       categories: staff.categories,
       salary: staff.salaryStructure && typeof staff.salaryStructure === 'object' ? (staff.salaryStructure as any).base : null,
       salaryStructure: staff.salaryStructure ?? null,
       joiningDate: staff.joiningDate,
+      leavingDate: staff.leavingDate ?? null,
+      familyDetails: staff.familyDetails ?? null,
+      emergencyContact: (staff as any).emergencyContact ?? null,
+      pendingLoansCount,
     };
   }
 
-  async updateStaff(staffId: string, body: { salaryStructure?: Record<string, any> }) {
+  async updateStaff(
+    staffId: string,
+    body: {
+      salaryStructure?: Record<string, any>;
+      department?: string;
+      designation?: string;
+      leavingDate?: string | null;
+      familyDetails?: any;
+      gender?: string;
+      dateOfBirth?: string | null;
+    },
+  ) {
     const staff = await this.prisma.staffMember.findUnique({ where: { id: staffId } });
     if (!staff) throw new NotFoundException('Staff member not found');
-    const data: any = {};
+    const staffData: any = {};
+    const userData: any = {};
+
     if (body.salaryStructure !== undefined) {
       const existing = (staff.salaryStructure && typeof staff.salaryStructure === 'object') ? staff.salaryStructure as Record<string, any> : {};
-      data.salaryStructure = { ...existing, ...body.salaryStructure };
+      staffData.salaryStructure = { ...existing, ...body.salaryStructure };
     }
-    return this.prisma.staffMember.update({ where: { id: staffId }, data });
+    if (body.department !== undefined) staffData.department = body.department;
+    if (body.designation !== undefined) staffData.designation = body.designation;
+    if (body.leavingDate !== undefined) staffData.leavingDate = body.leavingDate ? new Date(body.leavingDate) : null;
+    if (body.familyDetails !== undefined) staffData.familyDetails = body.familyDetails;
+    if (body.gender !== undefined) userData.gender = body.gender;
+    if (body.dateOfBirth !== undefined) userData.dateOfBirth = body.dateOfBirth ? new Date(body.dateOfBirth) : null;
+
+    if (Object.keys(userData).length > 0) {
+      await this.prisma.user.update({ where: { id: staff.userId }, data: userData });
+    }
+    return this.prisma.staffMember.update({ where: { id: staffId }, data: staffData, include: { user: true } });
   }
 
   async getStaffDocuments(staffId: string) {
     const staff = await this.prisma.staffMember.findUnique({ where: { id: staffId } });
     if (!staff) throw new NotFoundException('Staff member not found');
-    const docs: Array<{ type: string; url: string; status: string }> = [];
-    if (staff.salaryStructure && typeof staff.salaryStructure === 'object') {
-      const ss = staff.salaryStructure as Record<string, any>;
-      if (ss['idProofUrl']) docs.push({ type: 'ID_PROOF', url: ss['idProofUrl'], status: 'UPLOADED' });
-      if (ss['addressProofUrl']) docs.push({ type: 'ADDRESS_PROOF', url: ss['addressProofUrl'], status: 'UPLOADED' });
-    }
-    return docs;
+    // Return from the dedicated StaffDocument model
+    return this.prisma.staffDocument.findMany({
+      where: { staffMemberId: staffId },
+      orderBy: { uploadedAt: 'desc' },
+    });
+  }
+
+  async addStaffDocument(staffId: string, documentType: string, fileUrl: string) {
+    const staff = await this.prisma.staffMember.findUnique({ where: { id: staffId } });
+    if (!staff) throw new NotFoundException('Staff member not found');
+    return this.prisma.staffDocument.create({
+      data: { staffMemberId: staffId, documentType, fileUrl },
+    });
+  }
+
+  async dismissStaff(staffId: string) {
+    const staff = await this.prisma.staffMember.findUnique({ where: { id: staffId } });
+    if (!staff) throw new NotFoundException('Staff member not found');
+    const now = new Date();
+    await this.prisma.staffMember.update({
+      where: { id: staffId },
+      data: { leavingDate: now, deletedAt: now },
+    });
+    await this.prisma.user.update({ where: { id: staff.userId }, data: { status: 'SUSPENDED' } });
+    return { ok: true };
   }
 
   async getStaffSalarySlips(staffId: string) {
     return this.prisma.salarySlip.findMany({
       where: { staffId },
       orderBy: { period: 'desc' },
+    });
+  }
+
+  async getStaffLoans(staffId: string) {
+    const staff = await this.prisma.staffMember.findUnique({ where: { id: staffId } });
+    if (!staff) throw new NotFoundException('Staff member not found');
+    return this.prisma.staffLoan.findMany({
+      where: { staffMemberId: staffId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async createStaffLoan(staffId: string, amount: number, reason?: string, status?: string) {
+    const staff = await this.prisma.staffMember.findUnique({ where: { id: staffId } });
+    if (!staff) throw new NotFoundException('Staff member not found');
+    return this.prisma.staffLoan.create({
+      data: {
+        staffMemberId: staffId,
+        amount,
+        reason,
+        status: status ?? 'PENDING',
+      },
+    });
+  }
+
+  async approveVisitor(visitorId: string, societyId: string, adminUserId: string) {
+    const visitor = await this.prisma.visitor.findUnique({
+      where: { id: visitorId },
+      include: { resident: { include: { flat: true } } },
+    });
+    if (!visitor) throw new NotFoundException('Visitor not found');
+    if (visitor.resident.flat.societyId !== societyId) {
+      throw new ForbiddenException({ code: 'VISITOR_SOCIETY_MISMATCH', message: 'Visitor belongs to another society' });
+    }
+    return this.prisma.visitor.update({
+      where: { id: visitorId },
+      data: {
+        approvalStatus: 'APPROVED',
+        approvedById: adminUserId,
+        approvedAt: new Date(),
+      },
+    });
+  }
+
+  async rejectVisitor(visitorId: string, societyId: string) {
+    const visitor = await this.prisma.visitor.findUnique({
+      where: { id: visitorId },
+      include: { resident: { include: { flat: true } } },
+    });
+    if (!visitor) throw new NotFoundException('Visitor not found');
+    if (visitor.resident.flat.societyId !== societyId) {
+      throw new ForbiddenException({ code: 'VISITOR_SOCIETY_MISMATCH', message: 'Visitor belongs to another society' });
+    }
+    return this.prisma.visitor.update({
+      where: { id: visitorId },
+      data: {
+        approvalStatus: 'REJECTED',
+      },
     });
   }
 
@@ -1425,5 +1578,218 @@ async createStaff(
     }
     await this.prisma.user.delete({ where: { id: userId } });
     return { success: true };
+  }
+
+  // ── Resident CRUD ────────────────────────────────────────────────────────────
+
+  async getResidentDetail(societyId: string, residentId: string) {
+    const resident = await this.prisma.resident.findFirst({
+      where: { id: residentId, user: { societyId } },
+      include: { user: true, flat: true },
+    });
+    if (!resident) throw new NotFoundException('Resident not found');
+    return {
+      id: resident.id,
+      userId: resident.userId,
+      name: resident.user.name,
+      phone: resident.user.phone,
+      email: resident.user.email,
+      status: resident.user.status,
+      type: resident.type,
+      flat: resident.flat
+        ? { id: resident.flat.id, block: resident.flat.block, number: resident.flat.number, floor: resident.flat.floor }
+        : null,
+      moveInDate: resident.moveInDate,
+      moveOutDate: resident.moveOutDate,
+      dateOfBirth: (resident as any).dateOfBirth ?? null,
+      roleNote: (resident as any).roleNote ?? null,
+      appActivatedAt: (resident as any).appActivatedAt ?? null,
+      emergencyContact: resident.emergencyContact ?? null,
+      createdAt: resident.createdAt,
+    };
+  }
+
+  async updateResident(
+    residentId: string,
+    societyId: string,
+    body: {
+      dateOfBirth?: string | null;
+      roleNote?: string | null;
+      emergencyContact?: { name?: string; phone?: string } | null;
+    },
+  ) {
+    const resident = await this.prisma.resident.findFirst({
+      where: { id: residentId, user: { societyId } },
+    });
+    if (!resident) throw new NotFoundException('Resident not found');
+
+    const data: Record<string, unknown> = {};
+    if (body.dateOfBirth !== undefined) {
+      data.dateOfBirth = body.dateOfBirth ? new Date(body.dateOfBirth) : null;
+    }
+    if (body.roleNote !== undefined) data.roleNote = body.roleNote;
+    if (body.emergencyContact !== undefined) data.emergencyContact = body.emergencyContact;
+
+    await this.prisma.resident.update({ where: { id: residentId }, data: data as any });
+    return this.getResidentDetail(societyId, residentId);
+  }
+
+  async createResident(
+    societyId: string,
+    dto: { name: string; email?: string; phone: string; flatId: string; type: 'OWNER' | 'TENANT' },
+  ) {
+    const flat = await this.prisma.flat.findFirst({ where: { id: dto.flatId, societyId } });
+    if (!flat) throw new BadRequestException('Flat not found in this society');
+
+    const existing = await this.prisma.user.findFirst({ where: { phone: dto.phone, societyId } });
+    if (existing) throw new ConflictException('A user with this phone already exists in the society');
+
+    const user = await this.prisma.user.create({
+      data: {
+        phone: dto.phone,
+        name: dto.name,
+        email: dto.email,
+        role: UserRole.RESIDENT,
+        status: UserStatus.PENDING,
+        societyId,
+      },
+    });
+
+    const resident = await this.prisma.resident.create({
+      data: { userId: user.id, flatId: dto.flatId, type: dto.type as any },
+      include: { user: true, flat: true },
+    });
+
+    return {
+      id: resident.id,
+      userId: resident.userId,
+      name: resident.user.name,
+      phone: resident.user.phone,
+      email: resident.user.email,
+      status: resident.user.status,
+      type: resident.type,
+      flat: resident.flat ? { block: resident.flat.block, number: resident.flat.number } : null,
+      createdAt: resident.createdAt,
+    };
+  }
+
+  async dismissResident(residentId: string, societyId: string) {
+    const resident = await this.prisma.resident.findFirst({
+      where: { id: residentId, user: { societyId } },
+      include: { user: true },
+    });
+    if (!resident) throw new NotFoundException('Resident not found');
+
+    await this.prisma.resident.update({
+      where: { id: residentId },
+      data: { moveOutDate: new Date() },
+    });
+    await this.prisma.user.update({
+      where: { id: resident.userId },
+      data: { status: UserStatus.INACTIVE },
+    });
+    return { ok: true };
+  }
+
+  async deleteResident(residentId: string, societyId: string, actorRole: string) {
+    if (actorRole === UserRole.SUPER_ADMIN) {
+      throw new ForbiddenException('Super admins cannot delete residents');
+    }
+    const resident = await this.prisma.resident.findFirst({
+      where: { id: residentId, user: { societyId } },
+    });
+    if (!resident) throw new NotFoundException('Resident not found');
+
+    // Soft-delete
+    await this.prisma.resident.update({
+      where: { id: residentId },
+      data: { deletedAt: new Date() },
+    });
+    return { deleted: true };
+  }
+
+  async importResidentsCsv(societyId: string, csvText: string) {
+    const lines = csvText.split('\n').map((l) => l.trim()).filter(Boolean);
+    if (lines.length <= 1) throw new BadRequestException('CSV is empty or has only a header');
+
+    // Skip header row
+    const dataLines = lines.slice(1);
+    let created = 0;
+    let skipped = 0;
+    const errors: { row: number; reason: string }[] = [];
+
+    for (let i = 0; i < dataLines.length; i++) {
+      const row = dataLines[i];
+      const parts = row.split(',').map((p) => p.replace(/^"|"$/g, '').trim());
+      const [name, email, phone, flatNumber] = parts;
+
+      if (!name || !phone) {
+        errors.push({ row: i + 2, reason: 'Missing name or phone' });
+        continue;
+      }
+
+      try {
+        const existing = await this.prisma.user.findFirst({ where: { phone, societyId } });
+        if (existing) { skipped++; continue; }
+
+        const flat = flatNumber
+          ? await this.prisma.flat.findFirst({ where: { societyId, number: flatNumber } })
+          : null;
+
+        const user = await this.prisma.user.create({
+          data: {
+            phone,
+            name,
+            email: email || undefined,
+            role: UserRole.RESIDENT,
+            status: UserStatus.PENDING,
+            societyId,
+          },
+        });
+
+        if (flat) {
+          await this.prisma.resident.create({
+            data: { userId: user.id, flatId: flat.id, type: 'TENANT' as any },
+          });
+        }
+        created++;
+      } catch (err) {
+        errors.push({ row: i + 2, reason: (err as Error).message });
+      }
+    }
+
+    return { created, skipped, errors };
+  }
+
+  // ── Maintenance bill status update ─────────────────────────────────────────
+
+  async updateBillStatus(
+    billId: string,
+    societyId: string,
+    status: string,
+    paymentMethod?: string,
+  ) {
+    const normalizedStatus = status === 'PAID' ? 'SUCCESS' : status;
+    const allowed = ['PENDING', 'SUCCESS', 'WAIVED'];
+    if (!allowed.includes(normalizedStatus)) {
+      throw new BadRequestException(`Status must be one of: PENDING, SUCCESS (or PAID), WAIVED`);
+    }
+    const bill = await this.prisma.maintenanceBill.findUnique({
+      where: { id: billId },
+      include: { flat: true },
+    });
+    if (!bill) throw new NotFoundException('Bill not found');
+    if (bill.flat.societyId !== societyId) {
+      throw new ForbiddenException('Bill belongs to another society');
+    }
+
+    return this.prisma.maintenanceBill.update({
+      where: { id: billId },
+      data: {
+        status: normalizedStatus as any,
+        ...(paymentMethod !== undefined ? { paymentMethod } : {}),
+      },
+      include: { resident: { include: { user: true, flat: true } } },
+    });
   }
 }

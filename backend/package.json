@@ -10,6 +10,7 @@
     "lambda:smoke": "ts-node --transpile-only src/lambda/smoke.ts",
     "lint": "eslint \"{src,test}/**/*.ts\" --fix",
     "test": "jest",
+    "test:coverage:features": "jest --coverage --collectCoverageFrom='src/modules/service-request/service-request.service.ts' --collectCoverageFrom='src/modules/service-request/service-request-reminder.scheduler.ts' --collectCoverageFrom='src/modules/visitor/visitor.service.ts' --collectCoverageFrom='src/modules/admin/admin.service.ts' --collectCoverageFrom='src/modules/auth/auth.service.ts' --collectCoverageFrom='src/modules/notice/notice.service.ts' --collectCoverageFrom='src/common/notification/whatsapp.service.ts' --collectCoverageFrom='src/modules/help-request/help-request.service.ts'",
     "test:e2e": "jest --config test/jest-e2e.json",
     "postinstall": "prisma generate",
     "db:migrate": "prisma migrate dev",

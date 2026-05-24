@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsEnum, IsInt, Min, Max, IsArray, IsNumber, IsDateString, IsIn } from 'class-validator';
+import { IsString, IsOptional, IsEnum, IsInt, Min, Max, IsArray, IsNumber, IsDateString, IsIn, IsBoolean } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ServiceRequestStatus } from '@prisma/client';
 
@@ -15,6 +15,105 @@ export class CreateServiceRequestDto {
   @IsString()
   @IsOptional()
   preferredTime?: string;
+
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  tags?: string[];
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  isPaid?: boolean;
+
+  @ApiPropertyOptional({ description: 'Minutes before scheduledTime to send reminder' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  reminderMinutes?: number;
+
+  @ApiPropertyOptional({ description: 'ISO datetime for scheduled arrival' })
+  @IsOptional()
+  @IsDateString()
+  scheduledTime?: string;
+}
+
+export class AdminCreateServiceRequestDto {
+  @ApiProperty({ description: 'Resident ID (not user ID)' })
+  @IsString()
+  residentId: string;
+
+  @ApiProperty()
+  @IsString()
+  category: string;
+
+  @ApiProperty()
+  @IsString()
+  description: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsDateString()
+  scheduledTime?: string;
+
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  tags?: string[];
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  isPaid?: boolean;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  reminderMinutes?: number;
+}
+
+export class AdminUpdateServiceRequestDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  category?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsDateString()
+  scheduledTime?: string;
+
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  tags?: string[];
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  isPaid?: boolean;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  reminderMinutes?: number;
+}
+
+export class UpdateServiceRequestTagsDto {
+  @ApiProperty({ type: [String] })
+  @IsArray()
+  @IsString({ each: true })
+  tags: string[];
 }
 
 export class RaiseDisputeDto {
@@ -24,9 +123,16 @@ export class RaiseDisputeDto {
 }
 
 export class AssignWithScheduleDto {
-  @ApiProperty()
+  @ApiProperty({ description: 'Primary staff member ID (legacy single assign)' })
   @IsString()
-  staffId: string;
+  @IsOptional()
+  staffId?: string;
+
+  @ApiPropertyOptional({ type: [String], description: 'One or more staff member IDs' })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  staffIds?: string[];
 
   @ApiPropertyOptional({ description: 'ISO datetime when staff is scheduled to arrive' })
   @IsOptional()
@@ -38,6 +144,12 @@ export class UpdateServiceRequestStatusDto {
   @ApiProperty({ enum: ServiceRequestStatus })
   @IsEnum(ServiceRequestStatus)
   status: ServiceRequestStatus;
+
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  assignedToIds?: string[];
 
   @ApiPropertyOptional()
   @IsString()

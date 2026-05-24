@@ -58,7 +58,7 @@ export class HelpRequestService {
     const staffId = await this.resolveStaffId(userId);
     return this.prisma.serviceRequest.findMany({
       where: {
-        assignedToId: staffId,
+        assignedToIds: { has: staffId },
         category: { in: HELP_CATEGORIES },
       },
       include: { resident: { include: { user: true, flat: true } } },
@@ -84,7 +84,7 @@ export class HelpRequestService {
       where: { id: requestId },
       include: { resident: { include: { user: true, flat: true } } },
     });
-    if (!sr || sr.assignedToId !== staffId) {
+    if (!sr || !sr.assignedToIds.includes(staffId)) {
       throw new NotFoundException('Help request not found');
     }
     return sr;
@@ -96,7 +96,7 @@ export class HelpRequestService {
     if (!sr) throw new NotFoundException('Help request not found');
     return this.prisma.serviceRequest.update({
       where: { id: requestId },
-      data: { status: 'ASSIGNED', assignedToId: staffId, acceptedAt: new Date() },
+      data: { status: 'ASSIGNED', assignedToIds: [staffId], acceptedAt: new Date() },
     });
   }
 
@@ -108,7 +108,7 @@ export class HelpRequestService {
     const staffId = await this.resolveStaffId(userId);
     const sr = await this.prisma.serviceRequest.findUnique({ where: { id: requestId } });
     if (!sr) throw new NotFoundException('Help request not found');
-    if (sr.assignedToId && sr.assignedToId !== staffId) {
+    if (sr.assignedToIds?.length && !sr.assignedToIds.includes(staffId)) {
       throw new NotFoundException('Help request not found');
     }
     const data: any = { status };

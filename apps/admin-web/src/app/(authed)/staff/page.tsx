@@ -4,11 +4,141 @@ import { Fragment, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, HardHat, CalendarDays } from 'lucide-react';
+import { Plus, HardHat, CalendarDays, DollarSign } from 'lucide-react';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { ErrorState } from '@/components/ui/ErrorState';
 import type { StaffUser, LeaveRequest, LeaveStatus } from '@societyos/api-client';
+
+type StaffLoan = {
+  id: string;
+  amount: string | number;
+  reason?: string | null;
+  status: string;
+  createdAt: string;
+};
+
+const LOAN_STATUS_COLORS: Record<string, string> = {
+  PENDING: 'bg-amber-100 text-amber-700',
+  APPROVED: 'bg-green-100 text-green-700',
+  REJECTED: 'bg-red-100 text-red-700',
+  REPAID: 'bg-gray-100 text-gray-600',
+};
+
+function StaffLoansSection({ staffId }: { staffId: string }) {
+  const qc = useQueryClient();
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ amount: '', reason: '' });
+
+  const { data: loans, isLoading } = useQuery({
+    queryKey: ['admin-staff-loans', staffId],
+    queryFn: () => api.get<StaffLoan[]>(`/admin/staff/${staffId}/loans`),
+  });
+
+  const createMutation = useMutation({
+    mutationFn: (data: { amount: number; reason?: string }) =>
+      api.post(`/admin/staff/${staffId}/loans`, data),
+    onSuccess: () => {
+      toast.success('Loan recorded');
+      qc.invalidateQueries({ queryKey: ['admin-staff-loans', staffId] });
+      setShowForm(false);
+      setForm({ amount: '', reason: '' });
+    },
+    onError: (err: any) => toast.error(err?.message ?? 'Failed to record loan'),
+  });
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const amt = parseFloat(form.amount);
+    if (!amt || amt <= 0) { toast.error('Enter a valid amount'); return; }
+    createMutation.mutate({ amount: amt, reason: form.reason || undefined });
+  }
+
+  return (
+    <div className="mt-4 border-t border-gray-100 pt-4">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <DollarSign className="w-3.5 h-3.5 text-gray-400" />
+          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Loans</span>
+          {loans?.length ? (
+            <span className="bg-amber-100 text-amber-700 text-xs font-semibold px-1.5 py-0.5 rounded-full">
+              {loans.length}
+            </span>
+          ) : null}
+        </div>
+        <button
+          onClick={() => setShowForm((v) => !v)}
+          className="text-xs text-primary-600 hover:text-primary-700 font-medium"
+        >
+          {showForm ? 'Cancel' : '+ Record Loan'}
+        </button>
+      </div>
+
+      {showForm && (
+        <form onSubmit={handleSubmit} className="flex gap-2 mb-3 flex-wrap">
+          <input
+            type="number"
+            min="1"
+            step="0.01"
+            placeholder="Amount (₹)"
+            className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:border-primary-400 w-32"
+            value={form.amount}
+            onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))}
+          />
+          <input
+            type="text"
+            placeholder="Reason (optional)"
+            className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:border-primary-400 flex-1 min-w-32"
+            value={form.reason}
+            onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))}
+          />
+          <button
+            type="submit"
+            disabled={createMutation.isPending}
+            className="bg-primary-500 hover:bg-primary-600 text-white text-xs px-3 py-1.5 rounded-lg disabled:opacity-50"
+          >
+            Save
+          </button>
+        </form>
+      )}
+
+      {isLoading ? (
+        <p className="text-xs text-gray-400">Loading loans…</p>
+      ) : !loans?.length ? (
+        <p className="text-xs text-gray-400">No loans recorded</p>
+      ) : (
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-gray-400">
+              <th className="text-left pb-1 font-medium">Date</th>
+              <th className="text-left pb-1 font-medium">Amount</th>
+              <th className="text-left pb-1 font-medium">Reason</th>
+              <th className="text-left pb-1 font-medium">Status</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-50">
+            {loans.map((loan) => (
+              <tr key={loan.id}>
+                <td className="py-1 pr-4 text-gray-500">
+                  {new Date(loan.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                </td>
+                <td className="py-1 pr-4 font-semibold text-gray-800">
+                  ₹{Number(loan.amount).toLocaleString('en-IN')}
+                </td>
+                <td className="py-1 pr-4 text-gray-500">{loan.reason ?? '—'}</td>
+                <td className="py-1">
+                  <span className={cn('px-2 py-0.5 rounded-full font-medium', LOAN_STATUS_COLORS[loan.status] ?? 'bg-gray-100 text-gray-600')}>
+                    {loan.status}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
 
 const DEPT_COLORS: Record<string, string> = {
   SECURITY: 'bg-blue-100 text-blue-700',
@@ -31,8 +161,10 @@ type LeaveWithStaff = LeaveRequest & { staff?: Pick<StaffUser, 'name' | 'role'> 
 
 type StaffDetail = StaffUser & {
   designation?: string;
+  department?: string | null;
   categories?: string[];
   joiningDate?: string;
+  leavingDate?: string | null;
   salary?: number;
 };
 
@@ -88,6 +220,7 @@ function StaffDrawer({ staffId }: { staffId: string }) {
             <p className="text-gray-900">{data?.salary != null ? `₹${data.salary.toLocaleString('en-IN')}` : '—'}</p>
           </div>
         </div>
+        <StaffLoansSection staffId={staffId} />
       </td>
     </tr>
   );
@@ -295,25 +428,36 @@ export default function StaffPage() {
               {staff.map((s) => (
                 <Fragment key={s.id}>
                   <tr
-                    className="hover:bg-gray-50 cursor-pointer"
+                    className={cn('hover:bg-gray-50 cursor-pointer', s.leavingDate ? 'opacity-60' : '')}
                     onClick={() => handleRowClick(s.id)}
                   >
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-primary-100 flex items-center justify-center shrink-0">
-                          <span className="text-primary-600 text-xs font-semibold">
+                        <div className={cn('w-8 h-8 rounded-full flex items-center justify-center shrink-0', s.leavingDate ? 'bg-gray-100' : 'bg-primary-100')}>
+                          <span className={cn('text-xs font-semibold', s.leavingDate ? 'text-gray-400' : 'text-primary-600')}>
                             {s.name?.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
                           </span>
                         </div>
-                        <span className="text-sm font-medium text-gray-900">{s.name}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium text-gray-900">{s.name}</span>
+                          {s.leavingDate && (
+                            <span className="text-xs bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded-full font-medium">Ex-Staff</span>
+                          )}
+                        </div>
                       </div>
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600">{s.phone}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{s.role}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600">{s.designation || s.role}</td>
                     <td className="px-4 py-3 text-sm text-gray-600">
-                      <span className={cn('inline-block px-2 py-0.5 rounded-full text-xs', DEPT_COLORS[s.categories?.[0] ?? ''] ?? 'bg-gray-100 text-gray-600')}>
-                        {s.categories?.join(', ') || '-'}
-                      </span>
+                      {s.department ? (
+                        <span className={cn('inline-block px-2 py-0.5 rounded-full text-xs', DEPT_COLORS[s.department] ?? 'bg-gray-100 text-gray-600')}>
+                          {s.department}
+                        </span>
+                      ) : s.categories?.length ? (
+                        <span className={cn('inline-block px-2 py-0.5 rounded-full text-xs', DEPT_COLORS[s.categories[0]] ?? 'bg-gray-100 text-gray-600')}>
+                          {s.categories.join(', ')}
+                        </span>
+                      ) : '-'}
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-400">
                       {s.joiningDate
