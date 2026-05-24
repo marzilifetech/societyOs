@@ -9,6 +9,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { S3Service } from '../../common/storage/s3.service';
 import { RealtimeGateway } from '../../common/realtime/realtime.gateway';
 import { requireLeavePendingInSociety } from '../../common/utils/leave-admin.util';
+import { VisitorService } from '../visitor/visitor.service';
+import type { StaffMember } from '@prisma/client';
 
 const LEAVE_ENTITLEMENTS: Record<string, number> = {
   CASUAL: 12,
@@ -25,6 +27,7 @@ export class StaffService {
     private prisma: PrismaService,
     private s3: S3Service,
     private realtime: RealtimeGateway,
+    private visitorService: VisitorService,
   ) {}
 
   private async resolveStaffId(userId: string): Promise<string> {
@@ -742,5 +745,42 @@ export class StaffService {
       geofence: (staff.society as any).geofence,
       geofenceRadius: (staff.society as any).geofenceRadius,
     };
+  }
+
+  /** Gate/security staff: categories or department includes SECURITY. */
+  isSecurityStaff(staff: Pick<StaffMember, 'categories' | 'department'>): boolean {
+    const dept = staff.department?.toUpperCase() ?? '';
+    if (dept === 'SECURITY') return true;
+    return staff.categories.some((c) => c.toUpperCase() === 'SECURITY');
+  }
+
+  private async requireSecurityStaff(userId: string) {
+    const staff = await this.prisma.staffMember.findUnique({ where: { userId } });
+    if (!staff) throw new NotFoundException('Staff profile not found');
+    if (!this.isSecurityStaff(staff)) {
+      throw new ForbiddenException({
+        code: 'SECURITY_STAFF_ONLY',
+        message: 'Only security staff can manage visitor approvals',
+      });
+    }
+    return staff;
+  }
+
+  async getVisitorsForGate(userId: string, societyId: string, approvalStatus?: string) {
+    await this.requireSecurityStaff(userId);
+    return this.visitorService.listForSociety(societyId, {
+      approvalStatus,
+      date: 'today',
+    });
+  }
+
+  async approveVisitorAsSecurity(userId: string, societyId: string, visitorId: string) {
+    await this.requireSecurityStaff(userId);
+    return this.visitorService.approveVisitor(visitorId, societyId, userId);
+  }
+
+  async rejectVisitorAsSecurity(userId: string, societyId: string, visitorId: string) {
+    await this.requireSecurityStaff(userId);
+    return this.visitorService.rejectVisitor(visitorId, societyId);
   }
 }

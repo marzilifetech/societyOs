@@ -302,4 +302,36 @@ export class StaffController {
   ) {
     return this.staffService.registerDevice(user.sub, body.token, body.platform);
   }
+
+  // ─── Visitor gate (security staff) ─────────────────────────
+
+  @Get('visitors')
+  @Roles(UserRole.STAFF)
+  getVisitorsForGate(
+    @CurrentUser() user: JwtPayload,
+    @SocietyId() societyId: string,
+    @Query('approvalStatus') approvalStatus?: string,
+  ) {
+    return this.staffService.getVisitorsForGate(user.sub, societyId, approvalStatus);
+  }
+
+  @Patch('visitors/:id/approve')
+  @Roles(UserRole.STAFF)
+  approveVisitor(
+    @CurrentUser() user: JwtPayload,
+    @SocietyId() societyId: string,
+    @Param('id') id: string,
+  ) {
+    return this.staffService.approveVisitorAsSecurity(user.sub, societyId, id);
+  }
+
+  @Patch('visitors/:id/reject')
+  @Roles(UserRole.STAFF)
+  rejectVisitor(
+    @CurrentUser() user: JwtPayload,
+    @SocietyId() societyId: string,
+    @Param('id') id: string,
+  ) {
+    return this.staffService.rejectVisitorAsSecurity(user.sub, societyId, id);
+  }
 }

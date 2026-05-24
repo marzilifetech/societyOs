@@ -252,6 +252,83 @@ export class VisitorService {
     });
   }
 
+  async listForSociety(
+    societyId: string,
+    opts?: { approvalStatus?: string; date?: string },
+  ) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const visitors = await this.prisma.visitor.findMany({
+      where: {
+        resident: { flat: { societyId } },
+        ...(opts?.approvalStatus ? { approvalStatus: opts.approvalStatus } : {}),
+        ...(opts?.date === 'today' ? { createdAt: { gte: today } } : {}),
+      },
+      include: { resident: { include: { user: true, flat: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+
+    return visitors.map((v) => ({
+      id: v.id,
+      name: v.name,
+      phone: v.phone,
+      purpose: v.purpose,
+      vehicleNumber: v.vehicleNo,
+      status: v.status === 'EXPECTED' ? 'PENDING' : v.status,
+      approvalStatus: v.approvalStatus,
+      validFrom: v.validFrom,
+      validTill: v.validUntil,
+      qrToken: v.qrToken,
+      checkedInAt: v.entryAt,
+      checkedOutAt: v.exitAt,
+      resident: {
+        name: v.resident.user.name,
+        unit: { flatNumber: v.resident.flat?.number, tower: v.resident.flat?.block },
+      },
+      createdAt: v.createdAt,
+    }));
+  }
+
+  async approveVisitor(visitorId: string, societyId: string, approverUserId: string) {
+    const visitor = await this.prisma.visitor.findUnique({
+      where: { id: visitorId },
+      include: { resident: { include: { flat: true } } },
+    });
+    if (!visitor) {
+      throw new NotFoundException({ code: 'VISITOR_NOT_FOUND', message: 'Visitor not found' });
+    }
+    this.assertSameSociety(visitor, societyId);
+
+    return this.prisma.visitor.update({
+      where: { id: visitorId },
+      data: {
+        approvalStatus: 'APPROVED',
+        approvedById: approverUserId,
+        approvedAt: new Date(),
+      },
+      include: { resident: { include: { user: true, flat: true } } },
+    });
+  }
+
+  async rejectVisitor(visitorId: string, societyId: string) {
+    const visitor = await this.prisma.visitor.findUnique({
+      where: { id: visitorId },
+      include: { resident: { include: { flat: true } } },
+    });
+    if (!visitor) {
+      throw new NotFoundException({ code: 'VISITOR_NOT_FOUND', message: 'Visitor not found' });
+    }
+    this.assertSameSociety(visitor, societyId);
+
+    return this.prisma.visitor.update({
+      where: { id: visitorId },
+      data: { approvalStatus: 'REJECTED' },
+      include: { resident: { include: { user: true, flat: true } } },
+    });
+  }
+
   async deny(visitorId: string, societyId: string, userId?: string) {
     const existing = await this.findById(visitorId, societyId, userId);
     if (existing.status === VisitorStatus.DENIED) {

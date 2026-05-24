@@ -3,21 +3,28 @@ import { View, Text, TouchableOpacity, Alert, ActivityIndicator } from 'react-na
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Camera, CameraView } from 'expo-camera';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { api } from '../../src/lib/api';
 
 type Visitor = {
-  id?: string;
-  visitorName: string;
-  unitNo?: string;
-  flatNumber?: string;
-  visitPurpose?: string;
-  expiresAt?: string;
+  id: string;
+  name: string;
+  purpose?: string;
+  approvalStatus?: string;
   status?: string;
+  validUntil?: string;
+  resident?: { flat?: { number?: string; block?: string } };
 };
 
+function flatLabel(visitor: Visitor): string {
+  const flat = visitor.resident?.flat;
+  if (!flat) return '—';
+  return [flat.block, flat.number].filter(Boolean).join('-') || '—';
+}
+
 export default function QrScanScreen() {
+  const qc = useQueryClient();
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [scanned, setScanned] = useState(false);
   const [visitor, setVisitor] = useState<Visitor | null>(null);
@@ -41,6 +48,36 @@ export default function QrScanScreen() {
       ]);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
     },
+  });
+
+  const approve = useMutation({
+    mutationFn: (id: string) => api.patch(`/staff/visitors/${id}/approve`, {}),
+    onSuccess: (data) => {
+      setVisitor(data as Visitor);
+      qc.invalidateQueries({ queryKey: ['staff-visitors-pending'] });
+      qc.invalidateQueries({ queryKey: ['staff-visitors-pending-count'] });
+      Alert.alert('Approved', 'Visitor can now be checked in.');
+    },
+    onError: (err: any) => Alert.alert('Could not approve', err?.message ?? 'Try again'),
+  });
+
+  const reject = useMutation({
+    mutationFn: (id: string) => api.patch(`/staff/visitors/${id}/reject`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['staff-visitors-pending'] });
+      qc.invalidateQueries({ queryKey: ['staff-visitors-pending-count'] });
+      Alert.alert('Rejected', undefined, [
+        {
+          text: 'OK',
+          onPress: () => {
+            setScanned(false);
+            setVisitor(null);
+            setToken(null);
+          },
+        },
+      ]);
+    },
+    onError: (err: any) => Alert.alert('Could not reject', err?.message ?? 'Try again'),
   });
 
   const decision = useMutation({
@@ -71,6 +108,12 @@ export default function QrScanScreen() {
     lookup.mutate(data);
   };
 
+  const resetScan = () => {
+    setScanned(false);
+    setVisitor(null);
+    setToken(null);
+  };
+
   if (hasPermission === null) {
     return (
       <SafeAreaView className="flex-1 bg-black items-center justify-center">
@@ -99,62 +142,96 @@ export default function QrScanScreen() {
     );
   }
 
-  // Visitor decision screen after a successful scan + lookup.
   if (visitor) {
+    const pendingApproval = visitor.approvalStatus === 'PENDING';
+    const rejected = visitor.approvalStatus === 'REJECTED';
+    const busy = approve.isPending || reject.isPending || decision.isPending;
+
     return (
       <SafeAreaView className="flex-1 bg-gray-900">
         <View className="flex-1 px-6 pt-12">
           <Text className="text-white text-2xl font-bold mb-1">Visitor Details</Text>
-          <Text className="text-gray-400 text-sm mb-8">Verify before allowing entry.</Text>
+          <Text className="text-gray-400 text-sm mb-8">
+            {pendingApproval ? 'Approve before allowing entry.' : 'Verify before allowing entry.'}
+          </Text>
 
           <View className="bg-white rounded-3xl p-6 shadow-lg">
             <Text className="text-xs text-gray-400">NAME</Text>
-            <Text className="text-2xl font-bold text-gray-900 mb-4">{visitor.visitorName}</Text>
+            <Text className="text-2xl font-bold text-gray-900 mb-4">{visitor.name}</Text>
 
-            <DetailRow label="Flat" value={visitor.flatNumber ?? visitor.unitNo ?? '—'} />
-            {visitor.visitPurpose && <DetailRow label="Purpose" value={visitor.visitPurpose} />}
-            {visitor.expiresAt && (
+            <DetailRow label="Flat" value={flatLabel(visitor)} />
+            {visitor.purpose && <DetailRow label="Purpose" value={visitor.purpose} />}
+            {visitor.validUntil && (
               <DetailRow
                 label="Expires"
-                value={new Date(visitor.expiresAt).toLocaleString('en-IN')}
+                value={new Date(visitor.validUntil).toLocaleString('en-IN')}
               />
             )}
-            {visitor.status && <DetailRow label="Status" value={visitor.status} />}
+            {visitor.status && <DetailRow label="Visit status" value={visitor.status} />}
+            {visitor.approvalStatus && (
+              <DetailRow label="Approval" value={visitor.approvalStatus} />
+            )}
           </View>
 
-          <View className="flex-row gap-3 mt-8">
-            <TouchableOpacity
-              className="flex-1 bg-red-500 rounded-2xl py-4 items-center"
-              onPress={() => decision.mutate({ allow: false })}
-              disabled={decision.isPending}
-            >
-              {decision.isPending ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text className="text-white font-bold">Deny</Text>
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity
-              className="flex-1 bg-green-500 rounded-2xl py-4 items-center"
-              onPress={() => decision.mutate({ allow: true })}
-              disabled={decision.isPending}
-            >
-              {decision.isPending ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text className="text-white font-bold">Allow Entry</Text>
-              )}
-            </TouchableOpacity>
-          </View>
+          {pendingApproval ? (
+            <View className="flex-row gap-3 mt-8">
+              <TouchableOpacity
+                className="flex-1 bg-red-500 rounded-2xl py-4 items-center"
+                onPress={() => reject.mutate(visitor.id)}
+                disabled={busy}
+              >
+                {reject.isPending ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text className="text-white font-bold">Reject</Text>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                className="flex-1 bg-amber-500 rounded-2xl py-4 items-center"
+                onPress={() => approve.mutate(visitor.id)}
+                disabled={busy}
+              >
+                {approve.isPending ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text className="text-white font-bold">Approve</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          ) : rejected ? (
+            <View className="mt-8 bg-red-900/40 rounded-2xl p-4">
+              <Text className="text-red-200 text-center text-sm">
+                This visitor was rejected and cannot enter.
+              </Text>
+            </View>
+          ) : (
+            <View className="flex-row gap-3 mt-8">
+              <TouchableOpacity
+                className="flex-1 bg-red-500 rounded-2xl py-4 items-center"
+                onPress={() => decision.mutate({ allow: false })}
+                disabled={busy}
+              >
+                {decision.isPending ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text className="text-white font-bold">Deny</Text>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                className="flex-1 bg-green-500 rounded-2xl py-4 items-center"
+                onPress={() => decision.mutate({ allow: true })}
+                disabled={busy}
+              >
+                {decision.isPending ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text className="text-white font-bold">Allow Entry</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          )}
 
-          <TouchableOpacity
-            className="mt-6 self-center"
-            onPress={() => {
-              setScanned(false);
-              setVisitor(null);
-              setToken(null);
-            }}
-          >
+          <TouchableOpacity className="mt-6 self-center" onPress={resetScan}>
             <Text className="text-gray-400 text-sm">Scan another</Text>
           </TouchableOpacity>
         </View>
