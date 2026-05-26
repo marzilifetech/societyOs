@@ -7,10 +7,4 @@
 society-dev.marzitech.in {
 	reverse_proxy backend:3000
 	encode gzip
-
-	# Health probe stays cheap and unlogged.
-	@health path /v1/health
-	log {
-		output stdout
-	}
 }

@@ -45,12 +45,12 @@ variable "lightsail_blueprint_id" {
 
 variable "lightsail_bundle_id" {
   description = <<-EOT
-    Lightsail instance size:
-      small_3_0  = 2 GB RAM / 2 vCPU  (~$12/mo) — recommended (backend + Redis + Caddy)
-      micro_3_0  = 1 GB RAM / 2 vCPU  (~$7/mo)  — tight, only if cost is critical
+    Lightsail instance size (ap-south-1 bundle IDs):
+      small_3_1  = 2 GB RAM / 2 vCPU  (~$12/mo) — recommended (backend + Redis + Caddy)
+      micro_3_1  = 1 GB RAM / 2 vCPU  (~$7/mo)  — tight, only if cost is critical
   EOT
   type        = string
-  default     = "small_3_0"
+  default     = "small_3_1"
 }
 
 variable "rds_endpoint" {
@@ -63,4 +63,30 @@ variable "marzi_tenant_name" {
   description = "White-label tenant name on the external Marzi auth backend (dev.marzitech.in)."
   type        = string
   default     = "Marzi"
+}
+
+# ── Amplify (admin web) ─────────────────────────────────────────────────────
+
+variable "github_repo_url" {
+  description = "GitHub repository Amplify builds the admin web app from."
+  type        = string
+  default     = "https://github.com/marzilifetech/societyOs"
+}
+
+variable "github_access_token" {
+  description = "GitHub token for Amplify to connect the repo — set in terraform.tfvars."
+  type        = string
+  sensitive   = true
+}
+
+variable "amplify_branch" {
+  description = "Branch Amplify auto-deploys for the admin web app."
+  type        = string
+  default     = "main"
+}
+
+variable "society_id" {
+  description = "Seeded society UUID — exposed to the admin web build."
+  type        = string
+  default     = "a1b2c3d4-e5f6-4789-abcd-ef0123456789"
 }

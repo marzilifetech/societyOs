@@ -6,7 +6,9 @@
 #  updates. The application itself (docker-compose.yml, Caddyfile, .env) is
 #  delivered in the separate deploy step — see infra/README.md.
 # ════════════════════════════════════════════════════════════════════════════
-set -euxo pipefail
+# POSIX-sh safe — Lightsail runs the launch script with /bin/sh, which has no
+# `pipefail`. `set -eux` works under both sh and bash.
+set -eux
 
 export DEBIAN_FRONTEND=noninteractive
 

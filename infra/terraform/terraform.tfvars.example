@@ -6,6 +6,12 @@ aws_profile = "marzi"
 environment = "dev"
 
 # Lightsail instance size:
-#   small_3_0  → 2 GB RAM / 2 vCPU  (~$12/mo) — recommended
-#   micro_3_0  → 1 GB RAM / 2 vCPU  (~$7/mo)  — tight, only if cost is critical
-lightsail_bundle_id = "small_3_0"
+#   small_3_1  → 2 GB RAM / 2 vCPU  (~$12/mo) — recommended
+#   micro_3_1  → 1 GB RAM / 2 vCPU  (~$7/mo)  — tight, only if cost is critical
+lightsail_bundle_id = "small_3_1"
+
+# Amplify → GitHub. The token is SENSITIVE — put the real value in
+# terraform.tfvars (gitignored), never in this example file.
+github_repo_url     = "https://github.com/marzilifetech/societyOs"
+amplify_branch      = "main"
+# github_access_token = "github_pat_xxxxxxxx"   # required — set in terraform.tfvars

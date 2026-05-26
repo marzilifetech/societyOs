@@ -16,6 +16,10 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.6"
     }
+    local = {
+      source  = "hashicorp/local"
+      version = "~> 2.5"
+    }
   }
   # State is stored locally (terraform.tfstate). Zero cost, fine for a single
   # operator. Move to an S3 backend later if the team needs shared state.
@@ -38,6 +42,19 @@ provider "aws" {
   }
 }
 
+# ── SSH key pair ────────────────────────────────────────────────────────────
+# Terraform generates the key pair and writes the private key locally (gitignored
+# via *.pem) so the deploy script can SSH in. No console download needed.
+resource "aws_lightsail_key_pair" "backend" {
+  name = "societyos-${var.environment}-key"
+}
+
+resource "local_file" "ssh_key" {
+  content         = aws_lightsail_key_pair.backend.private_key
+  filename        = "${path.module}/societyos-${var.environment}.pem"
+  file_permission = "0600"
+}
+
 # ── Compute: one Lightsail instance (VPS) ───────────────────────────────────
 # Runs the backend + Redis + Caddy as Docker containers (docker-compose). A
 # single fixed instance — no autoscaling. cloud-init.sh installs Docker on the
@@ -47,6 +64,7 @@ resource "aws_lightsail_instance" "backend" {
   availability_zone = "${var.aws_region}a"
   blueprint_id      = var.lightsail_blueprint_id # Ubuntu 22.04
   bundle_id         = var.lightsail_bundle_id    # size → RAM / vCPU / price
+  key_pair_name     = aws_lightsail_key_pair.backend.name
   user_data         = file("${path.module}/../instance/cloud-init.sh")
 
   tags = { Component = "backend" }
@@ -62,6 +80,11 @@ resource "aws_lightsail_static_ip" "backend" {
 resource "aws_lightsail_static_ip_attachment" "backend" {
   static_ip_name = aws_lightsail_static_ip.backend.name
   instance_name  = aws_lightsail_instance.backend.name
+
+  # If the instance is ever replaced, re-attach the static IP automatically.
+  lifecycle {
+    replace_triggered_by = [aws_lightsail_instance.backend.id]
+  }
 }
 
 # ── Instance firewall ───────────────────────────────────────────────────────
