@@ -1,8 +1,17 @@
 import type { Metadata } from 'next';
+import { Plus_Jakarta_Sans } from 'next/font/google';
 import './globals.css';
 import { Providers } from './providers';
 import { OfflineBanner } from '@/components/ui/OfflineBanner';
 import { ToastProvider } from '@/components/ui/ToastProvider';
+
+// F3: refreshed sans face — Plus Jakarta Sans has the same weight range as
+// Inter but a more contemporary feel, matching the rebrand on mobile apps.
+const jakarta = Plus_Jakarta_Sans({
+  subsets: ['latin'],
+  display: 'swap',
+  variable: '--font-sans',
+});
 
 export const metadata: Metadata = {
   title: 'SocietyOS Admin',
@@ -11,8 +20,8 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body className="bg-gray-50 text-gray-900 antialiased">
+    <html lang="en" className={jakarta.variable}>
+      <body className={`${jakarta.className} bg-gray-50 text-gray-900 antialiased`}>
         <OfflineBanner />
         <Providers>{children}</Providers>
         <ToastProvider />

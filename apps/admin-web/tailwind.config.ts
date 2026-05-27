@@ -20,7 +20,9 @@ const config: Config = {
         },
       },
       fontFamily: {
-        sans: ['Inter', 'sans-serif'],
+        // F3: Plus Jakarta Sans via next/font; falls back to the system stack
+        // when the variable is unavailable (e.g. early server render).
+        sans: ['var(--font-sans)', 'Plus Jakarta Sans', 'Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
       },
       animation: {
         'fade-up': 'fade-up 0.3s ease-out',
