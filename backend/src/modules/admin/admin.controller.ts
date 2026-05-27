@@ -8,6 +8,13 @@ import {
   AdminUpdateServiceRequestDto,
   UpdateServiceRequestTagsDto,
 } from '../service-request/dto/service-request.dto';
+import {
+  AddSosRecipientDto,
+  CreateSocietyDto,
+  CreateStaffDto,
+  SendPushNotificationDto,
+  UpdateSocietyDto,
+} from './dto/admin.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -47,20 +54,7 @@ export class AdminController {
   }
 
   @Patch('society')
-  updateSociety(
-    @SocietyId() societyId: string,
-    @Body()
-    dto: {
-      name?: string;
-      address?: string;
-      city?: string;
-      pincode?: string;
-      contactEmail?: string;
-      contactPhone?: string;
-      showInDirectory?: boolean;
-      config?: Record<string, unknown>;
-    },
-  ) {
+  updateSociety(@SocietyId() societyId: string, @Body() dto: UpdateSocietyDto) {
     return this.adminService.updateSociety(societyId, dto);
   }
 
@@ -78,6 +72,17 @@ export class AdminController {
       societyId,
       days ? parseInt(days, 10) : undefined,
     );
+  }
+
+  // F6: birthdays widget for the dashboard. `?on=today` is the only mode
+  // wired today; the param exists so we can extend to ?on=YYYY-MM-DD later
+  // without breaking the contract.
+  @Get('dashboard/birthdays')
+  getBirthdays(
+    @SocietyId() societyId: string,
+    @Query('on') on?: string,
+  ) {
+    return this.adminService.getBirthdays(societyId, on ?? 'today');
   }
 
   @Get('residents/pending')
@@ -135,20 +140,7 @@ export class AdminController {
 
   @Post('staff')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  createStaff(
-    @SocietyId() societyId: string,
-    @Body() dto: {
-      phone: string;
-      name: string;
-      designation: string;
-      department?: string;
-      categories: string[];
-      salary?: number;
-      gender?: string;
-      dateOfBirth?: string;
-      emergencyContact?: { name: string; phone: string; relation?: string };
-    },
-  ) {
+  createStaff(@SocietyId() societyId: string, @Body() dto: CreateStaffDto) {
     return this.adminService.createStaff(societyId, dto);
   }
 
@@ -176,13 +168,23 @@ export class AdminController {
     return this.adminService.importStaffCsv(societyId, csv, false);
   }
 
+  // C3: cross-tenant transfer is a SUPER_ADMIN action. Regular ADMINs can
+  // never reach into another society's staff roster.
   @Patch('staff/:id/transfer')
-  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  @Roles(UserRole.SUPER_ADMIN)
   transferStaff(
     @Param('id') id: string,
+    @SocietyId() societyId: string,
+    @CurrentUser() user: JwtPayload,
     @Body() dto: { toSocietyId: string; reason?: string },
   ) {
-    return this.adminService.transferStaff(id, dto.toSocietyId, dto.reason);
+    return this.adminService.transferStaff(
+      id,
+      societyId,
+      dto.toSocietyId,
+      { id: user.sub, role: user.role },
+      dto.reason,
+    );
   }
 
   @Patch('staff/:id/deactivate')
@@ -504,14 +506,7 @@ export class AdminController {
   @Post('notifications/push')
   sendPushNotification(
     @SocietyId() societyId: string,
-    @Body()
-    dto: {
-      title: string;
-      body: string;
-      targetType: 'ALL' | 'FLAT' | 'BLOCK' | 'INDIVIDUAL';
-      targetIds?: string[];
-      scheduledAt?: string;
-    },
+    @Body() dto: SendPushNotificationDto,
   ) {
     return this.adminService.sendPushNotification(societyId, dto);
   }
@@ -524,10 +519,7 @@ export class AdminController {
   }
 
   @Post('sos/recipients')
-  addSosRecipient(
-    @SocietyId() societyId: string,
-    @Body() dto: { name: string; phone: string; email?: string; role?: string },
-  ) {
+  addSosRecipient(@SocietyId() societyId: string, @Body() dto: AddSosRecipientDto) {
     return this.adminService.addSosRecipient(societyId, dto);
   }
 
@@ -622,10 +614,17 @@ export class AdminController {
   updateBillStatus(
     @SocietyId() societyId: string,
     @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
     @Body('status') status: string,
     @Body('paymentMethod') paymentMethod?: string,
   ) {
-    return this.adminService.updateBillStatus(id, societyId, status, paymentMethod);
+    return this.adminService.updateBillStatus(
+      id,
+      societyId,
+      status,
+      { id: user.sub, role: user.role },
+      paymentMethod,
+    );
   }
 
   // ── Building Admins ──────────────────────────────────────────────────────────
@@ -637,31 +636,28 @@ export class AdminController {
   listSocieties(
     @Query('search') search?: string,
     @Query('includeArchived') includeArchived?: string,
+    @Query('status') status?: string,
   ) {
+    const allowed = ['ACTIVE', 'SUSPENDED', 'ARCHIVED'] as const;
+    const statusFilter = allowed.includes(status as any)
+      ? (status as 'ACTIVE' | 'SUSPENDED' | 'ARCHIVED')
+      : undefined;
     return this.adminService.listAllSocieties({
       search,
       includeArchived: includeArchived === 'true',
+      status: statusFilter,
     });
+  }
+
+  @Get('platform/stats')
+  @Roles(UserRole.SUPER_ADMIN)
+  getPlatformStats() {
+    return this.adminService.getPlatformStats();
   }
 
   @Post('societies')
   @Roles(UserRole.SUPER_ADMIN)
-  createSociety(
-    @Body()
-    dto: {
-      name: string;
-      address: string;
-      city: string;
-      pincode: string;
-      showInDirectory?: boolean;
-      adminName: string;
-      adminPhone: string;
-      adminEmail?: string;
-      config?: Record<string, unknown>;
-      flatsCsv?: string;
-      residentsCsv?: string;
-    },
-  ) {
+  createSociety(@Body() dto: CreateSocietyDto) {
     return this.adminService.createSociety(dto);
   }
 
@@ -682,6 +678,8 @@ export class AdminController {
       city?: string;
       pincode?: string;
       showInDirectory?: boolean;
+      contactEmail?: string | null;
+      contactPhone?: string | null;
       config?: Record<string, unknown>;
     },
   ) {
@@ -690,14 +688,30 @@ export class AdminController {
 
   @Delete('societies/:id')
   @Roles(UserRole.SUPER_ADMIN)
-  archiveSociety(@Param('id') id: string) {
-    return this.adminService.archiveSociety(id);
+  archiveSociety(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.adminService.archiveSociety(id, user.sub);
   }
 
   @Patch('societies/:id/restore')
   @Roles(UserRole.SUPER_ADMIN)
-  restoreSociety(@Param('id') id: string) {
-    return this.adminService.restoreSociety(id);
+  restoreSociety(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.adminService.restoreSociety(id, user.sub);
+  }
+
+  @Patch('societies/:id/suspend')
+  @Roles(UserRole.SUPER_ADMIN)
+  suspendSociety(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @Body() body: { reason?: string },
+  ) {
+    return this.adminService.suspendSociety(id, user.sub, body?.reason);
+  }
+
+  @Patch('societies/:id/resume')
+  @Roles(UserRole.SUPER_ADMIN)
+  resumeSociety(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.adminService.resumeSociety(id, user.sub);
   }
 
   // ── Flats / structure ────────────────────────────────────────────────────────
