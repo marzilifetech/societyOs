@@ -473,7 +473,9 @@ model Resident {
   moveInDate      DateTime?
   moveOutDate     DateTime?
   aadhaar         Bytes?
+  aadhaarUrl      String?
   panNumber       String?
+  panUrl          String?
   idProof         String?
   addressProof    String?
   documentsStatus DocumentStatus @default(PENDING)
