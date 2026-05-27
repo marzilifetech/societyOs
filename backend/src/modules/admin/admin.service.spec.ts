@@ -435,9 +435,10 @@ describe('AdminService', () => {
   });
 
   describe('getStaffDetail', () => {
-    it('returns pendingLoansCount', async () => {
+    it('returns pendingLoansCount for same-society staff', async () => {
       mockPrisma.staffMember.findUnique.mockResolvedValue({
         id: 'sm-1',
+        societyId: 'soc-1',
         designation: 'Plumber',
         department: 'MAINTENANCE',
         categories: [],
@@ -449,9 +450,21 @@ describe('AdminService', () => {
       });
       mockPrisma.staffLoan.count.mockResolvedValue(3);
 
-      const result = await service.getStaffDetail('sm-1');
+      const result = await service.getStaffDetail('sm-1', 'soc-1');
 
       expect(result.pendingLoansCount).toBe(3);
+    });
+
+    it('rejects cross-tenant access with CROSS_TENANT_ACCESS', async () => {
+      mockPrisma.staffMember.findUnique.mockResolvedValue({
+        id: 'sm-1',
+        societyId: 'soc-other',
+        designation: 'Plumber',
+        user: { name: 'X', phone: '1' },
+      });
+      await expect(service.getStaffDetail('sm-1', 'soc-1')).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'CROSS_TENANT_ACCESS' }),
+      });
     });
   });
 
@@ -520,10 +533,10 @@ describe('AdminService', () => {
   });
 
   describe('deactivateStaff', () => {
-    it('sets user status INACTIVE', async () => {
-      mockPrisma.staffMember.findUnique.mockResolvedValue({ id: 'sm-1', userId: 'u1' });
+    it('sets user status INACTIVE for same-society staff', async () => {
+      mockPrisma.staffMember.findUnique.mockResolvedValue({ id: 'sm-1', userId: 'u1', societyId: 'soc-1' });
       mockPrisma.user.update.mockResolvedValue({});
-      const result = await service.deactivateStaff('sm-1');
+      const result = await service.deactivateStaff('sm-1', 'soc-1');
       expect(result.success).toBe(true);
       expect(mockPrisma.user.update).toHaveBeenCalledWith({
         where: { id: 'u1' },

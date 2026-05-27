@@ -199,13 +199,20 @@ export class NoticeService {
     });
   }
 
-  async togglePin(id: string, societyId: string) {
+  /**
+   * Explicit pin (always sets isPinned=true). Symmetric with unpinNotice
+   * (which sets false). The earlier `togglePin` flipped state on each call,
+   * which is racy when two admins click simultaneously: both see "unpinned"
+   * → both toggle to "pinned" → second click silently no-ops. Explicit
+   * set-true / set-false keeps the result deterministic regardless of order.
+   */
+  async pinNotice(id: string, societyId: string) {
     const notice = await this.prisma.notice.findUnique({ where: { id } });
     if (!notice) throw new NotFoundException('Notice not found');
     if (notice.societyId !== societyId) throw new ForbiddenException('Notice belongs to another society');
     return this.prisma.notice.update({
       where: { id },
-      data: { isPinned: !notice.isPinned },
+      data: { isPinned: true },
     });
   }
 

@@ -189,14 +189,14 @@ export class AdminController {
 
   @Patch('staff/:id/deactivate')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  deactivateStaff(@Param('id') id: string) {
-    return this.adminService.deactivateStaff(id);
+  deactivateStaff(@Param('id') id: string, @SocietyId() societyId: string) {
+    return this.adminService.deactivateStaff(id, societyId);
   }
 
   @Get('staff/:id')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  getStaffDetail(@Param('id') id: string) {
-    return this.adminService.getStaffDetail(id);
+  getStaffDetail(@Param('id') id: string, @SocietyId() societyId: string) {
+    return this.adminService.getStaffDetail(id, societyId);
   }
 
   @Get('staff/:id/attendance')

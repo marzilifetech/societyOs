@@ -1078,24 +1078,34 @@ async createStaff(
     return { success: true, message: 'Staff transferred successfully' };
   }
 
-  async deactivateStaff(staffId: string) {
+  async deactivateStaff(staffId: string, societyId: string) {
+    // Tenant scope: prisma.staffMember.findUnique is NOT auto-scoped by the
+    // tenant extension (it skips findUnique/update/delete). Caller passes
+    // their own societyId; we reject any staff record from a different one.
     const staff = await this.prisma.staffMember.findUnique({ where: { id: staffId } });
     if (!staff) throw new NotFoundException('Staff member not found');
-    
+    if (staff.societyId !== societyId) {
+      throw new ForbiddenException({ code: 'CROSS_TENANT_ACCESS' });
+    }
+
     await this.prisma.user.update({
       where: { id: staff.userId },
       data: { status: UserStatus.INACTIVE },
     });
-    
+
     return { success: true, message: 'Staff deactivated successfully' };
   }
 
-  async getStaffDetail(staffId: string) {
+  async getStaffDetail(staffId: string, societyId: string) {
+    // Tenant scope — see deactivateStaff for the rationale.
     const staff = await this.prisma.staffMember.findUnique({
       where: { id: staffId },
       include: { user: true },
     });
     if (!staff) throw new NotFoundException('Staff member not found');
+    if (staff.societyId !== societyId) {
+      throw new ForbiddenException({ code: 'CROSS_TENANT_ACCESS' });
+    }
 
     const pendingLoansCount = await this.prisma.staffLoan.count({
       where: { staffMemberId: staffId, status: 'PENDING' },

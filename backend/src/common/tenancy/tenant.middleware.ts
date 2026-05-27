@@ -56,6 +56,13 @@ export class TenantMiddleware implements NestMiddleware {
     // Super-admin tenant override — requires a verified one-shot re-auth
     // token. Consumed on first read so it cannot be replayed for a second
     // switch in the same session.
+    //
+    // Burn-order safety: we only consume the reauth jti AFTER the bearer
+    // token has been signature-verified here. If the bearer is invalid
+    // (expired / forged / wrong secret), the request would fail at the
+    // JwtAuthGuard anyway — burning the reauth token in that case wastes
+    // the user's TOTP/OTP entry. Re-verifying the bearer here is cheap and
+    // defends against that footgun.
     const switchHeader = req.header('x-society-id');
     if (switchHeader && ctx.role === 'SUPER_ADMIN' && switchHeader !== ctx.societyId) {
       const reauthHeader = req.header('x-reauth-token');
@@ -64,6 +71,17 @@ export class TenantMiddleware implements NestMiddleware {
           code: 'REAUTH_REQUIRED',
           message:
             'Super-admin tenant switch requires a fresh X-ReAuth-Token (POST /auth/reauth)',
+        });
+      }
+      // Cheap defense: signature-verify the bearer before burning the reauth.
+      const bearerOk = this.verifyBearer(req.header('authorization'));
+      if (!bearerOk) {
+        // Let the JwtAuthGuard surface the real error — but DO NOT burn the
+        // reauth token because the request will fail downstream anyway.
+        throw new BadRequestException({
+          code: 'REAUTH_REQUIRES_VALID_BEARER',
+          message:
+            'A tenant switch needs both a valid access token and a fresh re-auth token. Please sign in again.',
         });
       }
       const ok = await this.consumeReauthToken(reauthHeader, ctx.userId);
@@ -79,6 +97,23 @@ export class TenantMiddleware implements NestMiddleware {
     }
 
     tenantStorage.run(ctx, () => next());
+  }
+
+  /**
+   * Signature-verify the bearer access token. Returns true iff it verifies
+   * cleanly. We only use this in the reauth gate above — JwtAuthGuard does
+   * the same verification later for the actual route, so this is purely a
+   * pre-flight check to avoid burning the reauth jti when the bearer is bad.
+   */
+  private verifyBearer(authHeader: string | undefined): boolean {
+    if (!authHeader?.startsWith('Bearer ') || !this.jwt || !this.config) return false;
+    try {
+      const token = authHeader.slice(7);
+      const payload: any = this.jwt.verify(token, { secret: this.config.get('JWT_SECRET') });
+      return !!payload && typeof payload === 'object';
+    } catch {
+      return false;
+    }
   }
 
   /**

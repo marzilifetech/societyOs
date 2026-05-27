@@ -59,8 +59,8 @@ export class NoticeController {
 
   @Patch(':id/pin')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  togglePinNotice(@Param('id', ParseUUIDPipe) id: string, @SocietyId() societyId: string) {
-    return this.noticeService.togglePin(id, societyId);
+  pinNotice(@Param('id', ParseUUIDPipe) id: string, @SocietyId() societyId: string) {
+    return this.noticeService.pinNotice(id, societyId);
   }
 
   @Post('broadcast')

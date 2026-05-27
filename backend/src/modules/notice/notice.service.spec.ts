@@ -88,8 +88,8 @@ describe('NoticeService', () => {
     });
   });
 
-  describe('togglePin', () => {
-    it('flips the isPinned flag for a notice in the same society', async () => {
+  describe('pinNotice', () => {
+    it('sets isPinned=true (idempotent, never toggles) on a same-society notice', async () => {
       mockPrisma.notice.findUnique.mockResolvedValue({
         id: 'notice-1',
         societyId: 'society-1',
@@ -97,13 +97,23 @@ describe('NoticeService', () => {
       });
       mockPrisma.notice.update.mockResolvedValue({ id: 'notice-1', isPinned: true });
 
-      const result = await service.togglePin('notice-1', 'society-1');
+      const result = await service.pinNotice('notice-1', 'society-1');
 
       expect(result.isPinned).toBe(true);
       expect(mockPrisma.notice.update).toHaveBeenCalledWith({
         where: { id: 'notice-1' },
         data: { isPinned: true },
       });
+    });
+
+    it('rejects cross-society pin attempts with ForbiddenException', async () => {
+      mockPrisma.notice.findUnique.mockResolvedValue({
+        id: 'notice-2',
+        societyId: 'other-society',
+        isPinned: false,
+      });
+      await expect(service.pinNotice('notice-2', 'society-1')).rejects.toThrow(/another society/);
+      expect(mockPrisma.notice.update).not.toHaveBeenCalled();
     });
   });
 
