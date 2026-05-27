@@ -11,23 +11,40 @@ interface AdminUser {
 
 interface AuthState {
   token: string | null;
+  refreshToken: string | null;
   user: AdminUser | null;
-  setAuth: (token: string, user: AdminUser) => void;
+  setAuth: (token: string, refreshToken: string, user: AdminUser) => void;
+  setTokens: (token: string, refreshToken: string) => void;
   clearAuth: () => void;
 }
+
+// Persistent localStorage keys consumed by `lib/api.ts` — kept in sync here
+// so a fresh login wires up both access AND refresh tokens. Without the
+// refresh token, any 401 (or token expiry past 15 min) immediately bounces
+// the user back to /login because client.ts:tryRefresh has no token to use.
+const ACCESS_KEY = 'admin_token';
+const REFRESH_KEY = 'admin_refresh_token';
 
 export const useAuthStore = create<AuthState>()(
   persist(
     (set) => ({
       token: null,
+      refreshToken: null,
       user: null,
-      setAuth: (token, user) => {
-        localStorage.setItem('admin_token', token);
-        set({ token, user });
+      setAuth: (token, refreshToken, user) => {
+        localStorage.setItem(ACCESS_KEY, token);
+        localStorage.setItem(REFRESH_KEY, refreshToken);
+        set({ token, refreshToken, user });
+      },
+      setTokens: (token, refreshToken) => {
+        localStorage.setItem(ACCESS_KEY, token);
+        localStorage.setItem(REFRESH_KEY, refreshToken);
+        set({ token, refreshToken });
       },
       clearAuth: () => {
-        localStorage.removeItem('admin_token');
-        set({ token: null, user: null });
+        localStorage.removeItem(ACCESS_KEY);
+        localStorage.removeItem(REFRESH_KEY);
+        set({ token: null, refreshToken: null, user: null });
       },
     }),
     { name: 'admin-auth' },

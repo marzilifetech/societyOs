@@ -46,6 +46,26 @@ const REFRESHABLE_CODES = new Set([
   'REAUTH_REQUIRES_VALID_BEARER',
 ]);
 
+/**
+ * 401 codes that are TERMINAL — the session is definitively gone and no
+ * refresh attempt can recover it. Anything else on a 401 (including the
+ * generic `UNAUTHORIZED` produced by passport-jwt rejections, or a missing
+ * code entirely) should attempt a silent refresh ONCE before bouncing the
+ * user out. Without this, every transient bearer hiccup — clock skew, a
+ * stale token loaded from localStorage one tick before a fresh one — would
+ * dump the user back to /login with their refresh token unused.
+ */
+const TERMINAL_401_CODES = new Set([
+  'USER_REVOKED',
+  'TOKEN_REVOKED',
+  'INVALID_REFRESH',
+  'REFRESH_REUSE_DETECTED',
+  'ACCOUNT_SUSPENDED',
+  'SOCIETY_SUSPENDED',
+  'SOCIETY_ARCHIVED',
+  'SESSION_TIMEOUT',
+]);
+
 export class ApiClient {
   private config: ApiClientConfig;
   /** In-flight refresh promise — concurrent 401s share a single refresh call. */
@@ -126,14 +146,21 @@ export class ApiClient {
   }
 
   private async request<T>(method: string, path: string, body?: unknown, _retried = false): Promise<T> {
-    // /auth/* routes are PUBLIC — sending stale Authorization or
-    // X-Society-Id / X-ReAuth-Token headers can trip the backend's
-    // tenant-switch reauth gate, returning 400 REAUTH_REQUIRED. The
-    // refresh-retry path then fires for what is in fact the login
-    // call, the refresh fails (we're not logged in), onUnauthorized()
-    // hard-reloads /login, and the user is stuck in a refresh loop.
-    // Strip credentials entirely for auth routes.
-    const isAuthRoute = path.startsWith('/auth/');
+    // Only the PUBLIC auth routes are credential-stripped. Sending stale
+    // Authorization or X-Society-Id / X-ReAuth-Token headers to send-otp /
+    // verify-otp / refresh trips the backend's tenant-switch reauth gate,
+    // returning 400 REAUTH_REQUIRED → infinite refresh loop on the login
+    // page itself. The OTHER /auth/* routes (me, reauth, logout) REQUIRE a
+    // bearer and must NOT be filtered — stripping credentials there turns
+    // a normal dashboard load into a forced sign-out (the very bug we just
+    // fixed: /auth/me fired by SocietySwitcher returned 401 in 0ms with no
+    // bearer, friendlyError hard-redirected to /login).
+    const PUBLIC_AUTH_PATHS = new Set([
+      '/auth/send-otp',
+      '/auth/verify-otp',
+      '/auth/refresh',
+    ]);
+    const isAuthRoute = PUBLIC_AUTH_PATHS.has(path);
     const token = isAuthRoute ? null : this.config.getToken();
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -196,11 +223,18 @@ export class ApiClient {
         throw e;
       }
 
-      // 401 default = try refresh; 400 only when the code is one we recognise
-      // as auth-related (don't refresh on every random 400!).
+      // 401 default = try refresh, EXCEPT for known-terminal codes (revoked
+      // user, suspended society, reused refresh, etc.) where refresh cannot
+      // possibly succeed. The generic `UNAUTHORIZED` code emitted by the
+      // backend's exception filter for a passport-rejected bearer falls
+      // through to "refresh" — that is the path a routinely-expired token
+      // takes and the user must NOT be bounced to /login for it.
+      //
+      // 400 only refreshes when the code is explicitly REFRESHABLE — don't
+      // refresh on every random 400.
       const isAuth4xx =
         res.status === 401
-          ? code === undefined || REFRESHABLE_CODES.has(code)
+          ? !code || !TERMINAL_401_CODES.has(code)
           : !!code && REFRESHABLE_CODES.has(code);
 
       const canRefresh =

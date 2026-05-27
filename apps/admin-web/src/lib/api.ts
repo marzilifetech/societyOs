@@ -25,6 +25,8 @@ function friendlyError(status: number, serverMsg?: string, serverCode?: string):
       typeof window !== 'undefined' && window.location.pathname.startsWith('/login');
     if (!onLoginPage && typeof window !== 'undefined') {
       localStorage.removeItem('auth-storage');
+      localStorage.removeItem('admin_token');
+      localStorage.removeItem('admin_refresh_token');
       window.location.href = '/login?reason=session-expired';
       return new Error('Your session has ended. Please sign in again.');
     }
@@ -150,6 +152,24 @@ export const api = new AdminApiClient({
     if (typeof window === 'undefined') return null;
     return localStorage.getItem('admin_token');
   },
+  // Wire refresh-token rotation so a stale access token does NOT immediately
+  // log the user out. Without these two callbacks, client.ts:tryRefresh
+  // early-returns null and fires onUnauthorized() → /login bounce. The keys
+  // here must stay in sync with auth.store.ts (ACCESS_KEY, REFRESH_KEY).
+  getRefreshToken: () => {
+    if (typeof window === 'undefined') return null;
+    return localStorage.getItem('admin_refresh_token');
+  },
+  setTokens: (pair) => {
+    if (typeof window === 'undefined') return;
+    if (pair === null) {
+      localStorage.removeItem('admin_token');
+      localStorage.removeItem('admin_refresh_token');
+      return;
+    }
+    localStorage.setItem('admin_token', pair.accessToken);
+    localStorage.setItem('admin_refresh_token', pair.refreshToken);
+  },
   getExtraHeaders: () => {
     if (typeof window === 'undefined') return {};
     const societyId = localStorage.getItem('admin_selected_society_id');
@@ -171,6 +191,8 @@ export const api = new AdminApiClient({
   onUnauthorized: () => {
     if (typeof window !== 'undefined') {
       localStorage.removeItem('auth-storage');
+      localStorage.removeItem('admin_token');
+      localStorage.removeItem('admin_refresh_token');
       window.location.href = '/login?reason=session-expired';
     }
   },

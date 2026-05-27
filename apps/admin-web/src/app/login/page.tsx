@@ -78,6 +78,7 @@ function LoginPageInner() {
     if (typeof window === 'undefined') return;
     try {
       localStorage.removeItem('admin_token');
+      localStorage.removeItem('admin_refresh_token');
       localStorage.removeItem('admin_selected_society_id');
       localStorage.removeItem('auth-storage');
       sessionStorage.removeItem('admin_reauth_token');
@@ -145,13 +146,17 @@ function LoginPageInner() {
         throw new Error('Access denied — this console is for society admins only.');
       }
 
-      setAuth(res.accessToken, {
-        id: res.user.id,
-        name: res.user.name ?? '',
-        phone: res.user.phone,
-        role: res.user.role,
-        societyId: res.user.societyId ?? SOCIETY_ID,
-      });
+      setAuth(
+        res.accessToken,
+        res.refreshToken,
+        {
+          id: res.user.id,
+          name: res.user.name ?? '',
+          phone: res.user.phone,
+          role: res.user.role,
+          societyId: res.user.societyId ?? SOCIETY_ID,
+        },
+      );
       router.push('/dashboard');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sign-in failed.');
@@ -181,13 +186,17 @@ function LoginPageInner() {
       if (res.user.role !== 'ADMIN' && res.user.role !== 'SUPER_ADMIN') {
         throw new Error('Access denied — this console is for society admins only.');
       }
-      setAuth(res.accessToken, {
-        id: res.user.id,
-        name: res.user.name ?? '',
-        phone: res.user.phone,
-        role: res.user.role,
-        societyId: res.user.societyId ?? totpPending.societyId,
-      });
+      setAuth(
+        res.accessToken,
+        res.refreshToken,
+        {
+          id: res.user.id,
+          name: res.user.name ?? '',
+          phone: res.user.phone,
+          role: res.user.role,
+          societyId: res.user.societyId ?? totpPending.societyId,
+        },
+      );
       router.push('/dashboard');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Invalid code.');

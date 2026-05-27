@@ -38,8 +38,11 @@ echo "→ [4/5] Building image"
 ssh "${SSHOPT[@]}" "ubuntu@$IP" 'cd /opt/societyos && docker compose build backend'
 
 echo "→ [5/5] Applying schema + starting"
+# --accept-data-loss is fine for dev/staging (seed data is disposable). Replace
+# with `prisma migrate deploy` once a clean migration baseline is in place —
+# see infra/DEPLOY.md §6.
 ssh "${SSHOPT[@]}" "ubuntu@$IP" \
-  'cd /opt/societyos && docker compose run --rm backend pnpm exec prisma db push && docker compose up -d'
+  'cd /opt/societyos && docker compose run --rm backend pnpm exec prisma db push --accept-data-loss && docker compose up -d'
 
 rm -f backend.env   # don't leave secrets on the operator's disk
 echo "✓ Deployed → https://society-dev.marzitech.in   (allow Caddy ~30s for the TLS cert)"
