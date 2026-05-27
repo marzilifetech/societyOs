@@ -365,23 +365,19 @@ export default function MaintenancePage() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
-                        {b.status !== 'PAID' && b.status !== 'WAIVED' && (
-                          <button
-                            className="text-xs bg-primary-50 hover:bg-primary-100 text-primary-700 px-2.5 py-1 rounded-lg transition-colors border border-primary-200 font-medium"
-                            onClick={() => openStatusModal(b)}
-                          >
-                            Update Status
-                          </button>
-                        )}
-                        {b.status !== 'PAID' && (
-                          <button
-                            className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-2.5 py-1 rounded-lg transition-colors disabled:opacity-50"
-                            disabled={sendReminderMutation.isPending}
-                            onClick={() => sendReminderMutation.mutate(b.id)}
-                          >
-                            Send Reminder
-                          </button>
-                        )}
+                        <button
+                          className="text-xs bg-primary-50 hover:bg-primary-100 text-primary-700 px-2.5 py-1 rounded-lg transition-colors border border-primary-200 font-medium"
+                          onClick={() => openStatusModal(b)}
+                        >
+                          Update Status
+                        </button>
+                        <button
+                          className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-2.5 py-1 rounded-lg transition-colors disabled:opacity-50"
+                          disabled={sendReminderMutation.isPending}
+                          onClick={() => sendReminderMutation.mutate(b.id)}
+                        >
+                          Send Reminder
+                        </button>
                       </div>
                     </td>
                   </tr>

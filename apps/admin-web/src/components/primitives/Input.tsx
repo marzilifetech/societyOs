@@ -26,7 +26,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
           'w-full h-9 rounded-lg border bg-white text-sm text-gray-900 placeholder:text-gray-400',
           'px-3 outline-none transition-colors',
           'focus:ring-4 disabled:bg-gray-50 disabled:text-gray-500',
-          leadingIcon && 'pl-8',
+          !!leadingIcon && 'pl-8',
           ring,
           className,
         )}
