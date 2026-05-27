@@ -38,8 +38,12 @@ export class LaundryController {
 
   @Patch('bookings/:id/cancel')
   @Roles(UserRole.RESIDENT)
-  cancelBooking(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
-    return this.laundryService.cancelBooking(user.sub, id);
+  cancelBooking(
+    @CurrentUser() user: JwtPayload,
+    @SocietyId() societyId: string,
+    @Param('id') id: string,
+  ) {
+    return this.laundryService.cancelBooking(user.sub, id, societyId);
   }
 
   @Get('/admin/laundry/bookings')
@@ -50,25 +54,33 @@ export class LaundryController {
 
   @Patch('/admin/laundry/bookings/:id/status')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  updateStatus(@Param('id') id: string, @Body() body: { status: LaundryBookingStatus }) {
-    return this.laundryService.updateStatus(id, body.status);
+  updateStatus(
+    @Param('id') id: string,
+    @SocietyId() societyId: string,
+    @Body() body: { status: LaundryBookingStatus },
+  ) {
+    return this.laundryService.updateStatus(id, societyId, body.status);
   }
 
   @Get(':id')
   @Roles(UserRole.RESIDENT, UserRole.STAFF, UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  getBookingById(@Param('id') id: string) {
-    return this.laundryService.getBookingById(id);
+  getBookingById(@Param('id') id: string, @SocietyId() societyId: string) {
+    return this.laundryService.getBookingById(id, societyId);
   }
 
   @Patch(':id/pickup')
   @Roles(UserRole.STAFF, UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  markPickedUp(@Param('id') id: string) {
-    return this.laundryService.markPickedUp(id);
+  markPickedUp(@Param('id') id: string, @SocietyId() societyId: string) {
+    return this.laundryService.markPickedUp(id, societyId);
   }
 
   @Get(':id/photo-upload-url')
   @Roles(UserRole.STAFF, UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  getPhotoUploadUrl(@Param('id') id: string, @Query('contentType') contentType?: string) {
-    return this.laundryService.getPhotoUploadUrl(id, contentType);
+  getPhotoUploadUrl(
+    @Param('id') id: string,
+    @SocietyId() societyId: string,
+    @Query('contentType') contentType?: string,
+  ) {
+    return this.laundryService.getPhotoUploadUrl(id, societyId, contentType);
   }
 }

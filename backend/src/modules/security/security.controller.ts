@@ -44,9 +44,10 @@ export class SecurityController {
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   updateIncident(
     @Param('id') id: string,
+    @SocietyId() societyId: string,
     @Body() dto: { status?: string; resolution?: string },
   ) {
-    return this.securityService.updateIncident(id, dto);
+    return this.securityService.updateIncident(id, societyId, dto);
   }
 
   // --- Rounds ---
@@ -61,10 +62,11 @@ export class SecurityController {
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.STAFF)
   completeRound(
     @Param('id') id: string,
+    @SocietyId() societyId: string,
     @CurrentUser() user: JwtPayload,
     @Body() dto: { notes?: string },
   ) {
-    return this.securityService.completeRound(id, user.sub, dto.notes);
+    return this.securityService.completeRound(id, societyId, user.sub, dto.notes);
   }
 
   @Get('rounds')

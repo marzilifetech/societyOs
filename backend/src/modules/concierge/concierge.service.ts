@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { RateConciergeDto } from './dto/concierge.dto';
 import { PrismaService } from '../../prisma/prisma.service';
+import { requireOwnedById } from '../../common/tenancy/require-owned.util';
 
 @Injectable()
 export class ConciergeService {
@@ -24,10 +25,13 @@ export class ConciergeService {
     });
   }
 
-  async cancelRequest(userId: string, id: string) {
+  async cancelRequest(userId: string, id: string, societyId: string) {
     const resident = await this.prisma.resident.findFirst({ where: { user: { id: userId } } });
-    const req = await this.prisma.conciergeRequest.findUnique({ where: { id } });
-    if (!req) throw new NotFoundException('Request not found');
+    const req = await requireOwnedById(
+      () => this.prisma.conciergeRequest.findUnique({ where: { id } }),
+      societyId,
+      'Request',
+    );
     if (req.residentId !== resident?.id) throw new ForbiddenException();
     if (req.status !== 'PENDING') throw new ForbiddenException('Cannot cancel non-pending request');
     return this.prisma.conciergeRequest.update({ where: { id }, data: { status: 'CANCELLED' } });
@@ -41,25 +45,32 @@ export class ConciergeService {
     });
   }
 
-  async updateStatus(id: string, status: string, note?: string) {
-    const req = await this.prisma.conciergeRequest.findUnique({ where: { id } });
-    if (!req) throw new NotFoundException('Request not found');
+  async updateStatus(id: string, societyId: string, status: string, note?: string) {
+    await requireOwnedById(
+      () => this.prisma.conciergeRequest.findUnique({ where: { id } }),
+      societyId,
+      'Request',
+    );
     return this.prisma.conciergeRequest.update({
       where: { id },
       data: { status: status as any, ...(note ? { note } : {}) },
     });
   }
 
-  async getMyRequest(userId: string, id: string) {
+  async getMyRequest(userId: string, id: string, societyId: string) {
     const resident = await this.prisma.resident.findFirst({ where: { user: { id: userId } } });
     if (!resident) throw new NotFoundException('Resident not found');
-    const req = await this.prisma.conciergeRequest.findUnique({ where: { id } });
-    if (!req || req.residentId !== resident.id) throw new NotFoundException('Request not found');
+    const req = await requireOwnedById(
+      () => this.prisma.conciergeRequest.findUnique({ where: { id } }),
+      societyId,
+      'Request',
+    );
+    if (req.residentId !== resident.id) throw new NotFoundException('Request not found');
     return req;
   }
 
-  async rateRequest(userId: string, id: string, dto: RateConciergeDto) {
-    const req = await this.getMyRequest(userId, id);
+  async rateRequest(userId: string, id: string, societyId: string, dto: RateConciergeDto) {
+    const req = await this.getMyRequest(userId, id, societyId);
     if (req.status !== 'COMPLETED') {
       throw new BadRequestException('You can only rate completed requests');
     }

@@ -126,8 +126,8 @@ export class NoticeController {
 
   @Patch('/admin/polls/:id/close')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  closePoll(@Param('id') pollId: string) {
-    return this.noticeService.closePoll(pollId);
+  closePoll(@Param('id') pollId: string, @SocietyId() societyId: string) {
+    return this.noticeService.closePoll(pollId, societyId);
   }
 
   // ── Property admin endpoints ─────────────────────────────────────────────────
@@ -140,14 +140,18 @@ export class NoticeController {
 
   @Post('/admin/property/listings/:id/approve')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  approvePropertyListing(@Param('id') id: string) {
-    return this.noticeService.approvePropertyListing(id);
+  approvePropertyListing(@Param('id') id: string, @SocietyId() societyId: string) {
+    return this.noticeService.approvePropertyListing(id, societyId);
   }
 
   @Patch('/admin/property/listings/:id/reject')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  rejectPropertyListing(@Param('id') id: string, @Body() body: { reason?: string }) {
-    return this.noticeService.rejectPropertyListing(id, body?.reason);
+  rejectPropertyListing(
+    @Param('id') id: string,
+    @SocietyId() societyId: string,
+    @Body() body: { reason?: string },
+  ) {
+    return this.noticeService.rejectPropertyListing(id, societyId, body?.reason);
   }
 
   // ── Travel admin endpoints ───────────────────────────────────────────────────

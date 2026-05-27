@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundEx
 import { PrismaService } from '../../prisma/prisma.service';
 import { S3Service } from '../../common/storage/s3.service';
 import { requireResidentByUserId } from '../../common/utils/resident-context';
+import { requireOwnedById } from '../../common/tenancy/require-owned.util';
 import { CreateHousekeepingDto } from './dto/create-housekeeping.dto';
 import { RateHousekeepingDto } from './dto/rate-housekeeping.dto';
 import { UpdateHousekeepingStatusDto } from './dto/update-housekeeping-status.dto';
@@ -11,7 +12,13 @@ export class HousekeepingService {
   private readonly logger = new Logger(HousekeepingService.name);
   constructor(private prisma: PrismaService, private s3: S3Service) {}
 
-  async getPhotoUploadUrl(id: string, phase?: string, contentType?: string) {
+  async getPhotoUploadUrl(id: string, societyId: string, phase?: string, contentType?: string) {
+    // Cross-tenant guard: only mint upload URLs for requests in the caller's society.
+    await requireOwnedById(
+      () => this.prisma.housekeepingRequest.findUnique({ where: { id } }),
+      societyId,
+      'Housekeeping request',
+    );
     const phasePart = phase ? `/${phase.toLowerCase()}` : '';
     return this.s3.getPresignedUploadUrl(`housekeeping/${id}${phasePart}`, contentType);
   }
@@ -98,13 +105,16 @@ export class HousekeepingService {
     return request;
   }
 
-  async findOneAsAdmin(id: string) {
-    const request = await this.prisma.housekeepingRequest.findUnique({
-      where: { id },
-      include: { resident: { include: { user: true, flat: true } } },
-    });
-    if (!request) throw new NotFoundException('Housekeeping request not found');
-    return request;
+  async findOneAsAdmin(id: string, societyId: string) {
+    return requireOwnedById(
+      () =>
+        this.prisma.housekeepingRequest.findUnique({
+          where: { id },
+          include: { resident: { include: { user: true, flat: true } } },
+        }),
+      societyId,
+      'Housekeeping request',
+    );
   }
 
   async cancel(id: string, userId: string) {
@@ -129,8 +139,8 @@ export class HousekeepingService {
     });
   }
 
-  async updateStatus(id: string, dto: UpdateHousekeepingStatusDto) {
-    const request = await this.findOneAsAdmin(id);
+  async updateStatus(id: string, societyId: string, dto: UpdateHousekeepingStatusDto) {
+    const request = await this.findOneAsAdmin(id, societyId);
     return this.prisma.housekeepingRequest.update({
       where: { id: request.id },
       data: { status: dto.status as any },

@@ -29,8 +29,8 @@ export class PestControlController {
 
   @Get(':id')
   @Roles(UserRole.RESIDENT, UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.STAFF)
-  findOne(@Param('id', ParseUUIDPipe) id: string) {
-    return this.pestControlService.findOne(id);
+  findOne(@Param('id', ParseUUIDPipe) id: string, @SocietyId() societyId: string) {
+    return this.pestControlService.findOne(id, societyId);
   }
 
   @Post()
@@ -41,13 +41,13 @@ export class PestControlController {
 
   @Patch(':id/complete')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.STAFF)
-  complete(@Param('id', ParseUUIDPipe) id: string) {
-    return this.pestControlService.complete(id);
+  complete(@Param('id', ParseUUIDPipe) id: string, @SocietyId() societyId: string) {
+    return this.pestControlService.complete(id, societyId);
   }
 
   @Patch(':id/cancel')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  cancel(@Param('id', ParseUUIDPipe) id: string) {
-    return this.pestControlService.cancel(id);
+  cancel(@Param('id', ParseUUIDPipe) id: string, @SocietyId() societyId: string) {
+    return this.pestControlService.cancel(id, societyId);
   }
 }

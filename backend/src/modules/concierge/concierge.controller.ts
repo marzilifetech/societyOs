@@ -34,8 +34,12 @@ export class ConciergeController {
 
   @Patch(':id/cancel')
   @Roles(UserRole.RESIDENT)
-  cancelRequest(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
-    return this.conciergeService.cancelRequest(user.sub, id);
+  cancelRequest(
+    @CurrentUser() user: JwtPayload,
+    @SocietyId() societyId: string,
+    @Param('id') id: string,
+  ) {
+    return this.conciergeService.cancelRequest(user.sub, id, societyId);
   }
 
   @Get('admin/requests')
@@ -48,10 +52,11 @@ export class ConciergeController {
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   updateStatus(
     @Param('id') id: string,
+    @SocietyId() societyId: string,
     @Body('status') status: string,
     @Body('note') note?: string,
   ) {
-    return this.conciergeService.updateStatus(id, status, note);
+    return this.conciergeService.updateStatus(id, societyId, status, note);
   }
 }
 
@@ -70,8 +75,12 @@ export class ConciergeRequestsController {
 
   @Get(':id')
   @Roles(UserRole.RESIDENT)
-  getOne(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
-    return this.conciergeService.getMyRequest(user.sub, id);
+  getOne(
+    @CurrentUser() user: JwtPayload,
+    @SocietyId() societyId: string,
+    @Param('id') id: string,
+  ) {
+    return this.conciergeService.getMyRequest(user.sub, id, societyId);
   }
 
   @Patch(':id/rate')
@@ -79,8 +88,9 @@ export class ConciergeRequestsController {
   rate(
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,
+    @SocietyId() societyId: string,
     @Body() dto: RateConciergeDto,
   ) {
-    return this.conciergeService.rateRequest(user.sub, id, dto);
+    return this.conciergeService.rateRequest(user.sub, id, societyId, dto);
   }
 }
