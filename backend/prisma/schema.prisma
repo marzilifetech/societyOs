@@ -25,6 +25,12 @@ enum UserStatus {
   REJECTED
 }
 
+enum SocietyStatus {
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+}
+
 enum ResidentType {
   OWNER
   TENANT
@@ -427,7 +433,17 @@ model Society {
   vendorOrders         VendorOrder[]
   showInDirectory      Boolean               @default(false)
   archivedAt           DateTime?
+  status               SocietyStatus         @default(ACTIVE)
+  suspendedAt          DateTime?
+  suspendedReason      String?
+  suspendedById        String?
+  /// Stable opaque code shown in onboarding ("MZ-XXXX"). NULL until first set.
+  shortCode            String?               @unique
+  /// Optional Hindi-friendly contact fields surfaced in the SuperAdmin console.
+  contactEmail         String?
+  contactPhone         String?
 
+  @@index([status])
   @@map("societies")
 }
 
@@ -581,6 +597,7 @@ model StaffMember {
   securityRounds      SecurityRound[]
   documents           StaffDocument[]
   staffLoans          StaffLoan[]
+  assignedComplaints  Complaint[]       @relation("ComplaintAssignedTo")
 
   @@index([societyId])
   @@map("staff_members")
@@ -710,26 +727,32 @@ model ServicePhoto {
 // ─── Complaints ───────────────────────────────────────────────────────────────
 
 model Complaint {
-  id          String          @id @default(uuid())
-  societyId   String
-  residentId  String
-  category    String
-  title       String
-  description String
-  isAnonymous Boolean         @default(false)
-  status      ComplaintStatus @default(OPEN)
-  adminNote   String?
-  resolvedAt  DateTime?
-  rating      Decimal?        @db.Decimal(3, 2)
-  ratingText  String?
-  ratingNote  String?
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
+  id           String          @id @default(uuid())
+  societyId    String
+  residentId   String
+  category     String
+  title        String
+  description  String
+  isAnonymous  Boolean         @default(false)
+  status       ComplaintStatus @default(OPEN)
+  adminNote    String?
+  // Optional StaffMember assignment. Nullable — most complaints are not
+  // assigned to a specific staffer. Decoupled from adminNote so admins keep
+  // free-text notes; previously assignment overwrote the note field (H1).
+  assignedToId String?
+  resolvedAt   DateTime?
+  rating       Decimal?        @db.Decimal(3, 2)
+  ratingText   String?
+  ratingNote   String?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
 
-  society  Society  @relation(fields: [societyId], references: [id])
-  resident Resident @relation(fields: [residentId], references: [id])
+  society    Society      @relation(fields: [societyId], references: [id])
+  resident   Resident     @relation(fields: [residentId], references: [id])
+  assignedTo StaffMember? @relation("ComplaintAssignedTo", fields: [assignedToId], references: [id])
 
   @@index([societyId, status])
+  @@index([assignedToId])
   @@map("complaints")
 }
 

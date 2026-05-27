@@ -24,7 +24,12 @@ const FILTER_OPTIONS = ['ALL', 'OPEN', 'UNDER_REVIEW', 'RESOLVED', 'REJECTED', '
 type FilterOption = typeof FILTER_OPTIONS[number];
 
 type StaffMember = { id: string; name: string; role: string };
-type ComplaintWithResident = Complaint & { resident?: { name: string; unit?: { flatNumber: string } }; adminNote?: string };
+type ComplaintWithResident = Complaint & {
+  resident?: { name: string; unit?: { flatNumber: string } };
+  adminNote?: string;
+  // H1: assignment is now a first-class field, not a parsed adminNote prefix.
+  assignedTo?: { id: string; name: string } | null;
+};
 
 function buildTrendData(complaints: ComplaintWithResident[]): { date: string; count: number }[] {
   const now = Date.now();
@@ -79,8 +84,10 @@ function ComplaintCard({
   const [selectedStaffId, setSelectedStaffId] = useState('');
   const showNote = selectedStatus === 'RESOLVED' || selectedStatus === 'CLOSED';
 
-  const assignedMatch = c.adminNote?.match(/^Assigned to: (.+) \((.+)\)$/);
-  const assignedName = assignedMatch?.[1];
+  // Fall back to the legacy "Assigned to: X (id)" adminNote shape for rows
+  // that pre-date the assignedTo column (H1) and haven't been re-assigned yet.
+  const legacyMatch = c.adminNote?.match(/^Assigned to: (.+) \((.+)\)$/);
+  const assignedName = c.assignedTo?.name ?? legacyMatch?.[1] ?? null;
 
   function handleAssign() {
     const s = staff.find((m) => m.id === selectedStaffId);
