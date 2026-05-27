@@ -52,6 +52,19 @@ class TotpCodeDto {
   code: string;
 }
 
+class ReauthDto {
+  @ApiPropertyOptional({ description: '6-digit TOTP code (required if 2FA enabled)' })
+  @IsOptional()
+  @IsString()
+  @Length(6, 6)
+  totpCode?: string;
+
+  @ApiPropertyOptional({ description: 'Fresh OTP code (used when 2FA is not enabled)' })
+  @IsOptional()
+  @IsString()
+  otp?: string;
+}
+
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
@@ -93,6 +106,25 @@ export class AuthController {
   @ApiBearerAuth()
   me(@CurrentUser() user: JwtPayload) {
     return this.authService.getMe(user.sub, user.role);
+  }
+
+  /**
+   * Re-authenticate a SUPER_ADMIN before performing a tenant-switch. The
+   * caller is already holding a valid access token; this endpoint upgrades
+   * that session with a short-lived, one-shot `X-ReAuth-Token` that the
+   * tenant middleware will consume on the very next request that carries
+   * `X-Society-Id`.
+   */
+  @Post('reauth')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @HttpCode(200)
+  reauth(@CurrentUser() user: JwtPayload, @Body() dto: ReauthDto) {
+    return this.authService.issueReauthToken(user.sub, {
+      totpCode: dto.totpCode,
+      otp: dto.otp,
+    });
   }
 
   @Post('logout')
