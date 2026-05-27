@@ -170,6 +170,11 @@ export class ApiClient {
     // privileged action). For 4xx with one of the refreshable codes, attempt
     // a silent refresh + retry once. Pure-401 with no code is treated as
     // legacy/ambiguous and refresh is also tried.
+    //
+    // BUT: /auth/* routes are the LOGIN flow itself. A 401 there means
+    // "your OTP is wrong" or "your account is suspended" — surface the
+    // server message inline; do NOT fire onUnauthorized (which would
+    // hard-reload /login and lose the entered phone/OTP).
     if (res.status === 401 || res.status === 400) {
       let code: string | undefined;
       let serverBody: any;
@@ -178,6 +183,17 @@ export class ApiClient {
         code = serverBody?.error?.code;
       } catch {
         /* not JSON */
+      }
+
+      if (isAuthRoute) {
+        // Login-flow 4xx — let the caller render the real error inline.
+        const e: any = new Error(
+          serverBody?.error?.message ?? `Request failed: ${res.status}`,
+        );
+        e.status = res.status;
+        e.body = serverBody;
+        if (code) e.code = code;
+        throw e;
       }
 
       // 401 default = try refresh; 400 only when the code is one we recognise

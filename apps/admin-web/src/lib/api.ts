@@ -2,13 +2,41 @@ import { ApiClient, ApiClientConfig } from '@societyos/api-client';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000/v1';
 
+// Friendly translations of backend auth error codes — the raw NestJS
+// `UnauthorizedException` message is just "Unauthorized" which is useless
+// to a user typing an OTP.
+const AUTH_FRIENDLY_MESSAGES: Record<string, string> = {
+  INVALID_OTP: 'The OTP you entered is incorrect or has expired. Please try again.',
+  OTP_EXPIRED: 'This OTP has expired. Tap "Resend OTP" to get a new one.',
+  OTP_LOCKED: 'Too many wrong attempts. Please wait a few minutes before trying again.',
+  ACCOUNT_SUSPENDED: 'Your account has been suspended. Please contact your administrator.',
+  SOCIETY_SUSPENDED: 'This society is currently paused. Please contact the platform team.',
+  SOCIETY_ARCHIVED: 'This society has been archived and is no longer active.',
+  USER_REVOKED: 'Your account is no longer active. Please contact support.',
+  '2FA_INVALID_CODE': 'The authenticator code is incorrect. Please try again.',
+};
+
 function friendlyError(status: number, serverMsg?: string, serverCode?: string): Error {
   if (status === 401) {
-    if (typeof window !== 'undefined') {
+    // Don't kick the user back to /login if they're already there — a 401
+    // during the login flow itself (wrong OTP, account suspended, etc.) is
+    // a normal error to render inline, not a "session expired" event.
+    const onLoginPage =
+      typeof window !== 'undefined' && window.location.pathname.startsWith('/login');
+    if (!onLoginPage && typeof window !== 'undefined') {
       localStorage.removeItem('auth-storage');
       window.location.href = '/login?reason=session-expired';
+      return new Error('Your session has ended. Please sign in again.');
     }
-    return new Error('Your session has ended. Please sign in again.');
+    // On /login: surface a useful message, preferring the friendly map.
+    const message =
+      (serverCode && AUTH_FRIENDLY_MESSAGES[serverCode]) ??
+      (serverMsg && serverMsg !== 'Unauthorized' && serverMsg !== 'Unauthorized Exception'
+        ? serverMsg
+        : 'Sign-in failed. Please try again.');
+    const e: Error & { code?: string } = new Error(message);
+    if (serverCode) e.code = serverCode;
+    return e;
   }
   // Prefer API envelope messages for actionable admin errors (conflicts, transitions, etc.).
   if (serverMsg && status >= 400 && status < 500) {
