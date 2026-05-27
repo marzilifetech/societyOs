@@ -120,7 +120,7 @@ export default function StaffProfileScreen() {
         style: 'destructive',
         onPress: async () => {
           await clearAuth();
-          router.replace('/(auth)/phone-entry' as any);
+          router.replace('/(auth)/society-select' as any);
         },
       },
     ]);
@@ -142,7 +142,7 @@ export default function StaffProfileScreen() {
               if (__DEV__) console.warn('[delete] failed', err?.message);
             }
             await clearAuth();
-            router.replace('/(auth)/phone-entry' as any);
+            router.replace('/(auth)/society-select' as any);
           },
         },
       ],

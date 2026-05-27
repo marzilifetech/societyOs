@@ -1,18 +1,22 @@
 import { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, Alert, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { api } from '../../src/lib/api';
 
 export default function PhoneEntryScreen() {
+  const { societyId, societyName } = useLocalSearchParams<{ societyId?: string; societyName?: string }>();
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
 
   const isValid = phone.replace(/\D/g, '').length === 10;
 
-  const societyId = process.env.EXPO_PUBLIC_SOCIETY_ID!;
-
   const handleContinue = async () => {
+    if (!societyId) {
+      Alert.alert('Pick a society', 'Please choose your society first.');
+      router.replace('/(auth)/society-select' as any);
+      return;
+    }
     setLoading(true);
     try {
       await api.post('/auth/send-otp', { phone: `+91${phone}`, societyId });
@@ -33,7 +37,9 @@ export default function PhoneEntryScreen() {
         <View className="flex-1 px-8 justify-center">
           <View className="mb-10">
             <Text className="text-4xl font-bold text-white mb-2">Staff Login</Text>
-            <Text className="text-blue-200 text-base">SocietyOS Staff Portal</Text>
+            <Text className="text-blue-200 text-base">
+              {societyName ?? 'SocietyOS Staff Portal'}
+            </Text>
           </View>
 
           <View className="mb-6">
