@@ -71,6 +71,21 @@ function LoginPageInner() {
     return () => clearTimeout(t);
   }, [step, resendCountdown]);
 
+  // Wipe any stale auth artefacts when the user lands on /login. Belt-and-
+  // braces with the api-client's auth-route filter: even if some legacy
+  // code path leaks credentials, this ensures a fresh-start state.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      localStorage.removeItem('admin_token');
+      localStorage.removeItem('admin_selected_society_id');
+      localStorage.removeItem('auth-storage');
+      sessionStorage.removeItem('admin_reauth_token');
+    } catch {
+      /* private mode or quota — non-fatal */
+    }
+  }, []);
+
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');

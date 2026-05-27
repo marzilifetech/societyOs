@@ -126,13 +126,23 @@ export class ApiClient {
   }
 
   private async request<T>(method: string, path: string, body?: unknown, _retried = false): Promise<T> {
-    const token = this.config.getToken();
+    // /auth/* routes are PUBLIC — sending stale Authorization or
+    // X-Society-Id / X-ReAuth-Token headers can trip the backend's
+    // tenant-switch reauth gate, returning 400 REAUTH_REQUIRED. The
+    // refresh-retry path then fires for what is in fact the login
+    // call, the refresh fails (we're not logged in), onUnauthorized()
+    // hard-reloads /login, and the user is stuck in a refresh loop.
+    // Strip credentials entirely for auth routes.
+    const isAuthRoute = path.startsWith('/auth/');
+    const token = isAuthRoute ? null : this.config.getToken();
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
     if (token) headers['Authorization'] = `Bearer ${token}`;
-    const extra = this.config.getExtraHeaders?.() ?? {};
-    Object.assign(headers, extra);
+    if (!isAuthRoute) {
+      const extra = this.config.getExtraHeaders?.() ?? {};
+      Object.assign(headers, extra);
+    }
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
