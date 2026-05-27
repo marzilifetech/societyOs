@@ -3,6 +3,7 @@ import { StaffService } from './staff.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { S3Service } from '../../common/storage/s3.service';
 import { RealtimeGateway } from '../../common/realtime/realtime.gateway';
+import { VisitorService } from '../visitor/visitor.service';
 
 const mockPrisma = {
   staffMember: { findUnique: jest.fn() },
@@ -22,6 +23,9 @@ describe('StaffService documents', () => {
           useValue: { getPublicUrl: jest.fn((k: string) => `https://cdn/${k}`) },
         },
         { provide: RealtimeGateway, useValue: { emit: jest.fn() } },
+        // StaffService gained a VisitorService dep — provide a stub so the
+        // Nest DI graph resolves in this spec.
+        { provide: VisitorService, useValue: { handoffToStaff: jest.fn() } },
       ],
     }).compile();
 
