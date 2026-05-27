@@ -24,7 +24,7 @@ export default async function globalSetup(_config: FullConfig) {
     const verify = await ctx.post('/v1/auth/otp/verify', {
       data: {
         phone: process.env.E2E_ADMIN_PHONE ?? '+919999000000',
-        code: process.env.E2E_ADMIN_OTP ?? '123456',
+        code: process.env.E2E_ADMIN_OTP ?? '1234',
       },
     });
     if (!verify.ok()) throw new Error('otp verify failed');

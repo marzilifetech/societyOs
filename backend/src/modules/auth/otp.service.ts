@@ -73,7 +73,9 @@ export class OtpService {
     }
 
     if (this.isDev) {
-      const code = '123456';
+      // 4 digits to match the mobile + admin login inputs. The Marzi proxy
+      // path also uses 4-digit OTPs, so frontend and local dev are aligned.
+      const code = '1234';
       await this.redis.set(`otp:code:${phone}`, code, OTP_TTL_SECONDS);
       this.logger.log(`[DEV] OTP for ${phone}: ${code}`);
       return 'dev-session';
@@ -146,6 +148,6 @@ export class OtpService {
 
   /** @deprecated kept for backwards compat with old call sites */
   async verifyDevOtp(otp: string): Promise<boolean> {
-    return this.isDev && otp === '123456';
+    return this.isDev && otp === '1234';
   }
 }

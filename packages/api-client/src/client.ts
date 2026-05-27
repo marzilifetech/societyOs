@@ -49,12 +49,42 @@ export class ApiClient {
         const refreshToken = this.config.getRefreshToken!();
         if (!refreshToken) return null;
         const url = `${this.config.baseUrl}${this.config.refreshUrl ?? '/auth/refresh'}`;
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ refreshToken }),
-        });
+
+        // Up to 3 attempts with backoff so a single network blip or transient
+        // 5xx on the refresh endpoint does not sign the user out unnecessarily.
+        // We only retry on network errors and 5xx — 4xx is treated as terminal
+        // immediately (the server has made a definitive decision).
+        const MAX_ATTEMPTS = 3;
+        const BACKOFF_MS = [0, 400, 1200];
+        let res: Response | null = null;
+        let lastNetworkError: unknown = null;
+        for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+          if (BACKOFF_MS[attempt] > 0) {
+            await new Promise((r) => setTimeout(r, BACKOFF_MS[attempt]));
+          }
+          try {
+            res = await fetch(url, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ refreshToken }),
+            });
+          } catch (err) {
+            lastNetworkError = err;
+            res = null;
+            continue;
+          }
+          // Retry on 5xx only — 4xx is definitive.
+          if (res.status < 500) break;
+        }
+
+        if (!res) {
+          // All attempts failed at the network layer — do NOT wipe tokens.
+          // The refresh JWT is still valid; the user can retry when online.
+          void lastNetworkError;
+          return null;
+        }
         if (!res.ok) {
+          // Definitive server rejection — terminal.
           await this.config.setTokens!(null);
           return null;
         }
@@ -69,9 +99,8 @@ export class ApiClient {
         await this.config.setTokens!({ accessToken, refreshToken: newRefresh });
         return accessToken;
       } catch {
-        // Network error during refresh — don't wipe tokens; let the caller
-        // surface the network-error path. Returning null still falls through
-        // to onUnauthorized though, so distinguish: only wipe on a 4xx above.
+        // Defensive: anything unexpected — don't wipe tokens. Caller will
+        // surface the error path; user can retry.
         return null;
       } finally {
         this._refreshInFlight = null;

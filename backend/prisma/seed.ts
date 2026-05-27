@@ -3,7 +3,88 @@ import { normalizeIndianPhone } from '../src/common/utils/phone';
 
 const prisma = new PrismaClient();
 
+// Multi-tenant demo fixtures: a Platform society to host the SUPER_ADMIN,
+// plus one SUSPENDED and one ARCHIVED demo society for exercising the
+// lifecycle UI without touching the primary fully-populated Green Valley Heights.
+const PLATFORM_SOCIETY_ID = '00000000-0000-4000-a000-000000000001';
+const SUSPENDED_DEMO_ID = '00000000-0000-4000-a000-000000000002';
+const ARCHIVED_DEMO_ID = '00000000-0000-4000-a000-000000000003';
+const SUPER_ADMIN_PHONE = '9999900001';
+
+async function seedPlatformAndDemoSocieties(): Promise<void> {
+  await prisma.society.upsert({
+    where: { id: PLATFORM_SOCIETY_ID } as any,
+    update: { status: 'ACTIVE' },
+    create: {
+      id: PLATFORM_SOCIETY_ID,
+      name: 'SocietyOS Platform',
+      address: 'Internal',
+      city: '—',
+      pincode: '000000',
+      shortCode: 'MZ-PLAT',
+      status: 'ACTIVE',
+    },
+  });
+
+  await prisma.user.upsert({
+    where: {
+      phone_societyId: {
+        phone: normalizeIndianPhone(SUPER_ADMIN_PHONE),
+        societyId: PLATFORM_SOCIETY_ID,
+      },
+    },
+    update: { role: 'SUPER_ADMIN', status: 'ACTIVE' },
+    create: {
+      phone: normalizeIndianPhone(SUPER_ADMIN_PHONE),
+      name: 'Platform Super Admin',
+      email: 'superadmin@societyos.local',
+      role: 'SUPER_ADMIN',
+      status: 'ACTIVE',
+      societyId: PLATFORM_SOCIETY_ID,
+    },
+  });
+
+  await prisma.society.upsert({
+    where: { id: SUSPENDED_DEMO_ID } as any,
+    update: {
+      status: 'SUSPENDED',
+      suspendedAt: new Date(),
+      suspendedReason: 'Demo society for testing suspended-login behaviour',
+    },
+    create: {
+      id: SUSPENDED_DEMO_ID,
+      name: 'Skyline Residency (DEMO Suspended)',
+      address: '12 MG Road',
+      city: 'Pune',
+      pincode: '411001',
+      shortCode: 'MZ-DEMO-S',
+      status: 'SUSPENDED',
+      suspendedAt: new Date(),
+      suspendedReason: 'Demo society for testing suspended-login behaviour',
+    },
+  });
+
+  await prisma.society.upsert({
+    where: { id: ARCHIVED_DEMO_ID } as any,
+    update: {
+      status: 'ARCHIVED',
+      archivedAt: new Date(),
+    },
+    create: {
+      id: ARCHIVED_DEMO_ID,
+      name: 'Heritage Court (DEMO Archived)',
+      address: '5 Park Lane',
+      city: 'Mumbai',
+      pincode: '400001',
+      shortCode: 'MZ-DEMO-A',
+      status: 'ARCHIVED',
+      archivedAt: new Date(),
+    },
+  });
+}
+
 async function main() {
+  await seedPlatformAndDemoSocieties();
   // Society — fixed UUID v4 so API validators accept it
   const SOCIETY_ID = 'a1b2c3d4-e5f6-4789-abcd-ef0123456789';
   const society = await prisma.society.upsert({
@@ -1151,7 +1232,10 @@ async function main() {
   });
 
   console.log('Seed complete. Society ID:', society.id);
-  console.log('Admin login: phone +919000000001, OTP 123456 (dev mode).');
+  console.log('Admin login:        phone +919000000001, OTP 1234 (dev mode).');
+  console.log('Super-admin login:  phone +91' + SUPER_ADMIN_PHONE + ', OTP 1234 — Platform society.');
+  console.log('Demo suspended id:  ' + SUSPENDED_DEMO_ID);
+  console.log('Demo archived id:   ' + ARCHIVED_DEMO_ID);
 }
 
 main()
