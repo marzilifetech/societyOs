@@ -93,9 +93,10 @@ from `/auth/verify-otp` and `/auth/refresh` as before.
 - [ ] Sentry alert: any `MARZI_RESPONSE_MALFORMED` → shape drift from Marzi.
 - [ ] Metric: ratio of refresh calls hitting the legacy "no stored Marzi
       refresh" branch — once this approaches 0, drop the legacy fallback.
-- [ ] Marzi-mode SOS notifications must route to channel `sos` (push payload
-      needs `android.notification.channel_id: "sos"`). The channel is declared
-      but no payload targets it yet.
+- [x] ~~Marzi-mode SOS notifications must route to channel `sos`~~ — done
+      in push.service.ts: critical / category=sos / data.type=SOS_TRIGGERED
+      payloads now ride `android.notification.channelId: "sos"` and
+      iOS `interruption-level: critical`.
 
 ## References
 
