@@ -126,10 +126,19 @@ export const api = new AdminApiClient({
     if (typeof window === 'undefined') return {};
     const societyId = localStorage.getItem('admin_selected_society_id');
     if (!societyId) return {};
-    return {
-      'X-Society-Id': societyId,
-      'X-ReAuth-Confirmed': '1',
-    };
+    const headers: Record<string, string> = { 'X-Society-Id': societyId };
+    // C1: never stamp X-ReAuth-Confirmed automatically — it was trivially
+    // spoofable and defeated the tenant-switch gate. Instead, the
+    // SocietySwitcher writes a short-lived one-shot reauth token to
+    // sessionStorage; we forward it ONCE (the backend consumes the jti).
+    const reauth = sessionStorage.getItem('admin_reauth_token');
+    if (reauth) {
+      headers['X-ReAuth-Token'] = reauth;
+      // Drop after read — the backend is one-shot anyway, but this keeps
+      // dev tools from showing a stale token after the switch lands.
+      sessionStorage.removeItem('admin_reauth_token');
+    }
+    return headers;
   },
   onUnauthorized: () => {
     if (typeof window !== 'undefined') {
@@ -148,7 +157,11 @@ export async function downloadAdminFile(path: string, filename: string): Promise
   if (token) headers.Authorization = `Bearer ${token}`;
   if (societyId) {
     headers['X-Society-Id'] = societyId;
-    headers['X-ReAuth-Confirmed'] = '1';
+    const reauth = sessionStorage.getItem('admin_reauth_token');
+    if (reauth) {
+      headers['X-ReAuth-Token'] = reauth;
+      sessionStorage.removeItem('admin_reauth_token');
+    }
   }
   const res = await fetch(`${BASE_URL}${path}`, { headers });
   if (!res.ok) {
