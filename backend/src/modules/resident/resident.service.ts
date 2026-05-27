@@ -225,6 +225,15 @@ export class ResidentService {
     }));
   }
 
+  async getEmergencyContacts(societyId: string) {
+    const society = await this.prisma.society.findUnique({ where: { id: societyId } });
+    if (!society) throw new NotFoundException('Society not found');
+    const config = (society.config as Record<string, unknown> | null) ?? {};
+    const contacts = (config.emergencyContacts as unknown[] | undefined) ?? [];
+    // Surface a shape consistent with admin-web's existing settings UI.
+    return { id: society.id, config: { emergencyContacts: contacts } };
+  }
+
   async setDirectoryVisibility(userId: string, visible: boolean) {
     const resident = await findResidentByUserId(this.prisma, userId);
     if (!resident) throw new NotFoundException('Resident profile not found');

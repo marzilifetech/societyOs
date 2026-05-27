@@ -19,8 +19,14 @@ export class NoticeController {
   constructor(private noticeService: NoticeService) {}
 
   @Get()
-  getNotices(@SocietyId() societyId: string) {
-    return this.noticeService.getNotices(societyId);
+  getNotices(
+    @SocietyId() societyId: string,
+    @Query('pinned') pinned?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const onlyPinned = pinned === 'true' || pinned === '1';
+    const parsedLimit = limit ? Math.max(1, Math.min(50, parseInt(limit, 10) || 0)) : undefined;
+    return this.noticeService.getNotices(societyId, { onlyPinned, limit: parsedLimit });
   }
 
   @Post()
@@ -49,6 +55,12 @@ export class NoticeController {
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   unpinNotice(@Param('id', ParseUUIDPipe) id: string, @SocietyId() societyId: string) {
     return this.noticeService.updateNotice(id, societyId, { isPinned: false } as UpdateNoticeDto);
+  }
+
+  @Patch(':id/pin')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  togglePinNotice(@Param('id', ParseUUIDPipe) id: string, @SocietyId() societyId: string) {
+    return this.noticeService.togglePin(id, societyId);
   }
 
   @Post('broadcast')

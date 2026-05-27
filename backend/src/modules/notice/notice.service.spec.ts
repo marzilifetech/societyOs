@@ -10,6 +10,8 @@ const mockPrisma = {
   notice: {
     findMany: jest.fn(),
     create: jest.fn(),
+    findUnique: jest.fn(),
+    update: jest.fn(),
   },
   poll: { findMany: jest.fn(), findUnique: jest.fn() },
   pollVote: { upsert: jest.fn(), findMany: jest.fn() },
@@ -58,7 +60,7 @@ describe('NoticeService', () => {
       expect(mockPrisma.notice.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({ societyId: 'society-1' }),
-          orderBy: [{ isPinned: 'desc' }, { publishedAt: 'desc' }],
+          orderBy: [{ isPinned: 'desc' }, { publishedAt: 'desc' }, { createdAt: 'desc' }],
         }),
       );
     });
@@ -83,6 +85,40 @@ describe('NoticeService', () => {
       });
       await new Promise((r) => setImmediate(r));
       expect(mockWhatsapp.broadcastToSociety).toHaveBeenCalled();
+    });
+  });
+
+  describe('togglePin', () => {
+    it('flips the isPinned flag for a notice in the same society', async () => {
+      mockPrisma.notice.findUnique.mockResolvedValue({
+        id: 'notice-1',
+        societyId: 'society-1',
+        isPinned: false,
+      });
+      mockPrisma.notice.update.mockResolvedValue({ id: 'notice-1', isPinned: true });
+
+      const result = await service.togglePin('notice-1', 'society-1');
+
+      expect(result.isPinned).toBe(true);
+      expect(mockPrisma.notice.update).toHaveBeenCalledWith({
+        where: { id: 'notice-1' },
+        data: { isPinned: true },
+      });
+    });
+  });
+
+  describe('getNotices with onlyPinned', () => {
+    it('filters by isPinned=true when onlyPinned is set', async () => {
+      mockPrisma.notice.findMany.mockResolvedValue([{ id: 'n1', isPinned: true }]);
+
+      await service.getNotices('society-1', { onlyPinned: true, limit: 1 });
+
+      expect(mockPrisma.notice.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ societyId: 'society-1', isPinned: true }),
+          take: 1,
+        }),
+      );
     });
   });
 

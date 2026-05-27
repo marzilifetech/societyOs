@@ -19,6 +19,7 @@ const mockPrisma = {
     findFirst: jest.fn().mockResolvedValue(mockResident),
     update: jest.fn(),
   },
+  society: { findUnique: jest.fn() },
   user: { findUnique: jest.fn() },
 };
 
@@ -69,5 +70,43 @@ describe('ResidentService.uploadDocuments', () => {
     // Aadhaar bytes contain the digit string
     const callArgs = mockPrisma.resident.update.mock.calls[0][0];
     expect((callArgs.data.aadhaar as Buffer).toString('utf8')).toBe('123412341234');
+  });
+});
+
+describe('ResidentService.getEmergencyContacts', () => {
+  let service: ResidentService;
+
+  beforeEach(async () => {
+    const moduleRef: TestingModule = await Test.createTestingModule({
+      providers: [
+        ResidentService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: NotificationService, useValue: mockNotifications },
+      ],
+    }).compile();
+
+    service = moduleRef.get<ResidentService>(ResidentService);
+    jest.clearAllMocks();
+  });
+
+  it('returns the society config emergencyContacts array', async () => {
+    const contacts = [
+      { id: 'ec-medical', label: 'Medical', phone: '+91-108' },
+      { id: 'ec-security', label: 'Security', phone: '+91-9000000099' },
+    ];
+    mockPrisma.society.findUnique.mockResolvedValue({
+      id: 'soc-1',
+      config: { emergencyContacts: contacts },
+    });
+
+    const result = await service.getEmergencyContacts('soc-1');
+    expect(result).toEqual({ id: 'soc-1', config: { emergencyContacts: contacts } });
+  });
+
+  it('returns empty array when society has no emergencyContacts configured', async () => {
+    mockPrisma.society.findUnique.mockResolvedValue({ id: 'soc-2', config: {} });
+
+    const result = await service.getEmergencyContacts('soc-2');
+    expect(result.config.emergencyContacts).toEqual([]);
   });
 });

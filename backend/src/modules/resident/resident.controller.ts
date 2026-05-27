@@ -118,6 +118,12 @@ export class ResidentController {
     return this.residentService.getMyDocuments(user.sub);
   }
 
+  @Get('society/emergency-contacts')
+  @Roles(UserRole.RESIDENT)
+  getEmergencyContacts(@SocietyId() societyId: string) {
+    return this.residentService.getEmergencyContacts(societyId);
+  }
+
   @Patch('me/directory-visibility')
   @Roles(UserRole.RESIDENT)
   setDirectoryVisibility(
