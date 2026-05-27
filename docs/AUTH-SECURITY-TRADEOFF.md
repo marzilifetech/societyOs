@@ -1,4 +1,4 @@
-# Auth security tradeoff — Marzi-pass-through tokens
+# Auth security tradeoff — Marzi-backed refresh (hybrid)
 
 **Date:** 2026-05-27
 **Status:** Accepted, with monitoring follow-ups.
@@ -6,92 +6,100 @@
 
 ## Decision
 
-When `OTP_PROVIDER=marzi`, the SocietyOS backend stops minting its own JWT pair
-and instead passes Marzi-issued tokens straight through:
+When `OTP_PROVIDER=marzi`, the SocietyOS backend runs a **hybrid** auth flow:
 
-- `POST /auth/verify-otp` → proxies to `https://dev.marzitech.in/v1/auth/verify-otp`,
-  returns the Marzi pair (`accessToken`, `refreshToken`) to the client unchanged.
-- `POST /auth/refresh` → proxies to `https://dev.marzitech.in/v1/auth/refresh`
-  with the client's refresh token as `Authorization: Bearer …`, returns the
-  new Marzi pair unchanged.
-- Every API call validates the access-token signature using `JWT_SECRET`.
+1. **Client always sees LOCAL tokens** — `accessToken` and `refreshToken` minted
+   by `TokenService` with our `JWT_SECRET`. Apps and admin-web do not know
+   Marzi exists at the token layer.
+2. **Marzi is the per-refresh authority** — on every `POST /auth/refresh`, the
+   backend exchanges the user's Marzi refresh token (stored server-side in
+   Redis at `marzi:refresh:{userId}` with a 30-day TTL) for a fresh Marzi pair.
+   If Marzi rejects (account revoked / suspended at the identity provider),
+   we refuse the refresh and the user is signed out.
+3. **Local rotation flow is preserved** — `TokenService.rotateRefresh` still
+   runs: grace-window for the reuse race, Redis tombstone on `revokeFamily`,
+   denylist for individual jtis, all unchanged.
 
-For this to work, **`JWT_SECRET` MUST equal Marzi's signing secret** so
-`JwtStrategy` can verify Marzi-signed access tokens. The existing
-`tid → societyId` mapping in `JwtStrategy.validate` continues to translate
-Marzi's tenant claim into our scoping key.
+In short: the client experience is identical to the local-only flow. Marzi
+is invoked behind the scenes on each refresh as a "is this session still
+allowed?" check.
 
 ## Why we did this
 
-1. **30-day refresh window.** Marzi's refresh tokens live for 30 days; our
-   local rotation TTL was equivalent but tied to Redis being available.
-   Marzi is now the authority on session validity.
-2. **Single identity source.** Mobile and web users authenticate through
-   Marzi anyway (OTP delivery + verification). Owning the token lifecycle
-   here was duplicate state with no win.
-3. **Implementation simplicity.** Removes ~150 lines of refresh-rotation,
-   denylist, and family-tombstone code from the hot path — replaced by a
-   single `POST` to Marzi and a local user-status check.
+1. **30-day Marzi-controlled session.** Mobile/web users authenticate through
+   Marzi via OTP; Marzi now owns the right to revoke that session at any
+   time. We honour that revocation on the next refresh.
+2. **No shared `JWT_SECRET`.** Earlier pass-through designs required us to
+   sign tokens with Marzi's secret — coupling we did not want. The hybrid
+   keeps `JWT_SECRET` independent.
+3. **Apps and admin-web require zero changes.** Tokens look exactly the
+   same as before. The shared `@societyos/api-client` refresh flow works
+   unchanged. JwtStrategy works unchanged.
+4. **Graceful migration.** Sessions minted _before_ `OTP_PROVIDER=marzi`
+   was enabled (no Marzi refresh stored) still refresh successfully — they
+   take a local-only path with a one-line log entry. No mass force-logout
+   at the operator flip.
 
-## What we lose (and live with)
+## What we trade away (and live with)
 
-| Capability                                                            | Before                                                                                  | After                                                                                                                                                                                                                                                      |
-| --------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Local revocation** of a single user (kick now, regardless of Marzi) | Yes — `revokeFamily(fid)` writes a Redis tombstone, denying the family on next refresh. | Partial — we still flip `User.status` to SUSPENDED, and `JwtStrategy.validate` rejects on every request. But the user's _access token_ is valid for its full TTL (24h with Marzi) until we expire it from the denylist or `User.status` changes propagate. |
-| **JWT denylist** for individual jtis                                  | Yes — `denylist:{jti}` in Redis.                                                        | Still applied for incoming bearers; works exactly as before.                                                                                                                                                                                               |
-| **Race-window grace + tombstone** on refresh                          | Yes — built into local `rotateRefresh`.                                                 | N/A — Marzi handles rotation; we do not see the race.                                                                                                                                                                                                      |
-| **JWT-secret isolation** between us and Marzi                         | Yes — different secrets.                                                                | **No** — secret is shared. A compromise of Marzi's secret compromises our backend's ability to verify tokens.                                                                                                                                              |
-| **Survive Marzi outage for an existing session**                      | Yes — local refresh kept sessions alive.                                                | Refresh requires Marzi. If Marzi is down, access tokens still work for their full TTL but cannot be refreshed.                                                                                                                                             |
+| Capability                            | Local-only mode             | Hybrid mode                                                                                                                                |
+| ------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Survive a Marzi outage**            | Yes — fully self-contained. | Refresh requires Marzi reachability. Access tokens stay valid for their TTL (15 min). After that, refreshes 503 until Marzi recovers.      |
+| **Local-only revocation**             | Yes.                        | Yes — `User.status=SUSPENDED` still blocks all API calls at `JwtStrategy.validate`. The refresh path also still hits the User.status gate. |
+| **Marzi-side revocation propagates**  | N/A.                        | Yes — next refresh fails, user is signed out.                                                                                              |
+| **`JWT_SECRET` rotation independent** | Yes.                        | Yes (still our secret only).                                                                                                               |
+| **Per-refresh round trip to Marzi**   | No.                         | Yes (~80 ms typical). Bounded by access-token TTL: only happens on refresh, ~once per 15 min per active user.                              |
+| **Race-window grace + tombstone**     | Yes.                        | Yes — unchanged.                                                                                                                           |
 
-The user-facing impact of these tradeoffs is small: the typical session
-flow (open app, work, refresh in background) works identically. The edge
-cases bite during a Marzi incident — bounded by the 24-hour access TTL.
+The user-facing impact is essentially zero. The only failure mode is during
+a Marzi outage: existing sessions continue working until their access token
+expires, then refreshes start failing until Marzi recovers.
 
 ## Mitigations in place
 
-1. `JwtStrategy.validate` still checks `User.status` on every request — a
-   `SUSPENDED` user is rejected immediately regardless of what Marzi
-   thinks. Same gate for `Society.status` (SUSPENDED/ARCHIVED → reject).
-2. Every privileged action emits an audit-log entry (society suspend,
-   staff transfer, bill status change, etc.).
-3. Tenant middleware still requires fresh-login-window OR reauth token
-   for SUPER_ADMIN tenant switches — the access token alone is not
-   enough to switch societies.
-4. `OTP_PROVIDER=local` remains a working fallback for tests, CI, and
-   the rare deploy that needs to operate without Marzi. The local
-   `TokenService.rotateRefresh` path with full grace-window + tombstone
-   logic is preserved unchanged.
+1. `JwtStrategy.validate` still checks `User.status` and `Society.status`
+   on every authed request — local revocation is immediate.
+2. Marzi 5xx errors during refresh bubble up as 503 to the client; the
+   shared api-client's existing transient-failure retry logic (3 attempts,
+   400/1200 ms backoff) handles short Marzi blips invisibly to the user.
+3. Marzi 4xx (the user has genuinely been revoked at Marzi) translates to
+   `USER_REVOKED` and a hard sign-out. The stale Marzi token is dropped
+   from Redis so we don't keep retrying.
+4. Missing-Marzi-refresh users get a local-only rotation with a log entry —
+   ensures no flip-day surprises.
+5. `OTP_PROVIDER=local` remains a clean fallback for tests, CI, and the
+   rare deploy that runs without Marzi. The local `TokenService` rotation
+   path with grace-window + tombstone logic is unchanged.
 
 ## Required env config
 
-For environments running `OTP_PROVIDER=marzi`:
-
 ```bash
-# Must equal Marzi's HS256 signing secret. Both backends share it so JWTs
-# minted on either side verify cleanly on the other.
-JWT_SECRET=<obtain-from-marzi-platform-team>
+# Independent of Marzi. Set per environment as usual.
+JWT_SECRET=<your-secret>
 
 # Marzi base URL. dev = dev.marzitech.in, prod = prod.marzitech.in.
 MARZI_AUTH_BASE_URL=https://dev.marzitech.in
-
-# Marzi tenant slug. Determines which Marzi tenant the OTP flow targets.
 MARZI_TENANT_NAME=Marzi
 
 OTP_PROVIDER=marzi
 ```
 
+Apps need no changes — they continue to read `accessToken`/`refreshToken`
+from `/auth/verify-otp` and `/auth/refresh` as before.
+
 ## Monitoring follow-ups (TODO)
 
-- [ ] Sentry alert: spike in `MARZI_AUTH_UNREACHABLE` errors → Marzi is down.
+- [ ] Sentry alert: spike in `MARZI_AUTH_UNREACHABLE` 503s → Marzi is down.
 - [ ] Sentry alert: any `MARZI_RESPONSE_MALFORMED` → shape drift from Marzi.
-- [ ] Rotation cadence for the shared `JWT_SECRET`. Today: ad-hoc. Goal:
-      quarterly rotation with overlap window.
-- [ ] Plan B: if Marzi outage > 1 hour, document the manual switch to
-      `OTP_PROVIDER=local` so existing sessions can keep refreshing locally.
+- [ ] Metric: ratio of refresh calls hitting the legacy "no stored Marzi
+      refresh" branch — once this approaches 0, drop the legacy fallback.
+- [ ] Marzi-mode SOS notifications must route to channel `sos` (push payload
+      needs `android.notification.channel_id: "sos"`). The channel is declared
+      but no payload targets it yet.
 
 ## References
 
-- [`backend/src/modules/auth/marzi-auth.client.ts`](../backend/src/modules/auth/marzi-auth.client.ts) — Marzi client (`verifyOtp`, `refresh`).
-- [`backend/src/modules/auth/auth.service.ts`](../backend/src/modules/auth/auth.service.ts) — `refreshTokenViaMarzi`, `refreshTokenLocal`.
-- [`backend/src/modules/auth/strategies/jwt.strategy.ts`](../backend/src/modules/auth/strategies/jwt.strategy.ts) — `tid → societyId` mapping at line 32–35.
+- [`backend/src/modules/auth/marzi-auth.client.ts`](../backend/src/modules/auth/marzi-auth.client.ts) — Marzi client (`verifyOtp`, `refresh`, `normalisePair`).
+- [`backend/src/modules/auth/auth.service.ts`](../backend/src/modules/auth/auth.service.ts) — `verifyOtp` captures Marzi refresh into Redis; `refreshTokenViaMarzi` exchanges via Marzi and rotates locally.
+- [`backend/src/modules/auth/strategies/jwt.strategy.ts`](../backend/src/modules/auth/strategies/jwt.strategy.ts) — unchanged; validates LOCAL tokens.
 - [POSTMAN.json](../backend/POSTMAN.json) — Marzi `/v1/auth/refresh` contract.

@@ -34,6 +34,10 @@ export function buildCorsOptions(rawOrigins: string, isProd: boolean): CorsOptio
       'Authorization',
       'X-Request-Id',
       'X-Society-Id',
+      // SUPER_ADMIN one-shot reauth token for tenant switching (see C1).
+      // Without this, browser preflights from admin-web drop the header and
+      // the tenant-switch gate falls back to REAUTH_REQUIRED.
+      'X-ReAuth-Token',
       'If-Match',
       'Idempotency-Key',
     ],

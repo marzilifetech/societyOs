@@ -215,13 +215,33 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
       return { ok: false, reason: 'firebase_not_initialized' };
     }
 
+    // Route critical-tagged or SOS-category alerts to the dedicated `sos`
+    // Android channel (declared by staff-app in src/lib/notifications.ts with
+    // MAX importance + lockscreen PUBLIC). Non-critical payloads fall through
+    // to the default channel.
+    const isSos = notification.critical || notification.category === 'sos' || data?.type === 'SOS_TRIGGERED';
+    const channelId = isSos ? 'sos' : 'default';
+
     try {
       await admin.messaging().send({
         token: user.fcmToken,
         notification: { title: notification.title, body: notification.body },
         data,
-        android: { priority: notification.critical ? 'high' : 'normal' },
-        apns: { payload: { aps: { sound: notification.critical ? 'default' : undefined } } },
+        android: {
+          priority: notification.critical ? 'high' : 'normal',
+          notification: { channelId },
+        },
+        apns: {
+          payload: {
+            aps: {
+              sound: notification.critical ? 'default' : undefined,
+              // iOS critical-alert flag: respected only when the app's
+              // bundle has Apple's critical-alerts entitlement granted. No-op
+              // otherwise — degrades to standard notification.
+              ...(isSos ? { 'interruption-level': 'critical' as const } : {}),
+            },
+          },
+        },
       });
       return { ok: true };
     } catch (err) {
@@ -295,6 +315,11 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
     let sent = 0;
     let failed = 0;
     let cleaned = 0;
+    // Same SOS routing as sendNow — route to the `sos` channel on Android
+    // and bump iOS to interruption-level=critical when the alert is tagged.
+    const isSos = notification.critical || notification.category === 'sos' || data?.type === 'SOS_TRIGGERED';
+    const channelId = isSos ? 'sos' : 'default';
+
     const chunks = chunk(tokens, 500);
     for (const c of chunks) {
       try {
@@ -302,8 +327,18 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
           tokens: c,
           notification: { title: notification.title, body: notification.body },
           data,
-          android: { priority: notification.critical ? 'high' : 'normal' },
-          apns: { payload: { aps: { sound: notification.critical ? 'default' : undefined } } },
+          android: {
+            priority: notification.critical ? 'high' : 'normal',
+            notification: { channelId },
+          },
+          apns: {
+            payload: {
+              aps: {
+                sound: notification.critical ? 'default' : undefined,
+                ...(isSos ? { 'interruption-level': 'critical' as const } : {}),
+              },
+            },
+          },
         });
         sent += res.successCount;
         failed += res.failureCount;

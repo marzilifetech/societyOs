@@ -13,13 +13,13 @@
   <!-- Lock-screen + full-screen SOS notification stack. POST_NOTIFICATIONS is
        required for Android 13+ runtime permission prompt; USE_FULL_SCREEN_INTENT
        is required for Android 14+ to take over the lock screen on critical
-       alerts; WAKE_LOCK + RECEIVE_BOOT_COMPLETED + SCHEDULE_EXACT_ALARM let the
-       SOS channel wake the device and survive reboots. -->
+       alerts. We intentionally do NOT request SCHEDULE_EXACT_ALARM (would
+       trigger Play Store review attention and a runtime prompt) or
+       RECEIVE_BOOT_COMPLETED/WAKE_LOCK (nothing in the app schedules an alarm
+       or holds a wake-lock today). FCM high-priority pushes wake the screen
+       via the system delivery layer. -->
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
   <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
-  <uses-permission android:name="android.permission.WAKE_LOCK"/>
-  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
-  <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
   <queries>
     <intent>
       <action android:name="android.intent.action.VIEW"/>

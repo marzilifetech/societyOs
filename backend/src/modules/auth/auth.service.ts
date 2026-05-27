@@ -167,9 +167,17 @@ export class AuthService {
   async verifyOtp(dto: VerifyOtpDto, totpCode?: string) {
     const phone = normalizeIndianPhone(dto.phone);
 
-    // In marzi-mode we call Marzi directly so we can capture its full token
-    // pair (access + refresh). The OtpService boolean fallback is still used
-    // when the local provider is configured (OTP_PROVIDER=local).
+    // Hybrid auth design:
+    //   - Local mode: OtpService verifies the OTP locally, we mint local
+    //     tokens. JWT_SECRET is independent.
+    //   - Marzi mode: we call Marzi directly so we can capture its refresh
+    //     token. The client still receives LOCAL tokens (so JWT_SECRET stays
+    //     ours, no shared-secret coupling). Marzi's refresh is parked in
+    //     Redis at `marzi:refresh:{userId}` and exchanged via Marzi on every
+    //     local /auth/refresh call (refreshTokenViaMarzi). This lets Marzi
+    //     remain the source of truth for "is this user still allowed" while
+    //     SocietyOS keeps full control of access-token signing/denylist.
+    //     See docs/AUTH-SECURITY-TRADEOFF.md.
     let marziPair: MarziTokenPair | null = null;
     if (this.marzi.enabled) {
       marziPair = await this.marzi.verifyOtp(phone, dto.otp);
@@ -223,27 +231,26 @@ export class AuthService {
       }
     }
 
-    // Two issuance paths:
-    //  - marzi mode: pass Marzi's signed tokens straight through. Requires
-    //    JWT_SECRET to match Marzi's signing secret so JwtStrategy can verify.
-    //    Marzi controls TTLs (24h access / 30d refresh) and rotation on
-    //    refresh.
-    //  - local mode: mint our own pair with TokenService (legacy / tests).
-    let accessToken: string;
-    let refreshToken: string;
+    // Always mint LOCAL tokens — keeps JWT_SECRET independent from Marzi.
+    // In marzi-mode we additionally store Marzi's refresh token in Redis;
+    // /auth/refresh uses it to re-validate the session against Marzi without
+    // ever returning Marzi's tokens to the client.
+    const pair = await this.tokens.issuePair({
+      sub: user.id,
+      phone: user.phone,
+      role: user.role,
+      societyId: user.societyId,
+      managedBlocks: (user as any).managedBlocks ?? [],
+    });
+    const accessToken = pair.accessToken;
+    const refreshToken = pair.refreshToken;
     if (marziPair) {
-      accessToken = marziPair.accessToken;
-      refreshToken = marziPair.refreshToken;
-    } else {
-      const pair = await this.tokens.issuePair({
-        sub: user.id,
-        phone: user.phone,
-        role: user.role,
-        societyId: user.societyId,
-        managedBlocks: (user as any).managedBlocks ?? [],
-      });
-      accessToken = pair.accessToken;
-      refreshToken = pair.refreshToken;
+      // 30-day TTL matches Marzi's refresh-token lifetime.
+      await this.redis.set(
+        `marzi:refresh:${user.id}`,
+        marziPair.refreshToken,
+        30 * 24 * 60 * 60,
+      );
     }
 
     await this.bumpActivity(user.id);
@@ -288,43 +295,33 @@ export class AuthService {
   }
 
   /**
-   * Proxy the refresh to Marzi, then re-verify our local user + society state.
-   * Marzi rotates both tokens; we return the new pair verbatim.
+   * Hybrid refresh:
+   *   1. Validate the LOCAL refresh token (signature, denylist, grace, etc.)
+   *      via TokenService.rotateRefresh — keeps full local control.
+   *   2. Exchange our stored Marzi refresh token via Marzi /auth/refresh.
+   *      If Marzi rejects (user revoked/suspended at the identity provider),
+   *      we fail closed even though our local rotation succeeded.
+   *   3. Persist the new Marzi refresh keyed by userId for the next round.
+   *   4. Return the LOCAL pair to the client.
+   *
+   * The client never sees Marzi tokens — JWT_SECRET stays independent.
+   * Marzi acts as the per-refresh "is this session still alive?" check.
    */
   private async refreshTokenViaMarzi(refreshToken: string) {
-    let marziPair: MarziTokenPair;
+    // Decode (no verify here — TokenService will fully verify next) to find
+    // who the user is so we can fetch their stored Marzi refresh.
+    let payload: any;
     try {
-      marziPair = await this.marzi.refresh(refreshToken);
-    } catch (err: any) {
-      // Marzi-side rejection (401 expired / 403 suspended). Translate to a
-      // single client-facing code so the mobile/web client's onUnauthorized
-      // path fires consistently.
-      this.logger.warn(`Marzi refresh rejected: ${err?.message ?? err}`);
-      throw new UnauthorizedException({ code: 'INVALID_REFRESH' });
-    }
-
-    // Decode the new ACCESS token to discover who the user is. We do not
-    // verify the signature here — JwtStrategy will do that on the next
-    // real request — but `sub` is the standard claim and we use it only to
-    // do a local lookup.
-    let decoded: any;
-    try {
-      decoded = this.jwt.decode(marziPair.accessToken);
+      payload = this.jwt.decode(refreshToken);
     } catch {
       throw new UnauthorizedException({ code: 'INVALID_REFRESH' });
     }
-    const userId: string | undefined = decoded?.sub;
-    if (!userId) throw new UnauthorizedException({ code: 'INVALID_REFRESH' });
+    if (!payload?.sub) throw new UnauthorizedException({ code: 'INVALID_REFRESH' });
 
     const user = await this.prisma.user.findUnique({
-      where: { id: userId },
+      where: { id: payload.sub },
       include: { society: { select: { status: true } } },
     });
-    // Local lifecycle gates run AFTER Marzi has accepted the refresh.
-    // - Unknown user: USER_REVOKED.
-    // - Non-ACTIVE user: USER_REVOKED.
-    // - Missing society relation: USER_REVOKED (defensive).
-    // - Non-ACTIVE society: SOCIETY_SUSPENDED / SOCIETY_ARCHIVED.
     if (!user || user.status !== UserStatus.ACTIVE) {
       throw new UnauthorizedException({ code: 'USER_REVOKED' });
     }
@@ -334,13 +331,58 @@ export class AuthService {
     }
     this.assertSocietyAccessible(user.society.status, user.societyId);
 
-    await this.bumpActivity(user.id);
+    // Marzi authority check: exchange the stored Marzi refresh for a new
+    // pair. If Marzi 401/403s, the user is revoked at the identity layer
+    // and we MUST refuse. If we have no stored Marzi refresh (eg. user
+    // logged in pre-marzi-mode), fall through to a local-only rotation —
+    // this is the migration grace path; without it, every existing session
+    // would be force-logged-out at the switch.
+    const storedMarziRefresh = await this.redis.get(`marzi:refresh:${user.id}`);
+    if (storedMarziRefresh) {
+      let newMarziPair: MarziTokenPair;
+      try {
+        newMarziPair = await this.marzi.refresh(storedMarziRefresh);
+      } catch (err: any) {
+        // 503 (Marzi unreachable) → bubble up so client retries instead
+        // of treating it as a terminal sign-out.
+        const httpStatus =
+          typeof err?.getStatus === 'function' ? err.getStatus() : undefined;
+        if (httpStatus && httpStatus >= 500) {
+          this.logger.warn(`Marzi refresh upstream unavailable: ${err?.message ?? err}`);
+          throw err;
+        }
+        this.logger.warn(`Marzi refresh rejected: ${err?.message ?? err}`);
+        // Drop the stale Marzi token so we don't keep retrying a dead one.
+        await this.redis.del(`marzi:refresh:${user.id}`);
+        throw new UnauthorizedException({ code: 'USER_REVOKED' });
+      }
+      // Marzi accepted → persist the new refresh (Marzi rotates on each call).
+      await this.redis.set(
+        `marzi:refresh:${user.id}`,
+        newMarziPair.refreshToken,
+        30 * 24 * 60 * 60,
+      );
+    } else {
+      this.logger.log(
+        `No Marzi refresh stored for user ${user.id}; rotating locally only ` +
+          '(legacy session minted before marzi-mode was enabled).',
+      );
+    }
 
+    // Always rotate the LOCAL pair via the existing TokenService flow —
+    // preserves grace window, tombstones, denylist, and the response shape
+    // the api-client expects.
+    const pair = await this.tokens.rotateRefresh(refreshToken, {
+      phone: user.phone,
+      role: user.role,
+      societyId: user.societyId,
+      managedBlocks: (user as any).managedBlocks ?? [],
+    });
+    await this.bumpActivity(user.id);
     return {
-      // Top-level fields the shared @societyos/api-client expects.
-      token: marziPair.accessToken,
-      accessToken: marziPair.accessToken,
-      refreshToken: marziPair.refreshToken,
+      token: pair.accessToken,
+      accessToken: pair.accessToken,
+      refreshToken: pair.refreshToken,
     };
   }
 

@@ -52,13 +52,17 @@ export async function registerForPushNotifications(): Promise<string | null> {
         lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
         vibrationPattern: [0, 250, 250, 250],
       });
-      // SOS / emergency channel — MAX importance, bypasses DND, takes the
-      // lock screen over via full-screen intent on Android 14+.
+      // SOS / emergency channel — MAX importance, full lockscreen visibility,
+      // distinct vibration + lights so on-call staff notice even in noisy
+      // notification environments. We deliberately do NOT set bypassDnd=true:
+      // that requires ACCESS_NOTIFICATION_POLICY plus an explicit user-side
+      // grant in DND settings, and silently no-ops otherwise. Backend push
+      // payload should target channel_id="sos" for emergency alerts to land
+      // here (TODO: wire in push.service.ts).
       await Notifications.setNotificationChannelAsync('sos', {
         name: 'Emergency Alerts',
         importance: Notifications.AndroidImportance.MAX,
         lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
-        bypassDnd: true,
         sound: 'default',
         vibrationPattern: [0, 500, 250, 500],
         enableVibrate: true,

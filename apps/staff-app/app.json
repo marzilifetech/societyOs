@@ -24,14 +24,7 @@
         "backgroundColor": "#1E3A5F"
       },
       "package": "com.societyos.staff",
-      "permissions": [
-        "POST_NOTIFICATIONS",
-        "USE_FULL_SCREEN_INTENT",
-        "VIBRATE",
-        "WAKE_LOCK",
-        "RECEIVE_BOOT_COMPLETED",
-        "SCHEDULE_EXACT_ALARM"
-      ]
+      "permissions": ["POST_NOTIFICATIONS", "USE_FULL_SCREEN_INTENT", "VIBRATE"]
     },
     "plugins": [
       "expo-router",
