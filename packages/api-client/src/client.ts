@@ -24,12 +24,27 @@ export interface ApiClientConfig {
 }
 
 /**
- * Backend error codes that mean "the access token is expired but the session
- * may still be valid" — these trigger a refresh attempt. Anything else on a
- * 401 (token revoked, refresh family revoked, replay detected, malformed
- * token) is a hard failure and the user must sign in again.
+ * Backend error codes that mean "the access token is expired or stale, but
+ * the session may still be valid" — refresh and retry once. Anything else
+ * (USER_REVOKED, REFRESH_REUSE_DETECTED, malformed token, INVALID_REFRESH)
+ * is a hard sign-out.
+ *
+ * REAUTH_REQUIRED is included because the backend's super-admin tenant-switch
+ * gate fires when the access token's `iat` is older than the fresh-login
+ * window. A successful refresh produces a token with a new `iat` (fresh by
+ * definition), so retrying after refresh passes the gate without needing
+ * the user to enter another OTP.
+ *
+ * REAUTH_REQUIRES_VALID_BEARER fires when the bearer signature is invalid
+ * at the middleware pre-check (before JwtAuthGuard). Refreshing produces
+ * a fresh, properly-signed bearer that clears this too.
  */
-const REFRESHABLE_CODES = new Set(['TOKEN_EXPIRED', 'TOKEN_SKEW']);
+const REFRESHABLE_CODES = new Set([
+  'TOKEN_EXPIRED',
+  'TOKEN_SKEW',
+  'REAUTH_REQUIRED',
+  'REAUTH_REQUIRES_VALID_BEARER',
+]);
 
 export class ApiClient {
   private config: ApiClientConfig;
@@ -140,22 +155,33 @@ export class ApiClient {
       clearTimeout(timeoutId);
     }
 
-    if (res.status === 401) {
-      // Inspect the envelope to decide whether to refresh or hard-logout.
+    // Auth-related failures can land as either 401 (expired/invalid bearer)
+    // OR 400 (e.g. REAUTH_REQUIRED — bearer valid but `iat` too old for a
+    // privileged action). For 4xx with one of the refreshable codes, attempt
+    // a silent refresh + retry once. Pure-401 with no code is treated as
+    // legacy/ambiguous and refresh is also tried.
+    if (res.status === 401 || res.status === 400) {
       let code: string | undefined;
+      let serverBody: any;
       try {
-        const serverBody = await res.json();
+        serverBody = await res.json();
         code = serverBody?.error?.code;
       } catch {
         /* not JSON */
       }
 
+      // 401 default = try refresh; 400 only when the code is one we recognise
+      // as auth-related (don't refresh on every random 400!).
+      const isAuth4xx =
+        res.status === 401
+          ? code === undefined || REFRESHABLE_CODES.has(code)
+          : !!code && REFRESHABLE_CODES.has(code);
+
       const canRefresh =
         !_retried &&
         !!this.config.getRefreshToken &&
         !!this.config.setTokens &&
-        // Treat 401 with no code as legacy/ambiguous — try a refresh once.
-        (code === undefined || REFRESHABLE_CODES.has(code));
+        isAuth4xx;
 
       if (canRefresh) {
         const newAccess = await this.tryRefresh();
@@ -165,9 +191,19 @@ export class ApiClient {
         }
       }
 
+      // If this wasn't an auth 4xx, fall through to the generic error path
+      // below so the caller sees the real message (e.g. validation errors).
+      if (res.status === 400 && !isAuth4xx) {
+        const e: any = new Error(serverBody?.error?.message ?? `Request failed: 400`);
+        e.status = 400;
+        e.body = serverBody;
+        if (code) e.code = code;
+        throw e;
+      }
+
       this.config.onUnauthorized?.();
       const e: any = new Error('Your session ended. Please sign in again.');
-      e.status = 401;
+      e.status = res.status;
       if (code) e.code = code;
       throw e;
     }
