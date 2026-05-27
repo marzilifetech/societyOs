@@ -55,6 +55,22 @@ The user-facing impact is essentially zero. The only failure mode is during
 a Marzi outage: existing sessions continue working until their access token
 expires, then refreshes start failing until Marzi recovers.
 
+## Reauth fresh-login window
+
+`REAUTH_FRESH_WINDOW_SECONDS` (default **24h**) controls how recently the
+bearer JWT must have been minted for a SUPER_ADMIN tenant switch to skip
+the explicit reauth modal. Beyond this window the user must POST
+`/auth/reauth` to mint a one-shot `X-ReAuth-Token`.
+
+The 24h default is deliberate for marzi-mode: every refresh re-validates
+the session against Marzi server-side, so a valid local bearer is itself
+proof of recent strong auth. Forcing a second OTP every 5 minutes for
+legitimate SUPER_ADMIN flows was friction without security gain.
+
+For high-risk environments (staging mirror of prod, security review
+mode), tighten to `REAUTH_FRESH_WINDOW_SECONDS=300` (5 min) to require
+reauth more aggressively.
+
 ## Mitigations in place
 
 1. `JwtStrategy.validate` still checks `User.status` and `Society.status`

@@ -19,12 +19,16 @@ type MeResponse = { id: string; totpEnabled?: boolean };
 type ReauthResponse = { reauthToken: string; expiresInSeconds: number };
 
 /**
- * Backend's REAUTH_FRESH_WINDOW_SECONDS — must match. Within this window
- * after the JWT was minted, tenant switches are allowed without an
- * explicit reauth token (Marzi OTP just happened, so the JWT is itself
- * proof of recent strong auth). Beyond it, we open the reauth modal.
+ * Backend's REAUTH_FRESH_WINDOW_SECONDS — must match. The backend default
+ * is now 24h: in marzi-mode every refresh re-validates against Marzi
+ * server-side, so a valid local bearer IS recent strong auth. Within this
+ * window, tenant switches require no extra reauth step.
+ *
+ * Mirror with a slight cushion so the client always opens the modal a
+ * little BEFORE the backend would 400 — avoids the awkward path where
+ * the user clicks, no modal opens, then the next API call 400s anyway.
  */
-const FRESH_LOGIN_WINDOW_SECONDS = 300;
+const FRESH_LOGIN_WINDOW_SECONDS = 24 * 60 * 60 - 60; // 24h − 60s safety cushion
 
 function readBearerIat(): number | null {
   if (typeof window === 'undefined') return null;

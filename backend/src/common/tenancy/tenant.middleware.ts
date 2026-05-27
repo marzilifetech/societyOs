@@ -11,12 +11,17 @@ import { AuthRedis } from '../../modules/auth/redis.client';
  * tenant switches without a separate one-shot re-auth token. After this
  * window the user must POST /auth/reauth to mint an X-ReAuth-Token.
  *
- * Rationale: with OTP_PROVIDER=marzi every JWT minting is preceded by a
- * fresh Marzi-side OTP verification — so a recent `iat` IS recent strong
- * auth. Requiring a second OTP within 5 minutes is friction without
- * meaningful security gain. Configurable via REAUTH_FRESH_WINDOW_SECONDS.
+ * Default = 24h: in marzi-mode every refresh re-validates the session
+ * against Marzi server-side (refreshTokenViaMarzi), so "this bearer is
+ * still valid + the user still exists in Marzi" gives us the same
+ * assurance a fresh OTP would. Forcing a second OTP every 5 minutes for
+ * legitimate SUPER_ADMIN flows was friction without security gain — see
+ * docs/AUTH-SECURITY-TRADEOFF.md for the deliberate tradeoff.
+ *
+ * To tighten the window (e.g. for high-risk staging), set
+ * REAUTH_FRESH_WINDOW_SECONDS=300 to require reauth after 5 min.
  */
-const DEFAULT_FRESH_WINDOW_SECONDS = 300; // 5 minutes
+const DEFAULT_FRESH_WINDOW_SECONDS = 24 * 60 * 60; // 24 hours
 
 /**
  * TenantMiddleware
