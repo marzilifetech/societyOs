@@ -6,17 +6,31 @@ import { tenantStorage, TenantContext } from './tenant.context';
 import { AuthRedis } from '../../modules/auth/redis.client';
 
 /**
+ * If the bearer JWT was issued within this many seconds, we treat it as
+ * fresh proof-of-auth (Marzi OTP just happened) and allow super-admin
+ * tenant switches without a separate one-shot re-auth token. After this
+ * window the user must POST /auth/reauth to mint an X-ReAuth-Token.
+ *
+ * Rationale: with OTP_PROVIDER=marzi every JWT minting is preceded by a
+ * fresh Marzi-side OTP verification — so a recent `iat` IS recent strong
+ * auth. Requiring a second OTP within 5 minutes is friction without
+ * meaningful security gain. Configurable via REAUTH_FRESH_WINDOW_SECONDS.
+ */
+const DEFAULT_FRESH_WINDOW_SECONDS = 300; // 5 minutes
+
+/**
  * TenantMiddleware
  *
  * Extracts tenant context (societyId, userId, role) from the bearer JWT
  * and stores it into AsyncLocalStorage so the Prisma tenant extension
  * can scope every query.
  *
- * Corner case MT4: Super-admins may switch tenant via `X-Society-Id`
- * header — this requires a fresh one-shot re-auth token in
- * `X-ReAuth-Token` (issued by POST /auth/reauth). The legacy boolean
- * `X-ReAuth-Confirmed: 1` header is no longer trusted: it was trivial
- * for the client to stamp on every request, defeating the gate.
+ * Corner case MT4: Super-admins may switch tenant via `X-Society-Id`.
+ * Accepted proofs of recent strong auth, in order of preference:
+ *   1. Bearer JWT `iat` within FRESH_WINDOW_SECONDS — implicit, no extra header.
+ *   2. `X-ReAuth-Token` header — one-shot signed token from POST /auth/reauth.
+ * The legacy boolean `X-ReAuth-Confirmed: 1` is no longer trusted: it was
+ * trivial for any client to stamp on every request, defeating the gate.
  */
 @Injectable()
 export class TenantMiddleware implements NestMiddleware {
@@ -53,66 +67,78 @@ export class TenantMiddleware implements NestMiddleware {
       }
     }
 
-    // Super-admin tenant override — requires a verified one-shot re-auth
-    // token. Consumed on first read so it cannot be replayed for a second
-    // switch in the same session.
-    //
-    // Burn-order safety: we only consume the reauth jti AFTER the bearer
-    // token has been signature-verified here. If the bearer is invalid
-    // (expired / forged / wrong secret), the request would fail at the
-    // JwtAuthGuard anyway — burning the reauth token in that case wastes
-    // the user's TOTP/OTP entry. Re-verifying the bearer here is cheap and
-    // defends against that footgun.
+    // Super-admin tenant override. Two acceptable proofs:
+    //   (a) Bearer JWT issued within the fresh-login window → trust as recent
+    //       Marzi auth, no extra header required.
+    //   (b) Explicit one-shot X-ReAuth-Token → for older sessions.
+    // Burn order: when (b) is in use, the bearer is signature-verified BEFORE
+    // the reauth jti is consumed so a bad bearer doesn't waste the user's OTP.
     const switchHeader = req.header('x-society-id');
     if (switchHeader && ctx.role === 'SUPER_ADMIN' && switchHeader !== ctx.societyId) {
-      const reauthHeader = req.header('x-reauth-token');
-      if (!reauthHeader) {
-        throw new BadRequestException({
-          code: 'REAUTH_REQUIRED',
-          message:
-            'Super-admin tenant switch requires a fresh X-ReAuth-Token (POST /auth/reauth)',
-        });
-      }
-      // Cheap defense: signature-verify the bearer before burning the reauth.
-      const bearerOk = this.verifyBearer(req.header('authorization'));
-      if (!bearerOk) {
-        // Let the JwtAuthGuard surface the real error — but DO NOT burn the
-        // reauth token because the request will fail downstream anyway.
+      const verified = this.verifyBearerWithPayload(req.header('authorization'));
+      if (!verified) {
         throw new BadRequestException({
           code: 'REAUTH_REQUIRES_VALID_BEARER',
           message:
-            'A tenant switch needs both a valid access token and a fresh re-auth token. Please sign in again.',
+            'A tenant switch needs a valid access token. Please sign in again.',
         });
       }
-      const ok = await this.consumeReauthToken(reauthHeader, ctx.userId);
-      if (!ok) {
-        throw new BadRequestException({
-          code: 'REAUTH_INVALID',
-          message: 'Re-auth token is invalid, expired, or already used',
-        });
+
+      // (a) Fresh-login grace — JWT issued within FRESH_WINDOW_SECONDS.
+      const freshWindow = Number(
+        this.config?.get('REAUTH_FRESH_WINDOW_SECONDS') ?? DEFAULT_FRESH_WINDOW_SECONDS,
+      );
+      const iat = typeof verified.iat === 'number' ? verified.iat : 0;
+      const ageSeconds = Math.floor(Date.now() / 1000) - iat;
+      const isFresh = iat > 0 && ageSeconds <= freshWindow;
+
+      if (isFresh) {
+        ctx.reAuthConfirmed = true;
+        ctx.societyId = switchHeader;
+        ctx.superAdminBypass = true;
+      } else {
+        // (b) Fall back to explicit one-shot reauth token for aged sessions.
+        const reauthHeader = req.header('x-reauth-token');
+        if (!reauthHeader) {
+          throw new BadRequestException({
+            code: 'REAUTH_REQUIRED',
+            message:
+              `Access token is older than ${freshWindow}s; tenant switch requires a fresh X-ReAuth-Token (POST /auth/reauth) or a fresh sign-in.`,
+            ageSeconds,
+            freshWindowSeconds: freshWindow,
+          });
+        }
+        const ok = await this.consumeReauthToken(reauthHeader, ctx.userId);
+        if (!ok) {
+          throw new BadRequestException({
+            code: 'REAUTH_INVALID',
+            message: 'Re-auth token is invalid, expired, or already used',
+          });
+        }
+        ctx.reAuthConfirmed = true;
+        ctx.societyId = switchHeader;
+        ctx.superAdminBypass = true;
       }
-      ctx.reAuthConfirmed = true;
-      ctx.societyId = switchHeader;
-      ctx.superAdminBypass = true;
     }
 
     tenantStorage.run(ctx, () => next());
   }
 
   /**
-   * Signature-verify the bearer access token. Returns true iff it verifies
-   * cleanly. We only use this in the reauth gate above — JwtAuthGuard does
-   * the same verification later for the actual route, so this is purely a
-   * pre-flight check to avoid burning the reauth jti when the bearer is bad.
+   * Signature-verify the bearer access token and return its payload.
+   * Returns null on any verification failure. Used by the reauth gate to
+   * (a) ensure we don't burn a reauth token when the bearer is bad, and
+   * (b) read `iat` for the fresh-login grace window. JwtAuthGuard does the
+   * same verification later for the actual route, so this is a pre-flight.
    */
-  private verifyBearer(authHeader: string | undefined): boolean {
-    if (!authHeader?.startsWith('Bearer ') || !this.jwt || !this.config) return false;
+  private verifyBearerWithPayload(authHeader: string | undefined): Record<string, any> | null {
+    if (!authHeader?.startsWith('Bearer ') || !this.jwt || !this.config) return null;
     try {
       const token = authHeader.slice(7);
       const payload: any = this.jwt.verify(token, { secret: this.config.get('JWT_SECRET') });
-      return !!payload && typeof payload === 'object';
+      return payload && typeof payload === 'object' ? payload : null;
     } catch {
-      return false;
+      return null;
     }
   }
 

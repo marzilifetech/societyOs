@@ -19,6 +19,28 @@ type MeResponse = { id: string; totpEnabled?: boolean };
 type ReauthResponse = { reauthToken: string; expiresInSeconds: number };
 
 /**
+ * Backend's REAUTH_FRESH_WINDOW_SECONDS — must match. Within this window
+ * after the JWT was minted, tenant switches are allowed without an
+ * explicit reauth token (Marzi OTP just happened, so the JWT is itself
+ * proof of recent strong auth). Beyond it, we open the reauth modal.
+ */
+const FRESH_LOGIN_WINDOW_SECONDS = 300;
+
+function readBearerIat(): number | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const token = localStorage.getItem('admin_token');
+    if (!token) return null;
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+    return typeof payload?.iat === 'number' ? payload.iat : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * SocietySwitcher
  *
  * Lets SUPER_ADMIN re-target every subsequent API call at a different society
@@ -115,6 +137,21 @@ export function SocietySwitcher() {
     }
     const target = societies.find((s) => s.id === societyId);
     if (!target) return;
+
+    // Fresh-login fast path: if the current access token was minted within
+    // the last FRESH_LOGIN_WINDOW_SECONDS (Marzi OTP happened recently), the
+    // backend will accept the switch without a separate reauth token. Skip
+    // the modal entirely — much smoother UX for the typical "log in, do
+    // multi-society work" flow.
+    const iat = readBearerIat();
+    const now = Math.floor(Date.now() / 1000);
+    const ageSeconds = iat ? now - iat : Number.POSITIVE_INFINITY;
+    if (ageSeconds <= FRESH_LOGIN_WINDOW_SECONDS) {
+      finalizeSwitch(societyId);
+      return;
+    }
+
+    // Stale session — fall back to explicit reauth modal.
     setPendingTarget(target);
   };
 
