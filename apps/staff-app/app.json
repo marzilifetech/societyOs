@@ -13,14 +13,25 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.societyos.staff"
+      "bundleIdentifier": "com.societyos.staff",
+      "infoPlist": {
+        "UIBackgroundModes": ["remote-notification"]
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#1E3A5F"
       },
-      "package": "com.societyos.staff"
+      "package": "com.societyos.staff",
+      "permissions": [
+        "POST_NOTIFICATIONS",
+        "USE_FULL_SCREEN_INTENT",
+        "VIBRATE",
+        "WAKE_LOCK",
+        "RECEIVE_BOOT_COMPLETED",
+        "SCHEDULE_EXACT_ALARM"
+      ]
     },
     "plugins": [
       "expo-router",

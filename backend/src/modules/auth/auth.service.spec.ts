@@ -41,6 +41,19 @@ describe('AuthService app activation', () => {
         { provide: AuthRedis, useValue: { set: jest.fn().mockResolvedValue(undefined), get: jest.fn(), del: jest.fn() } },
         { provide: ComplianceService, useValue: {} },
         { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue('test-secret') } },
+        // Marzi client: tests use the LOCAL OTP+token path (marzi.enabled=false)
+        // unless the test explicitly enables it. Refresh is also overridden
+        // per-test where the Marzi-proxy path is being exercised.
+        {
+          provide: require('./marzi-auth.client').MarziAuthClient,
+          useValue: {
+            get enabled() {
+              return false;
+            },
+            verifyOtp: jest.fn(),
+            refresh: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
@@ -300,6 +313,102 @@ describe('AuthService app activation', () => {
       jwtSvc.verify.mockReturnValue({ sub: 'sa-1', jti: 'jti-1' });
       const result = await service.consumeReauthToken('access-token');
       expect(result).toBeNull();
+    });
+  });
+
+  // ── Marzi-proxy refresh path (OTP_PROVIDER=marzi) ────────────────────────────
+  // When marzi.enabled, refreshToken() delegates to Marzi's /v1/auth/refresh,
+  // then re-applies our local user+society lifecycle gates on the returned
+  // identity. We never touch the local TokenService rotation in this mode.
+  describe('refreshToken — Marzi-proxy path', () => {
+    const marziPair = {
+      accessToken: 'marzi.access.jwt',
+      refreshToken: 'marzi.refresh.jwt',
+    };
+
+    function enableMarzi() {
+      const marzi = (service as any).marzi as { enabled: boolean; refresh: jest.Mock };
+      Object.defineProperty(marzi, 'enabled', { value: true, configurable: true });
+      marzi.refresh.mockResolvedValue(marziPair);
+    }
+
+    function decodeReturns(sub: string | null) {
+      const jwtSvc = (service as any).jwt as { decode: jest.Mock };
+      jwtSvc.decode.mockReturnValue(sub ? { sub } : null);
+    }
+
+    it('happy path: calls Marzi, validates local user, returns the Marzi pair', async () => {
+      enableMarzi();
+      decodeReturns('u1');
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'u1',
+        status: UserStatus.ACTIVE,
+        role: UserRole.RESIDENT,
+        societyId: 'soc-1',
+        society: { status: 'ACTIVE' },
+      });
+
+      const result = await service.refreshToken('client.refresh.jwt');
+
+      const marziSvc = (service as any).marzi as { refresh: jest.Mock };
+      expect(marziSvc.refresh).toHaveBeenCalledWith('client.refresh.jwt');
+      expect(result).toEqual({
+        token: marziPair.accessToken,
+        accessToken: marziPair.accessToken,
+        refreshToken: marziPair.refreshToken,
+      });
+    });
+
+    it('translates Marzi rejection (401/403) to INVALID_REFRESH', async () => {
+      enableMarzi();
+      const marziSvc = (service as any).marzi as { refresh: jest.Mock };
+      marziSvc.refresh.mockRejectedValue(new Error('Marzi 401'));
+
+      await expect(service.refreshToken('bad.refresh')).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'INVALID_REFRESH' }),
+      });
+    });
+
+    it('USER_REVOKED when local user not found after Marzi accepted', async () => {
+      enableMarzi();
+      decodeReturns('u-missing');
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+
+      await expect(service.refreshToken('refresh')).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'USER_REVOKED' }),
+      });
+    });
+
+    it('USER_REVOKED when local user is non-ACTIVE (we can revoke without Marzi)', async () => {
+      enableMarzi();
+      decodeReturns('u1');
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'u1',
+        status: UserStatus.SUSPENDED,
+        role: UserRole.RESIDENT,
+        societyId: 'soc-1',
+        society: { status: 'ACTIVE' },
+      });
+
+      await expect(service.refreshToken('refresh')).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'USER_REVOKED' }),
+      });
+    });
+
+    it('SOCIETY_SUSPENDED when caller society is SUSPENDED — even with valid Marzi pair', async () => {
+      enableMarzi();
+      decodeReturns('u1');
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'u1',
+        status: UserStatus.ACTIVE,
+        role: UserRole.RESIDENT,
+        societyId: 'soc-1',
+        society: { status: 'SUSPENDED' },
+      });
+
+      await expect(service.refreshToken('refresh')).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'SOCIETY_SUSPENDED' }),
+      });
     });
   });
 });

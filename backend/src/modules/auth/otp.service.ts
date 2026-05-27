@@ -93,11 +93,17 @@ export class OtpService {
     return 'no-delivery';
   }
 
-  /** Verify OTP previously sent. Returns true on match, throws on lockout. */
+  /**
+   * Verify OTP previously sent. Returns true on match, throws on lockout.
+   * In marzi-mode the AuthService bypasses this method and calls
+   * `marzi.verifyOtp` directly so it can capture the Marzi token pair.
+   * This boolean-shaped fallback is kept so older callers (tests, fallback
+   * paths) still work — we wrap the Marzi pair result back to a boolean.
+   */
   async verifyOtp(phone: string, otp: string): Promise<boolean> {
-    // OTP_PROVIDER=marzi — verification happens on the external Marzi backend.
     if (this.marzi.enabled) {
-      return this.marzi.verifyOtp(phone, otp);
+      const pair = await this.marzi.verifyOtp(phone, otp);
+      return pair !== null;
     }
 
     const locked = await this.redis.get(`otp:lock:${phone}`);
