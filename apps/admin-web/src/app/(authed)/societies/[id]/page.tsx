@@ -5,9 +5,11 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, ShieldAlert } from 'lucide-react';
 import { api } from '@/lib/api';
 import { ErrorState } from '@/components/ui/ErrorState';
+import { useAuthStore } from '@/store/auth.store';
+import { Card } from '@/components/primitives';
 
 type SocietyDetail = {
   id: string;
@@ -24,12 +26,18 @@ export default function SocietyDetailPage() {
   const params = useParams();
   const id = params.id as string;
   const qc = useQueryClient();
+  const { user } = useAuthStore();
+  const isSuperAdmin = user?.role === 'SUPER_ADMIN';
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({ name: '', address: '', city: '', pincode: '', showInDirectory: false });
 
+  // Hooks must run unconditionally — gate the render, not the hooks. Also
+  // disable the query for non-super-admins so they don't trip the backend's
+  // SUPER_ADMIN-only role guard and surface a confusing 403 toast.
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['society-detail', id],
     queryFn: () => api.get<SocietyDetail>(`/admin/societies/${id}`),
+    enabled: isSuperAdmin,
   });
 
   const updateMutation = useMutation({
@@ -54,6 +62,26 @@ export default function SocietyDetailPage() {
     });
     setEditing(true);
   };
+
+  if (!isSuperAdmin) {
+    return (
+      <div className="p-8">
+        <Card>
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 rounded-lg bg-amber-50 text-amber-700 flex items-center justify-center shrink-0">
+              <ShieldAlert className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-[15px] font-semibold text-gray-950">Restricted</h2>
+              <p className="text-[13px] text-gray-500 mt-0.5">
+                Society management is a platform-level operation. Sign in as a super-admin to manage societies.
+              </p>
+            </div>
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   if (isLoading) return <div className="p-8 text-gray-500">Loading…</div>;
   if (isError || !data) return <ErrorState onRetry={() => refetch()} />;

@@ -9,6 +9,7 @@ import { api } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { useAuthStore } from '@/store/auth.store';
+import { Button, Modal, Textarea } from '@/components/primitives';
 
 const STATUS_META: Record<string, { label: string; color: string }> = {
   ACTIVE: { label: 'Active', color: 'bg-green-100 text-green-700' },
@@ -21,6 +22,7 @@ const DOC_STATUS_META: Record<string, { label: string; color: string }> = {
   PENDING: { label: 'Pending', color: 'bg-gray-100 text-gray-500' },
   UPLOADED: { label: 'Uploaded', color: 'bg-blue-100 text-blue-700' },
   VERIFIED: { label: 'Verified', color: 'bg-green-100 text-green-700' },
+  REJECTED: { label: 'Rejected', color: 'bg-red-100 text-red-700' },
 };
 
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
@@ -56,6 +58,9 @@ export default function ResidentDetailPage() {
   const [editForm, setEditForm] = useState<Record<string, any>>({});
   const [dismissOpen, setDismissOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  // F2: doc verify/reject — small reject-with-note modal.
+  const [docRejectOpen, setDocRejectOpen] = useState(false);
+  const [docRejectNote, setDocRejectNote] = useState('');
 
   const { data: residents, isLoading, isError, refetch } = useQuery({
     queryKey: ['residents'],
@@ -127,6 +132,20 @@ export default function ResidentDetailPage() {
     onError: (err: any) => toast.error(err?.message ?? 'Failed to update resident'),
   });
 
+  // F2: Verify / Reject resident documents. Backend endpoint:
+  // PATCH /admin/residents/:id/documents/verify { status, note? }
+  const verifyDocsMutation = useMutation({
+    mutationFn: (payload: { status: 'VERIFIED' | 'REJECTED'; note?: string }) =>
+      api.patch(`/admin/residents/${id}/documents/verify`, payload),
+    onSuccess: (_data, vars) => {
+      toast.success(vars.status === 'VERIFIED' ? 'Documents verified' : 'Documents rejected');
+      invalidateBoth();
+      setDocRejectOpen(false);
+      setDocRejectNote('');
+    },
+    onError: (err: any) => toast.error(err?.message ?? 'Failed to update document status'),
+  });
+
   const exportMutation = useMutation({
     mutationFn: () => api.post<{ url?: string; jobId?: string }>(`/admin/residents/${id}/data-export`, {}),
     onSuccess: (res) => {
@@ -148,6 +167,7 @@ export default function ResidentDetailPage() {
         setDismissOpen(false);
         setDeleteOpen(false);
         setEditOpen(false);
+        setDocRejectOpen(false); setDocRejectNote('');
       }
     };
     window.addEventListener('keydown', handler);
@@ -320,11 +340,38 @@ export default function ResidentDetailPage() {
 
       {/* Documents card */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-4">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <h2 className="text-sm font-semibold text-gray-700">Documents</h2>
-          <span className={cn('text-xs font-medium px-2.5 py-1 rounded-full', docMeta.color)}>
-            {docMeta.label}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className={cn('text-xs font-medium px-2.5 py-1 rounded-full', docMeta.color)}>
+              {docMeta.label}
+            </span>
+            {/* F2: only show action buttons when there is something to act on
+                (something uploaded) and it's not already in the requested
+                state — keeps the UI calm for fully-verified residents. */}
+            {r.documentsStatus !== 'VERIFIED' && (
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={() => verifyDocsMutation.mutate({ status: 'VERIFIED' })}
+                disabled={verifyDocsMutation.isPending}
+              >
+                {verifyDocsMutation.isPending && verifyDocsMutation.variables?.status === 'VERIFIED'
+                  ? 'Verifying…'
+                  : 'Verify'}
+              </Button>
+            )}
+            {r.documentsStatus !== 'REJECTED' && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => { setDocRejectOpen(true); setDocRejectNote(''); }}
+                disabled={verifyDocsMutation.isPending}
+              >
+                Reject
+              </Button>
+            )}
+          </div>
         </div>
         <div className="flex gap-4 flex-wrap">
           {r.idProof ? (
@@ -589,6 +636,38 @@ export default function ResidentDetailPage() {
           </div>
         </div>
       )}
+
+      {/* F2: Reject documents — optional note */}
+      <Modal
+        open={docRejectOpen}
+        onClose={() => { setDocRejectOpen(false); setDocRejectNote(''); }}
+        title="Reject documents"
+        description="Add a short note explaining what needs to be corrected. The resident sees this."
+        size="sm"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => { setDocRejectOpen(false); setDocRejectNote(''); }}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              loading={verifyDocsMutation.isPending}
+              onClick={() =>
+                verifyDocsMutation.mutate({ status: 'REJECTED', note: docRejectNote.trim() || undefined })
+              }
+            >
+              Reject documents
+            </Button>
+          </>
+        }
+      >
+        <Textarea
+          rows={4}
+          placeholder="Optional: e.g. ID proof unreadable, please re-upload."
+          value={docRejectNote}
+          onChange={(e) => setDocRejectNote(e.target.value)}
+        />
+      </Modal>
     </div>
   );
 }
