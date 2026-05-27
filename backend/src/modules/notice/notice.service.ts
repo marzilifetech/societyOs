@@ -16,10 +16,18 @@ export class NoticeService {
     private whatsapp: WhatsAppService,
   ) {}
 
-  async getNotices(societyId: string) {
+  async getNotices(
+    societyId: string,
+    opts?: { onlyPinned?: boolean; limit?: number },
+  ) {
     return this.prisma.notice.findMany({
-      where: { societyId, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
-      orderBy: [{ isPinned: 'desc' }, { publishedAt: 'desc' }],
+      where: {
+        societyId,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+        ...(opts?.onlyPinned ? { isPinned: true } : {}),
+      },
+      orderBy: [{ isPinned: 'desc' }, { publishedAt: 'desc' }, { createdAt: 'desc' }],
+      ...(opts?.limit ? { take: opts.limit } : {}),
     });
   }
 
@@ -188,6 +196,16 @@ export class NoticeService {
     return this.prisma.notice.update({
       where: { id },
       data: { ...(category !== undefined ? { category } : {}), ...rest },
+    });
+  }
+
+  async togglePin(id: string, societyId: string) {
+    const notice = await this.prisma.notice.findUnique({ where: { id } });
+    if (!notice) throw new NotFoundException('Notice not found');
+    if (notice.societyId !== societyId) throw new ForbiddenException('Notice belongs to another society');
+    return this.prisma.notice.update({
+      where: { id },
+      data: { isPinned: !notice.isPinned },
     });
   }
 

@@ -45,7 +45,7 @@ export default function PinLoginScreen() {
           text: 'OK',
           onPress: async () => {
             await clearAuth();
-            router.replace('/(auth)/phone-entry' as any);
+            router.replace('/(auth)/society-select' as any);
           },
         },
       ]);
@@ -85,7 +85,7 @@ export default function PinLoginScreen() {
             className="mt-4 items-center py-2"
             onPress={async () => {
               await clearAuth();
-              router.replace('/(auth)/phone-entry' as any);
+              router.replace('/(auth)/society-select' as any);
             }}
           >
             <Text className="text-blue-200 text-sm">Forgot PIN? Log in with phone</Text>
