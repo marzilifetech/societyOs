@@ -40,7 +40,19 @@ function friendlyError(status: number, serverMsg?: string, serverCode?: string):
     if (serverCode) e.code = serverCode;
     return e;
   }
-  // Prefer API envelope messages for actionable admin errors (conflicts, transitions, etc.).
+  // Per-status messages with explicit codes so users get actionable feedback
+  // for the common failure modes. 429 in particular was previously falling
+  // through to "An unexpected error occurred" which mis-classified as CORS
+  // in the browser console — see senior-frontend review (2026-05-28).
+  if (status === 429) {
+    const e: Error & { code?: string } = new Error(
+      serverMsg ||
+        'Too many requests — please wait a few seconds and try again.',
+    );
+    e.code = serverCode ?? 'RATE_LIMITED';
+    return e;
+  }
+  // Prefer API envelope messages for other actionable admin 4xx (conflicts, transitions, etc.).
   if (serverMsg && status >= 400 && status < 500) {
     const e: Error & { code?: string } = new Error(serverMsg);
     if (serverCode) e.code = serverCode;
@@ -54,6 +66,11 @@ function friendlyError(status: number, serverMsg?: string, serverCode?: string):
   }
   if (status === 409) {
     return new Error(serverMsg ?? 'This record already exists. Please check and try again.');
+  }
+  if (status === 503) {
+    return new Error(
+      'Service is temporarily unavailable. Please try again in a moment.',
+    );
   }
   if (status >= 500) {
     return new Error('Something went wrong on our end. Please try again in a moment.');
@@ -100,14 +117,25 @@ class AdminApiClient extends ApiClient {
     try {
       return await fn();
     } catch (err: any) {
-      // Network / timeout errors
+      // Network / timeout errors. Differentiate "user is offline" from
+      // "server unreachable" so the message tells the user something useful;
+      // previously every network-class failure (real offline, server down,
+      // CORS reject, browser block) showed the same opaque "check your
+      // internet" line.
       if (
         err instanceof TypeError ||
         err?.code === 'ECONNABORTED' ||
         err?.code === 'ERR_NETWORK'
       ) {
+        const browserOffline =
+          typeof navigator !== 'undefined' && navigator.onLine === false;
+        if (browserOffline) {
+          throw new Error(
+            "You're offline. The dashboard will retry automatically once you're back online.",
+          );
+        }
         throw new Error(
-          'Could not connect to the server. Please check your internet connection and try again.',
+          'The server is unreachable. This is usually temporary — please retry in a moment.',
         );
       }
       const msg: string = err?.message ?? '';
