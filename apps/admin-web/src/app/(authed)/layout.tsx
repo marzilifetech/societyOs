@@ -1,5 +1,6 @@
 import { Sidebar } from '@/components/layout/Sidebar';
 import { OfflineBanner } from '@/components/ui/OfflineBanner';
+import { CrossTabSocietySync } from '@/components/layout/CrossTabSocietySync';
 
 // Opt the entire authed route segment OUT of static generation. These pages
 // are runtime-only dashboards: every child component reads from React Query,
@@ -20,6 +21,10 @@ export default function AuthedLayout({ children }: { children: React.ReactNode }
           top when offline so users get honest network feedback instead of
           opaque "Something went wrong" errors. */}
       <OfflineBanner />
+      {/* Reload this tab when another tab switches the active society —
+          prevents stale React Query cache from leaking the previous tenant's
+          data into the current tab. */}
+      <CrossTabSocietySync />
       <Sidebar />
       <main className="flex-1 min-w-0 overflow-x-hidden">{children}</main>
     </div>
