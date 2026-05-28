@@ -1,4 +1,5 @@
 import { Controller, Post, Patch, Get, Delete, Body, Param, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { IsString, IsNotEmpty } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
@@ -22,6 +23,9 @@ export class SosController {
     private sosGateway: SosGateway,
   ) {}
 
+  // Anti-spam: 5 SOS triggers per minute per (IP, userId) — see
+  // AppThrottlerGuard.getTracker for the composite key on /sos/trigger.
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('trigger')
   async trigger(
     @CurrentUser() user: JwtPayload,
@@ -34,6 +38,7 @@ export class SosController {
   }
 
   /** Staff SOS — same alert pipeline; optional note + location (e.g. at a resident unit). */
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('staff')
   @UseGuards(RolesGuard)
   @Roles(UserRole.STAFF)

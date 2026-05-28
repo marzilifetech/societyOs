@@ -2,7 +2,6 @@ import {
   ThrottlerAsyncOptions,
   ThrottlerModuleOptions,
   ThrottlerGuard,
-  seconds,
 } from '@nestjs/throttler';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ExecutionContext, Injectable } from '@nestjs/common';
@@ -55,16 +54,18 @@ export const throttlerOptions: ThrottlerAsyncOptions = {
   useFactory: (config: ConfigService): ThrottlerModuleOptions => {
     const ttlMs = config.get<number>('THROTTLE_TTL_MS', 60_000);
     const limitDefault = config.get<number>('THROTTLE_LIMIT_DEFAULT', 100);
-    const limitAuth = config.get<number>('THROTTLE_LIMIT_AUTH', 10);
-    const limitSos = config.get<number>('THROTTLE_LIMIT_SOS', 5);
 
+    // Only the `default` bucket is registered globally. Stricter limits on
+    // specific routes (auth/OTP, SOS trigger) are applied via per-route
+    // @Throttle({ default: { limit, ttl } }) overrides — same pattern auth
+    // controller already uses. Defining named buckets here would apply them
+    // to EVERY route (Nest throttler behaviour), which previously rate-
+    // limited /sos/active reads down to 5/min and broke admin polling.
+    // THROTTLE_LIMIT_AUTH / THROTTLE_LIMIT_SOS env vars are retained in
+    // env.validation for backwards compat but no longer consumed.
     return {
       throttlers: [
-        // Default bucket — applied to everything that doesn't override.
         { name: 'default', ttl: ttlMs, limit: limitDefault },
-        // Stricter buckets that handlers can opt into via @Throttle.
-        { name: 'auth', ttl: ttlMs, limit: limitAuth },
-        { name: 'sos', ttl: seconds(60), limit: limitSos },
       ],
     };
   },
