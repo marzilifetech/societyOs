@@ -35,18 +35,30 @@ import * as Notifications from 'expo-notifications';
 import { Alert, Vibration } from 'react-native';
 import { useRealtime } from '../src/hooks/useRealtime';
 
-// Capture at module init — before any beforeEach can clearAllMocks
+// The notification handler is registered lazily on first hook mount (Expo Go
+// SDK 52 New Architecture cannot tolerate setNotificationHandler at module
+// scope — see comment in src/hooks/useRealtime.ts). Tests below mount the
+// hook before asserting; this captures the registered config on first call.
 const mockSetNotificationHandler = Notifications.setNotificationHandler as jest.Mock;
 const mockScheduleNotification = Notifications.scheduleNotificationAsync as jest.Mock;
-const _notificationHandlerConfigured = mockSetNotificationHandler.mock.calls.length > 0;
-// Capture the config object so we can invoke the handleNotification callback in tests
-const _notificationHandlerConfig: { handleNotification: () => Promise<any> } | null =
-  _notificationHandlerConfigured ? (mockSetNotificationHandler.mock.calls[0][0] as any) : null;
 
 const mockAlert = jest.fn();
 const mockVibrate = jest.fn();
 
+// Captured once on first hook mount — the hook lazy-registers
+// setNotificationHandler exactly once per module load (guarded by an internal
+// flag in useRealtime.ts), so we snapshot it here before any beforeEach
+// clearAllMocks wipes the call history.
+let capturedHandlerConfig: { handleNotification: () => Promise<any> } | null = null;
+
 describe('useRealtime', () => {
+  beforeAll(() => {
+    renderHook(() => useRealtime());
+    capturedHandlerConfig = (mockSetNotificationHandler.mock.calls[0]?.[0] ?? null) as
+      | { handleNotification: () => Promise<any> }
+      | null;
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
     // Spy on Alert/Vibration from react-native (already mocked by jest-expo preset).
@@ -75,14 +87,13 @@ describe('useRealtime', () => {
     expect(events).toContain('emergency:broadcast');
   });
 
-  it('sets notification handler on module load', () => {
-    // _notificationHandlerConfigured is captured before any clearAllMocks runs
-    expect(_notificationHandlerConfigured).toBe(true);
+  it('registers a notification handler lazily on first hook mount', () => {
+    expect(capturedHandlerConfig).not.toBeNull();
   });
 
   it('setNotificationHandler handleNotification returns correct foreground display options', async () => {
-    expect(_notificationHandlerConfig).not.toBeNull();
-    const result = await _notificationHandlerConfig!.handleNotification();
+    expect(capturedHandlerConfig).not.toBeNull();
+    const result = await capturedHandlerConfig!.handleNotification();
     expect(result).toMatchObject({
       shouldShowAlert: true,
       shouldShowBanner: true,

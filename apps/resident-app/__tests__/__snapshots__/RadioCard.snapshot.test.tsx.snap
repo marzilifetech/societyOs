@@ -1,0 +1,316 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`RadioCard disabled snapshot 1`] = `
+<View
+  accessibilityLabel="Plumbing"
+  accessibilityRole="radio"
+  accessibilityState={
+    {
+      "busy": undefined,
+      "checked": undefined,
+      "disabled": true,
+      "expanded": undefined,
+      "selected": false,
+    }
+  }
+  accessibilityValue={
+    {
+      "max": undefined,
+      "min": undefined,
+      "now": undefined,
+      "text": undefined,
+    }
+  }
+  accessible={true}
+  collapsable={false}
+  focusable={false}
+  onClick={[Function]}
+  onResponderGrant={[Function]}
+  onResponderMove={[Function]}
+  onResponderRelease={[Function]}
+  onResponderTerminate={[Function]}
+  onResponderTerminationRequest={[Function]}
+  onStartShouldSetResponder={[Function]}
+  style={
+    {
+      "alignItems": "center",
+      "backgroundColor": "#FFFFFF",
+      "borderColor": "rgba(0,0,0,0.12)",
+      "borderRadius": 16,
+      "borderWidth": 1,
+      "flexDirection": "row",
+      "gap": 14,
+      "minHeight": 60,
+      "opacity": 0.5,
+      "paddingHorizontal": 16,
+      "paddingVertical": 14,
+    }
+  }
+>
+  <View
+    style={
+      {
+        "flex": 1,
+      }
+    }
+  >
+    <Text
+      style={
+        {
+          "color": "#000000",
+          "fontSize": 16,
+          "fontWeight": "600",
+        }
+      }
+    >
+      Plumbing
+    </Text>
+  </View>
+  <View
+    style={
+      {
+        "alignItems": "center",
+        "borderColor": "rgba(0,0,0,0.12)",
+        "borderRadius": 11,
+        "borderWidth": 2,
+        "height": 22,
+        "justifyContent": "center",
+        "width": 22,
+      }
+    }
+  />
+</View>
+`;
+
+exports[`RadioCard selected snapshot 1`] = `
+<View
+  accessibilityLabel="Plumbing, Tap, leak, fitting"
+  accessibilityRole="radio"
+  accessibilityState={
+    {
+      "busy": undefined,
+      "checked": undefined,
+      "disabled": false,
+      "expanded": undefined,
+      "selected": true,
+    }
+  }
+  accessibilityValue={
+    {
+      "max": undefined,
+      "min": undefined,
+      "now": undefined,
+      "text": undefined,
+    }
+  }
+  accessible={true}
+  collapsable={false}
+  focusable={true}
+  onClick={[Function]}
+  onResponderGrant={[Function]}
+  onResponderMove={[Function]}
+  onResponderRelease={[Function]}
+  onResponderTerminate={[Function]}
+  onResponderTerminationRequest={[Function]}
+  onStartShouldSetResponder={[Function]}
+  style={
+    {
+      "alignItems": "center",
+      "backgroundColor": "rgba(130,26,82,0.06)",
+      "borderColor": "#821A52",
+      "borderRadius": 16,
+      "borderWidth": 2,
+      "flexDirection": "row",
+      "gap": 14,
+      "minHeight": 60,
+      "opacity": 1,
+      "paddingHorizontal": 16,
+      "paddingVertical": 14,
+    }
+  }
+>
+  <View
+    style={
+      {
+        "alignItems": "center",
+        "backgroundColor": "#821A52",
+        "borderRadius": 20,
+        "height": 40,
+        "justifyContent": "center",
+        "width": 40,
+      }
+    }
+  >
+    <Icon
+      color="#FFFFFF"
+      name="water"
+      size={20}
+    />
+  </View>
+  <View
+    style={
+      {
+        "flex": 1,
+      }
+    }
+  >
+    <Text
+      style={
+        {
+          "color": "#000000",
+          "fontSize": 16,
+          "fontWeight": "600",
+        }
+      }
+    >
+      Plumbing
+    </Text>
+    <Text
+      style={
+        {
+          "color": "rgba(0,0,0,0.70)",
+          "fontSize": 14,
+          "marginTop": 2,
+        }
+      }
+    >
+      Tap, leak, fitting
+    </Text>
+  </View>
+  <View
+    style={
+      {
+        "alignItems": "center",
+        "borderColor": "#821A52",
+        "borderRadius": 11,
+        "borderWidth": 2,
+        "height": 22,
+        "justifyContent": "center",
+        "width": 22,
+      }
+    }
+  >
+    <View
+      style={
+        {
+          "backgroundColor": "#821A52",
+          "borderRadius": 5,
+          "height": 10,
+          "width": 10,
+        }
+      }
+    />
+  </View>
+</View>
+`;
+
+exports[`RadioCard unselected snapshot 1`] = `
+<View
+  accessibilityLabel="Plumbing, Tap, leak, fitting"
+  accessibilityRole="radio"
+  accessibilityState={
+    {
+      "busy": undefined,
+      "checked": undefined,
+      "disabled": false,
+      "expanded": undefined,
+      "selected": false,
+    }
+  }
+  accessibilityValue={
+    {
+      "max": undefined,
+      "min": undefined,
+      "now": undefined,
+      "text": undefined,
+    }
+  }
+  accessible={true}
+  collapsable={false}
+  focusable={true}
+  onClick={[Function]}
+  onResponderGrant={[Function]}
+  onResponderMove={[Function]}
+  onResponderRelease={[Function]}
+  onResponderTerminate={[Function]}
+  onResponderTerminationRequest={[Function]}
+  onStartShouldSetResponder={[Function]}
+  style={
+    {
+      "alignItems": "center",
+      "backgroundColor": "#FFFFFF",
+      "borderColor": "rgba(0,0,0,0.12)",
+      "borderRadius": 16,
+      "borderWidth": 1,
+      "flexDirection": "row",
+      "gap": 14,
+      "minHeight": 60,
+      "opacity": 1,
+      "paddingHorizontal": 16,
+      "paddingVertical": 14,
+    }
+  }
+>
+  <View
+    style={
+      {
+        "alignItems": "center",
+        "backgroundColor": "#E8E8EC",
+        "borderRadius": 20,
+        "height": 40,
+        "justifyContent": "center",
+        "width": 40,
+      }
+    }
+  >
+    <Icon
+      color="#000000"
+      name="water"
+      size={20}
+    />
+  </View>
+  <View
+    style={
+      {
+        "flex": 1,
+      }
+    }
+  >
+    <Text
+      style={
+        {
+          "color": "#000000",
+          "fontSize": 16,
+          "fontWeight": "600",
+        }
+      }
+    >
+      Plumbing
+    </Text>
+    <Text
+      style={
+        {
+          "color": "rgba(0,0,0,0.70)",
+          "fontSize": 14,
+          "marginTop": 2,
+        }
+      }
+    >
+      Tap, leak, fitting
+    </Text>
+  </View>
+  <View
+    style={
+      {
+        "alignItems": "center",
+        "borderColor": "rgba(0,0,0,0.12)",
+        "borderRadius": 11,
+        "borderWidth": 2,
+        "height": 22,
+        "justifyContent": "center",
+        "width": 22,
+      }
+    }
+  />
+</View>
+`;

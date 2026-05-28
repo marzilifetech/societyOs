@@ -5,13 +5,13 @@ exports[`ThemedCard glow="emergency" adds emergency shadow 1`] = `
   style={
     [
       {
-        "backgroundColor": "rgba(255,255,255,0.06)",
+        "backgroundColor": "#F7F7F8",
         "borderColor": "rgba(255,59,48,0.3)",
         "borderRadius": 20,
         "borderWidth": 1,
         "elevation": 8,
         "padding": 16,
-        "shadowColor": "rgba(255,59,48,0.4)",
+        "shadowColor": "rgba(220,38,38,0.40)",
         "shadowOffset": {
           "height": 4,
           "width": 0,
@@ -34,13 +34,13 @@ exports[`ThemedCard glow="primary" adds primary shadow 1`] = `
   style={
     [
       {
-        "backgroundColor": "rgba(255,255,255,0.06)",
-        "borderColor": "rgba(108,99,255,0.3)",
+        "backgroundColor": "#F7F7F8",
+        "borderColor": "rgba(130,26,82,0.3)",
         "borderRadius": 20,
         "borderWidth": 1,
         "elevation": 8,
         "padding": 16,
-        "shadowColor": "rgba(108,99,255,0.3)",
+        "shadowColor": "rgba(130,26,82,0.30)",
         "shadowOffset": {
           "height": 4,
           "width": 0,
@@ -63,8 +63,8 @@ exports[`ThemedCard renders children (default card) 1`] = `
   style={
     [
       {
-        "backgroundColor": "rgba(255,255,255,0.06)",
-        "borderColor": "rgba(255,255,255,0.12)",
+        "backgroundColor": "#F7F7F8",
+        "borderColor": "rgba(0,0,0,0.12)",
         "borderRadius": 20,
         "borderWidth": 1,
         "padding": 16,
@@ -84,8 +84,8 @@ exports[`ThemedCard strong prop uses stronger background 1`] = `
   style={
     [
       {
-        "backgroundColor": "rgba(255,255,255,0.12)",
-        "borderColor": "rgba(255,255,255,0.12)",
+        "backgroundColor": "#E8E8EC",
+        "borderColor": "rgba(0,0,0,0.12)",
         "borderRadius": 20,
         "borderWidth": 1,
         "padding": 16,

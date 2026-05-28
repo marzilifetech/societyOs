@@ -5,8 +5,12 @@ import { useTimerStore } from '../src/store/timer.store';
 
 describe('ElapsedChip', () => {
   afterEach(() => {
-    // Reset timer store between tests — must happen after any unmounts
-    useTimerStore.setState({ starts: {} });
+    // Reset timer store between tests. Wrap in act() because any
+    // still-mounted ElapsedChip subscribes to the store and would otherwise
+    // produce "update was not wrapped in act(...)" warnings on teardown.
+    act(() => {
+      useTimerStore.setState({ starts: {} });
+    });
   });
 
   it('renders null when no timer is running for taskId', () => {
@@ -17,7 +21,9 @@ describe('ElapsedChip', () => {
   it('renders the chip when a timer is running', () => {
     // Seed the store with a start time 5 seconds ago
     const start = new Date(Date.now() - 5000).toISOString();
-    useTimerStore.setState({ starts: { t1: start } });
+    act(() => {
+      useTimerStore.setState({ starts: { t1: start } });
+    });
 
     const tree = render(<ElapsedChip taskId="t1" />).toJSON();
     expect(tree).toMatchSnapshot();
@@ -25,7 +31,9 @@ describe('ElapsedChip', () => {
 
   it('renders null for a different taskId than the running timer', () => {
     const start = new Date(Date.now() - 3000).toISOString();
-    useTimerStore.setState({ starts: { t2: start } });
+    act(() => {
+      useTimerStore.setState({ starts: { t2: start } });
+    });
 
     expect(render(<ElapsedChip taskId="t1" />).toJSON()).toBeNull();
   });
@@ -33,7 +41,9 @@ describe('ElapsedChip', () => {
   it('sets up setInterval when timer starts and clears it on unmount', () => {
     jest.useFakeTimers();
     const start = new Date(Date.now() - 1000).toISOString();
-    useTimerStore.setState({ starts: { t1: start } });
+    act(() => {
+      useTimerStore.setState({ starts: { t1: start } });
+    });
 
     const setIntervalSpy = jest.spyOn(global, 'setInterval');
     const clearIntervalSpy = jest.spyOn(global, 'clearInterval');
@@ -50,7 +60,9 @@ describe('ElapsedChip', () => {
   it('ticks every second and updates displayed time', () => {
     jest.useFakeTimers();
     const start = new Date(Date.now() - 2000).toISOString();
-    useTimerStore.setState({ starts: { t1: start } });
+    act(() => {
+      useTimerStore.setState({ starts: { t1: start } });
+    });
 
     const { toJSON, unmount } = render(<ElapsedChip taskId="t1" />);
     const before = toJSON();

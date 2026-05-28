@@ -5,7 +5,7 @@ exports[`ThemedText caption variant snapshot 1`] = `
   style={
     [
       {
-        "color": "rgba(255,255,255,0.70)",
+        "color": "rgba(0,0,0,0.70)",
         "fontSize": 14,
         "fontWeight": "400",
         "lineHeight": 19.599999999999998,
@@ -25,7 +25,7 @@ exports[`ThemedText default (body) variant snapshot 1`] = `
   style={
     [
       {
-        "color": "#FFFFFF",
+        "color": "#000000",
         "fontSize": 16,
         "fontWeight": "400",
         "lineHeight": 22.4,
@@ -45,7 +45,7 @@ exports[`ThemedText heading variant snapshot 1`] = `
   style={
     [
       {
-        "color": "#FFFFFF",
+        "color": "#000000",
         "fontSize": 30,
         "fontWeight": "700",
         "lineHeight": 36,
@@ -65,7 +65,7 @@ exports[`ThemedText label variant snapshot 1`] = `
   style={
     [
       {
-        "color": "rgba(255,255,255,0.70)",
+        "color": "rgba(0,0,0,0.70)",
         "fontSize": 14,
         "fontWeight": "600",
         "letterSpacing": 0.8,
@@ -86,7 +86,7 @@ exports[`ThemedText muted variant snapshot 1`] = `
   style={
     [
       {
-        "color": "rgba(255,255,255,0.45)",
+        "color": "rgba(0,0,0,0.45)",
         "fontSize": 14,
         "fontWeight": "400",
         "lineHeight": 22.400000000000002,
@@ -106,7 +106,7 @@ exports[`ThemedText subheading variant snapshot 1`] = `
   style={
     [
       {
-        "color": "#FFFFFF",
+        "color": "#000000",
         "fontSize": 24,
         "fontWeight": "600",
         "lineHeight": 33.599999999999994,

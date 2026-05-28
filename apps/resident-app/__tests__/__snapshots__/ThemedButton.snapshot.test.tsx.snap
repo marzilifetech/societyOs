@@ -34,7 +34,7 @@ exports[`ThemedButton danger variant snapshot 1`] = `
   style={
     {
       "alignItems": "center",
-      "backgroundColor": "#FF3B30",
+      "backgroundColor": "#dc2626",
       "borderColor": "transparent",
       "borderRadius": 16,
       "borderWidth": 0,
@@ -162,7 +162,7 @@ exports[`ThemedButton disabled primary renders with dimmed background 1`] = `
   style={
     {
       "alignItems": "center",
-      "backgroundColor": "rgba(108,99,255,0.35)",
+      "backgroundColor": "rgba(130,26,82,0.35)",
       "borderColor": "transparent",
       "borderRadius": 16,
       "borderWidth": 0,
@@ -227,7 +227,7 @@ exports[`ThemedButton ghost variant snapshot 1`] = `
     {
       "alignItems": "center",
       "backgroundColor": "transparent",
-      "borderColor": "#6C63FF",
+      "borderColor": "#821A52",
       "borderRadius": 16,
       "borderWidth": 1,
       "justifyContent": "center",
@@ -242,7 +242,7 @@ exports[`ThemedButton ghost variant snapshot 1`] = `
     style={
       [
         {
-          "color": "#6C63FF",
+          "color": "#821A52",
           "fontSize": 16,
           "fontWeight": "600",
           "letterSpacing": 0.3,
@@ -290,7 +290,7 @@ exports[`ThemedButton lg size snapshot 1`] = `
   style={
     {
       "alignItems": "center",
-      "backgroundColor": "#6C63FF",
+      "backgroundColor": "#821A52",
       "borderColor": "transparent",
       "borderRadius": 16,
       "borderWidth": 0,
@@ -354,7 +354,7 @@ exports[`ThemedButton primary variant (default) snapshot 1`] = `
   style={
     {
       "alignItems": "center",
-      "backgroundColor": "#6C63FF",
+      "backgroundColor": "#821A52",
       "borderColor": "transparent",
       "borderRadius": 16,
       "borderWidth": 0,
@@ -418,8 +418,8 @@ exports[`ThemedButton secondary variant snapshot 1`] = `
   style={
     {
       "alignItems": "center",
-      "backgroundColor": "rgba(255,255,255,0.12)",
-      "borderColor": "rgba(255,255,255,0.12)",
+      "backgroundColor": "#E8E8EC",
+      "borderColor": "rgba(0,0,0,0.12)",
       "borderRadius": 16,
       "borderWidth": 1,
       "justifyContent": "center",
@@ -434,7 +434,7 @@ exports[`ThemedButton secondary variant snapshot 1`] = `
     style={
       [
         {
-          "color": "#FFFFFF",
+          "color": "#000000",
           "fontSize": 16,
           "fontWeight": "600",
           "letterSpacing": 0.3,
@@ -482,7 +482,7 @@ exports[`ThemedButton sm size snapshot 1`] = `
   style={
     {
       "alignItems": "center",
-      "backgroundColor": "#6C63FF",
+      "backgroundColor": "#821A52",
       "borderColor": "transparent",
       "borderRadius": 16,
       "borderWidth": 0,

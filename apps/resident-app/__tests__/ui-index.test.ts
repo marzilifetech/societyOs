@@ -25,4 +25,20 @@ describe('components/ui/index barrel', () => {
   it('exports SeniorModeToggle', () => {
     expect(typeof uiBarrel.SeniorModeToggle).toBe('function');
   });
+
+  it('exports ScreenHeader', () => {
+    expect(typeof uiBarrel.ScreenHeader).toBe('function');
+  });
+
+  it('exports BottomActionBar', () => {
+    expect(typeof uiBarrel.BottomActionBar).toBe('function');
+  });
+
+  it('exports StatusChip', () => {
+    expect(typeof uiBarrel.StatusChip).toBe('function');
+  });
+
+  it('exports RadioCard', () => {
+    expect(typeof uiBarrel.RadioCard).toBe('function');
+  });
 });

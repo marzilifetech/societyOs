@@ -1,22 +1,42 @@
 import { ScrollView, View, Text, TouchableOpacity, TextInput, Alert } from 'react-native';
 import { router } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
+import { useTheme } from '../../src/hooks/useTheme';
+import {
+  ScreenHeader,
+  BottomActionBar,
+  RadioCard,
+} from '../../src/components/ui';
 
-const CATEGORIES = ['Plumbing', 'Electrical', 'Carpentry', 'Cleaning', 'Other'];
-const URGENCIES: { value: 'LOW' | 'MEDIUM' | 'HIGH'; label: string; activeBg: string; activeText: string; activeBorder: string }[] = [
+// Public Figma reference (Staff Help Requests frame): node-id=101-22188
+// Behaviour-preserving redesign — same /help-requests POST, same validation;
+// new ScreenHeader / RadioCard / BottomActionBar primitives.
+
+type IoniconName = keyof typeof Ionicons.glyphMap;
+
+const CATEGORIES: { value: string; label: string; icon: IoniconName; subtitle: string }[] = [
+  { value: 'Plumbing', label: 'Plumbing', icon: 'water', subtitle: 'Leaks, drainage, taps' },
+  { value: 'Electrical', label: 'Electrical', icon: 'flash', subtitle: 'Wiring, outlets, lights' },
+  { value: 'Carpentry', label: 'Carpentry', icon: 'hammer', subtitle: 'Doors, locks, fittings' },
+  { value: 'Cleaning', label: 'Cleaning', icon: 'sparkles', subtitle: 'Common-area cleanup' },
+  { value: 'Other', label: 'Other', icon: 'help-circle', subtitle: 'Anything not above' },
+];
+
+type Urgency = 'LOW' | 'MEDIUM' | 'HIGH';
+const URGENCIES: { value: Urgency; label: string; activeBg: string; activeText: string; activeBorder: string }[] = [
   { value: 'LOW', label: 'Low', activeBg: 'bg-gray-100', activeText: 'text-gray-700', activeBorder: 'border-gray-300' },
   { value: 'MEDIUM', label: 'Medium', activeBg: 'bg-orange-100', activeText: 'text-orange-700', activeBorder: 'border-orange-300' },
   { value: 'HIGH', label: 'High', activeBg: 'bg-red-100', activeText: 'text-red-700', activeBorder: 'border-red-300' },
 ];
 
 export default function NewHelpRequestScreen() {
+  const t = useTheme();
   const qc = useQueryClient();
   const [category, setCategory] = useState('');
-  const [urgency, setUrgency] = useState<'LOW' | 'MEDIUM' | 'HIGH'>('LOW');
+  const [urgency, setUrgency] = useState<Urgency>('LOW');
   const [description, setDescription] = useState('');
 
   const mutation = useMutation({
@@ -38,30 +58,37 @@ export default function NewHelpRequestScreen() {
     mutation.mutate({ category, urgency, description: description.trim() });
   };
 
-  return (
-    <SafeAreaView className="flex-1 bg-white">
-      <View className="px-6 pt-4 pb-2 flex-row items-center">
-        <TouchableOpacity onPress={() => router.back()} className="min-h-[52px] justify-center mr-3">
-          <Ionicons name="chevron-back" size={24} color="#111827" />
-        </TouchableOpacity>
-        <Text className="text-2xl font-bold text-gray-900 flex-1">New Help Request</Text>
-      </View>
+  const isValid = category.length > 0 && description.trim().length > 0;
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 80 }}>
-        <Text className="text-gray-500 text-xs font-semibold mb-2.5">CATEGORY *</Text>
-        <View className="flex-row flex-wrap gap-2.5 mb-6">
+  return (
+    <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+      <ScreenHeader title="New Help Request" subtitle="Tell us what needs attention" />
+
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{ paddingHorizontal: t.screenPadding, paddingBottom: 24, paddingTop: 8 }}
+      >
+        <Text className="text-gray-500 font-semibold mb-3" style={{ fontSize: t.fontXs, letterSpacing: 0.5 }}>
+          CATEGORY *
+        </Text>
+        <View style={{ gap: 10, marginBottom: 24 }}>
           {CATEGORIES.map((c) => (
-            <TouchableOpacity
-              key={c}
-              onPress={() => setCategory(c)}
-              className={`rounded-xl px-3.5 py-2.5 min-h-[48px] justify-center border ${category === c ? 'bg-primary-500 border-primary-500' : 'bg-gray-100 border-gray-200'}`}
-            >
-              <Text className={`font-semibold text-sm ${category === c ? 'text-white' : 'text-gray-700'}`}>{c}</Text>
-            </TouchableOpacity>
+            <RadioCard
+              key={c.value}
+              title={c.label}
+              subtitle={c.subtitle}
+              icon={c.icon}
+              selected={category === c.value}
+              onPress={() => setCategory(c.value)}
+              accessibilityHint={`Select ${c.label} category`}
+            />
           ))}
         </View>
 
-        <Text className="text-gray-500 text-xs font-semibold mb-2.5">URGENCY</Text>
+        <Text className="text-gray-500 font-semibold mb-3" style={{ fontSize: t.fontXs, letterSpacing: 0.5 }}>
+          URGENCY
+        </Text>
         <View className="flex-row gap-2.5 mb-6">
           {URGENCIES.map((u) => {
             const isActive = urgency === u.value;
@@ -69,15 +96,23 @@ export default function NewHelpRequestScreen() {
               <TouchableOpacity
                 key={u.value}
                 onPress={() => setUrgency(u.value)}
-                className={`flex-1 rounded-xl py-3 min-h-[48px] justify-center items-center border ${isActive ? `${u.activeBg} ${u.activeBorder}` : 'bg-gray-100 border-gray-200'}`}
+                className={`flex-1 rounded-xl py-3 justify-center items-center border ${isActive ? `${u.activeBg} ${u.activeBorder}` : 'bg-gray-100 border-gray-200'}`}
+                style={{ minHeight: t.touchTarget }}
+                accessibilityRole="button"
+                accessibilityLabel={`Set urgency to ${u.label}`}
+                accessibilityState={{ selected: isActive }}
               >
-                <Text className={`font-bold text-sm ${isActive ? u.activeText : 'text-gray-500'}`}>{u.label}</Text>
+                <Text className={`font-bold ${isActive ? u.activeText : 'text-gray-500'}`} style={{ fontSize: t.fontSm }}>
+                  {u.label}
+                </Text>
               </TouchableOpacity>
             );
           })}
         </View>
 
-        <Text className="text-gray-500 text-xs font-semibold mb-2">DESCRIPTION *</Text>
+        <Text className="text-gray-500 font-semibold mb-2" style={{ fontSize: t.fontXs, letterSpacing: 0.5 }}>
+          DESCRIPTION *
+        </Text>
         <TextInput
           value={description}
           onChangeText={setDescription}
@@ -85,20 +120,21 @@ export default function NewHelpRequestScreen() {
           placeholderTextColor="#9CA3AF"
           multiline
           numberOfLines={5}
-          className="bg-gray-100 rounded-2xl border border-gray-200 text-gray-900 text-base p-4 min-h-[140px] mb-8"
-          style={{ textAlignVertical: 'top' }}
+          accessibilityLabel="Help request description"
+          className="bg-gray-100 rounded-2xl border border-gray-200 text-gray-900 p-4 min-h-[140px]"
+          style={{ textAlignVertical: 'top', fontSize: t.fontBase }}
         />
-
-        <TouchableOpacity
-          onPress={handleSubmit}
-          disabled={mutation.isPending}
-          className="bg-primary-500 rounded-2xl py-4 items-center min-h-[56px] justify-center"
-        >
-          <Text className="text-white text-base font-bold">
-            {mutation.isPending ? 'Submitting…' : 'Submit Request'}
-          </Text>
-        </TouchableOpacity>
       </ScrollView>
-    </SafeAreaView>
+
+      <BottomActionBar
+        primary={{
+          label: mutation.isPending ? 'Submitting…' : 'Submit Request',
+          onPress: handleSubmit,
+          loading: mutation.isPending,
+          disabled: mutation.isPending || !isValid,
+          accessibilityLabel: 'Submit help request',
+        }}
+      />
+    </View>
   );
 }

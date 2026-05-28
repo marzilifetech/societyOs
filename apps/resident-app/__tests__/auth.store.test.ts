@@ -5,7 +5,15 @@
  * (happy path, missing keys, and SecureStore throwing).
  */
 
-jest.mock('@/lib/api', () => ({ setApiToken: jest.fn() }), { virtual: true });
+jest.mock(
+  '../src/lib/api',
+  () => ({
+    setApiToken: jest.fn(),
+    setApiTokens: jest.fn(),
+    api: { get: jest.fn(), post: jest.fn(), patch: jest.fn(), put: jest.fn(), delete: jest.fn() },
+  }),
+  { virtual: false },
+);
 
 import { useAuthStore } from '../src/store/auth.store';
 import * as SecureStore from 'expo-secure-store';
@@ -15,7 +23,13 @@ const mockUser = { id: 'u1', phone: '+91', role: 'RESIDENT', status: 'ACTIVE', n
 describe('useAuthStore', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    useAuthStore.setState({ token: null, user: null, societyId: null, isHydrated: false });
+    useAuthStore.setState({
+      token: null,
+      refreshToken: null,
+      user: null,
+      societyId: null,
+      isHydrated: false,
+    });
   });
 
   // ─── setAuth ───────────────────────────────────────────────────────────────
@@ -85,12 +99,14 @@ describe('useAuthStore', () => {
   describe('hydrate', () => {
     it('restores auth state when all keys are present in SecureStore', async () => {
       (SecureStore.getItemAsync as jest.Mock)
-        .mockResolvedValueOnce('tok-hydrated')           // auth_token
-        .mockResolvedValueOnce('soc-hydrated')           // society_id
+        .mockResolvedValueOnce('tok-hydrated')            // auth_token
+        .mockResolvedValueOnce('rt-hydrated')             // refresh_token
+        .mockResolvedValueOnce('soc-hydrated')            // society_id
         .mockResolvedValueOnce(JSON.stringify(mockUser)); // auth_user
       await useAuthStore.getState().hydrate();
       const state = useAuthStore.getState();
       expect(state.token).toBe('tok-hydrated');
+      expect(state.refreshToken).toBe('rt-hydrated');
       expect(state.societyId).toBe('soc-hydrated');
       expect(state.user).toEqual(mockUser);
       expect(state.isHydrated).toBe(true);
@@ -111,9 +127,10 @@ describe('useAuthStore', () => {
 
     it('does not restore if only some keys are present (token but no societyId)', async () => {
       (SecureStore.getItemAsync as jest.Mock)
-        .mockResolvedValueOnce('tok-only')               // auth_token
-        .mockResolvedValueOnce(null)                     // society_id missing
-        .mockResolvedValueOnce(JSON.stringify(mockUser));
+        .mockResolvedValueOnce('tok-only')                 // auth_token
+        .mockResolvedValueOnce(null)                       // refresh_token missing
+        .mockResolvedValueOnce(null)                       // society_id missing
+        .mockResolvedValueOnce(JSON.stringify(mockUser));  // auth_user
       await useAuthStore.getState().hydrate();
       // Because societyId is null, the if-branch is not entered
       expect(useAuthStore.getState().token).toBeNull();
