@@ -292,6 +292,25 @@ export class AdminController {
     return this.adminService.verifyStaffDocument(societyId, id, docId, user.sub);
   }
 
+  // Alias for `verify` — added 2026-05 because Brave and many ad-blockers
+  // ship EasyList/EasyPrivacy filter rules that match URLs containing
+  // "verify" (collateral damage from analytics endpoints with names like
+  // /verify.gif, /verify?event=). Browsers block the request before it
+  // leaves the page, surfacing as a misleading "CORS error" in DevTools.
+  // The /review path is identical in behaviour and unaffected by those
+  // filter lists. Admin-web should call /review; /verify is retained until
+  // the next breaking-change window.
+  @Patch('staff/:id/documents/:docId/review')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  reviewStaffDocument(
+    @SocietyId() societyId: string,
+    @Param('id') id: string,
+    @Param('docId') docId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.adminService.verifyStaffDocument(societyId, id, docId, user.sub);
+  }
+
   @Patch('staff/:id/dismiss')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   dismissStaff(@SocietyId() societyId: string, @Param('id') id: string) {
@@ -324,6 +343,19 @@ export class AdminController {
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   getResidentDocuments(@SocietyId() societyId: string, @Param('id') id: string) {
     return this.adminService.getResidentDocuments(societyId, id);
+  }
+
+  // Alias for the legacy `verify` path — see reviewStaffDocument comment for
+  // the ad-blocker rationale. Both routes are wired to the same service
+  // method; admin-web targets /review going forward.
+  @Patch('residents/:id/documents/review')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  reviewResidentDocuments(
+    @SocietyId() societyId: string,
+    @Param('id') id: string,
+    @Body() body: { status: 'VERIFIED' | 'REJECTED'; note?: string },
+  ) {
+    return this.adminService.verifyResidentDocuments(societyId, id, body.status, body.note);
   }
 
   @Patch('residents/:id/documents/verify')

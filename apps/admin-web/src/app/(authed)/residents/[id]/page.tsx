@@ -133,10 +133,13 @@ export default function ResidentDetailPage() {
   });
 
   // F2: Verify / Reject resident documents. Backend endpoint:
-  // PATCH /admin/residents/:id/documents/verify { status, note? }
+  // PATCH /admin/residents/:id/documents/review { status, note? }
+  // (was /verify — renamed to dodge ad-blocker filter lists that match
+  // the word "verify" in URLs. Backend still exposes /verify as an alias
+  // until the next breaking-change window.)
   const verifyDocsMutation = useMutation({
     mutationFn: (payload: { status: 'VERIFIED' | 'REJECTED'; note?: string }) =>
-      api.patch(`/admin/residents/${id}/documents/verify`, payload),
+      api.patch(`/admin/residents/${id}/documents/review`, payload),
     onSuccess: (_data, vars) => {
       toast.success(vars.status === 'VERIFIED' ? 'Documents verified' : 'Documents rejected');
       invalidateBoth();

@@ -248,7 +248,9 @@ export default function StaffDetailPage() {
   });
 
   const verifyDocMutation = useMutation({
-    mutationFn: (docId: string) => api.patch(`/admin/staff/${staffId}/documents/${docId}/verify`, {}),
+    // Use /review (alias of /verify) — see backend admin.controller.ts comment.
+    // Brave + EasyList block URLs with "verify" as a tracking-pixel false-positive.
+    mutationFn: (docId: string) => api.patch(`/admin/staff/${staffId}/documents/${docId}/review`, {}),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['staff-documents', staffId] });
       toast.success('Document verified');
