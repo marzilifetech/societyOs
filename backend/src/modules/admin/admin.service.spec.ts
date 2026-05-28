@@ -181,25 +181,25 @@ describe('AdminService', () => {
   // ─── getStaffLoans ─────────────────────────────────────────────────────────
 
   describe('getStaffLoans', () => {
-    it('throws NotFoundException when staff not found', async () => {
-      mockPrisma.staffMember.findUnique.mockResolvedValue(null);
+    it('throws NotFoundException when staff not found in caller society', async () => {
+      mockPrisma.staffMember.findFirst.mockResolvedValue(null);
 
-      await expect(service.getStaffLoans('staff-missing')).rejects.toThrow(NotFoundException);
+      await expect(service.getStaffLoans('soc-1', 'staff-missing')).rejects.toThrow(NotFoundException);
       expect(mockPrisma.staffLoan.findMany).not.toHaveBeenCalled();
     });
 
-    it('returns loans for the staff member', async () => {
+    it('returns loans for the staff member when society matches', async () => {
       const loans = [{ id: 'loan-1', staffMemberId: 'sm-1', amount: 5000 }];
-      mockPrisma.staffMember.findUnique.mockResolvedValue({ id: 'sm-1', societyId: 'soc-1' });
+      mockPrisma.staffMember.findFirst.mockResolvedValue({ id: 'sm-1' });
       mockPrisma.staffLoan.findMany.mockResolvedValue(loans);
 
-      const result = await service.getStaffLoans('sm-1');
+      const result = await service.getStaffLoans('soc-1', 'sm-1');
 
-      expect(result).toEqual(loans);
-      expect(mockPrisma.staffLoan.findMany).toHaveBeenCalledWith({
-        where: { staffMemberId: 'sm-1' },
-        orderBy: { createdAt: 'desc' },
+      expect(mockPrisma.staffMember.findFirst).toHaveBeenCalledWith({
+        where: { id: 'sm-1', societyId: 'soc-1' },
+        select: { id: true },
       });
+      expect(result).toEqual(loans);
     });
   });
 
@@ -240,36 +240,32 @@ describe('AdminService', () => {
   // ─── createStaffLoan ───────────────────────────────────────────────────────
 
   describe('createStaffLoan', () => {
-    it('throws NotFoundException when staff not found', async () => {
-      mockPrisma.staffMember.findUnique.mockResolvedValue(null);
+    it('throws NotFoundException when staff not found in caller society', async () => {
+      mockPrisma.staffMember.findFirst.mockResolvedValue(null);
 
-      await expect(service.createStaffLoan('staff-missing', 1000)).rejects.toThrow(NotFoundException);
+      await expect(service.createStaffLoan('soc-1', 'staff-missing', 1000)).rejects.toThrow(NotFoundException);
       expect(mockPrisma.staffLoan.create).not.toHaveBeenCalled();
     });
 
-    it('creates a loan record with default PENDING status', async () => {
+    it('creates a loan record with default PENDING status when society matches', async () => {
       const created = { id: 'loan-1', staffMemberId: 'sm-1', amount: 2000, status: 'PENDING' };
-      mockPrisma.staffMember.findUnique.mockResolvedValue({ id: 'sm-1' });
+      mockPrisma.staffMember.findFirst.mockResolvedValue({ id: 'sm-1' });
       mockPrisma.staffLoan.create.mockResolvedValue(created);
 
-      const result = await service.createStaffLoan('sm-1', 2000, 'emergency');
+      const result = await service.createStaffLoan('soc-1', 'sm-1', 2000, 'emergency');
 
       expect(result).toEqual(created);
-      expect(mockPrisma.staffLoan.create).toHaveBeenCalledWith({
-        data: {
-          staffMemberId: 'sm-1',
-          amount: 2000,
-          reason: 'emergency',
-          status: 'PENDING',
-        },
+      expect(mockPrisma.staffMember.findFirst).toHaveBeenCalledWith({
+        where: { id: 'sm-1', societyId: 'soc-1' },
+        select: { id: true },
       });
     });
 
     it('creates a loan with explicit status when provided', async () => {
-      mockPrisma.staffMember.findUnique.mockResolvedValue({ id: 'sm-1' });
+      mockPrisma.staffMember.findFirst.mockResolvedValue({ id: 'sm-1' });
       mockPrisma.staffLoan.create.mockResolvedValue({ id: 'loan-2', status: 'APPROVED' });
 
-      await service.createStaffLoan('sm-1', 3000, undefined, 'APPROVED');
+      await service.createStaffLoan('soc-1', 'sm-1', 3000, undefined, 'APPROVED');
 
       expect(mockPrisma.staffLoan.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ status: 'APPROVED' }),
@@ -503,8 +499,8 @@ describe('AdminService', () => {
   });
 
   describe('updateStaff', () => {
-    it('updates staff and user profile fields', async () => {
-      mockPrisma.staffMember.findUnique.mockResolvedValue({
+    it('updates staff and user profile fields when society matches', async () => {
+      mockPrisma.staffMember.findFirst.mockResolvedValue({
         id: 'sm-1',
         userId: 'u1',
         salaryStructure: { base: 10000 },
@@ -512,7 +508,7 @@ describe('AdminService', () => {
       mockPrisma.user.update.mockResolvedValue({});
       mockPrisma.staffMember.update.mockResolvedValue({ id: 'sm-1', designation: 'Lead' });
 
-      await service.updateStaff('sm-1', {
+      await service.updateStaff('soc-1', 'sm-1', {
         designation: 'Lead',
         department: 'MAINTENANCE',
         gender: 'MALE',
@@ -522,6 +518,9 @@ describe('AdminService', () => {
         leavingDate: null,
       });
 
+      expect(mockPrisma.staffMember.findFirst).toHaveBeenCalledWith({
+        where: { id: 'sm-1', societyId: 'soc-1' },
+      });
       expect(mockPrisma.user.update).toHaveBeenCalled();
       expect(mockPrisma.staffMember.update).toHaveBeenCalledWith({
         where: { id: 'sm-1' },
@@ -530,39 +529,81 @@ describe('AdminService', () => {
       });
     });
 
-    it('throws when staff not found', async () => {
-      mockPrisma.staffMember.findUnique.mockResolvedValue(null);
-      await expect(service.updateStaff('missing', { designation: 'X' })).rejects.toThrow(NotFoundException);
+    it('throws NotFoundException when staff is in a different society', async () => {
+      mockPrisma.staffMember.findFirst.mockResolvedValue(null);
+      await expect(
+        service.updateStaff('soc-1', 'staff-from-soc-B', { designation: 'X' }),
+      ).rejects.toThrow(NotFoundException);
+      expect(mockPrisma.staffMember.update).not.toHaveBeenCalled();
     });
   });
 
-  describe('staff documents', () => {
-    it('getStaffDocuments returns documents for staff', async () => {
-      mockPrisma.staffMember.findUnique.mockResolvedValue({ id: 'sm-1' });
+  describe('staff documents — cross-tenant guards', () => {
+    it('getStaffDocuments returns documents when society matches', async () => {
+      mockPrisma.staffMember.findFirst.mockResolvedValue({ id: 'sm-1' });
       mockPrisma.staffDocument.findMany.mockResolvedValue([{ id: 'd1' }]);
-      const docs = await service.getStaffDocuments('sm-1');
+      const docs = await service.getStaffDocuments('soc-1', 'sm-1');
       expect(docs).toHaveLength(1);
+      expect(mockPrisma.staffMember.findFirst).toHaveBeenCalledWith({
+        where: { id: 'sm-1', societyId: 'soc-1' },
+        select: { id: true },
+      });
     });
 
-    it('addStaffDocument creates document record', async () => {
-      mockPrisma.staffMember.findUnique.mockResolvedValue({ id: 'sm-1' });
+    it('getStaffDocuments throws NotFound when staff belongs to another society', async () => {
+      mockPrisma.staffMember.findFirst.mockResolvedValue(null);
+      await expect(
+        service.getStaffDocuments('soc-1', 'staff-from-soc-B'),
+      ).rejects.toThrow(NotFoundException);
+      expect(mockPrisma.staffDocument.findMany).not.toHaveBeenCalled();
+    });
+
+    it('addStaffDocument creates document when society matches', async () => {
+      mockPrisma.staffMember.findFirst.mockResolvedValue({ id: 'sm-1' });
       mockPrisma.staffDocument.create.mockResolvedValue({ id: 'd1', documentType: 'AADHAR' });
-      const doc = await service.addStaffDocument('sm-1', 'AADHAR', 'https://file');
+      const doc = await service.addStaffDocument('soc-1', 'sm-1', 'AADHAR', 'https://file');
       expect(doc).toMatchObject({ documentType: 'AADHAR' });
+      // Explicitly assert the composite WHERE so a regression to findUnique({id})
+      // would fail this test (per advocate review feedback).
+      expect(mockPrisma.staffMember.findFirst).toHaveBeenCalledWith({
+        where: { id: 'sm-1', societyId: 'soc-1' },
+        select: { id: true },
+      });
+    });
+
+    it('addStaffDocument throws NotFound when staff belongs to another society', async () => {
+      mockPrisma.staffMember.findFirst.mockResolvedValue(null);
+      await expect(
+        service.addStaffDocument('soc-1', 'staff-from-soc-B', 'AADHAR', 'https://file'),
+      ).rejects.toThrow(NotFoundException);
+      expect(mockPrisma.staffDocument.create).not.toHaveBeenCalled();
     });
   });
 
   describe('dismissStaff', () => {
-    it('sets leavingDate and suspends user', async () => {
-      mockPrisma.staffMember.findUnique.mockResolvedValue({ id: 'sm-1', userId: 'u1' });
+    it('sets leavingDate and suspends user when society matches', async () => {
+      mockPrisma.staffMember.findFirst.mockResolvedValue({ id: 'sm-1', userId: 'u1' });
       mockPrisma.staffMember.update.mockResolvedValue({});
       mockPrisma.user.update.mockResolvedValue({});
-      const result = await service.dismissStaff('sm-1');
+      const result = await service.dismissStaff('soc-1', 'sm-1');
       expect(result).toEqual({ ok: true });
+      // Lock in the composite WHERE so a regression to findUnique({id}) fails.
+      expect(mockPrisma.staffMember.findFirst).toHaveBeenCalledWith({
+        where: { id: 'sm-1', societyId: 'soc-1' },
+      });
       expect(mockPrisma.user.update).toHaveBeenCalledWith({
         where: { id: 'u1' },
         data: { status: 'SUSPENDED' },
       });
+    });
+
+    it('throws NotFoundException when staff belongs to another society', async () => {
+      mockPrisma.staffMember.findFirst.mockResolvedValue(null);
+      await expect(
+        service.dismissStaff('soc-1', 'staff-from-soc-B'),
+      ).rejects.toThrow(NotFoundException);
+      expect(mockPrisma.staffMember.update).not.toHaveBeenCalled();
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
     });
   });
 
@@ -1014,12 +1055,57 @@ describe('AdminService', () => {
   });
 
   describe('staff document security', () => {
-    it('deleteStaffDocument rejects cross-society access', async () => {
-      mockPrisma.staffMember.findUnique.mockResolvedValue({ id: 'sm-1', societyId: 'soc-other' });
+    it('deleteStaffDocument rejects cross-society access with NotFound (not 403)', async () => {
+      // Returning 404 instead of 403 is intentional: we leak less info about
+      // existence of records in other tenants.
+      mockPrisma.staffMember.findFirst.mockResolvedValue(null);
 
-      await expect(service.deleteStaffDocument('sm-1', 'doc-1', 'soc-1')).rejects.toThrow(
-        ForbiddenException,
-      );
+      await expect(
+        service.deleteStaffDocument('soc-1', 'sm-from-other-society', 'doc-1'),
+      ).rejects.toThrow(NotFoundException);
+      expect(mockPrisma.staffDocument.delete).not.toHaveBeenCalled();
+    });
+
+    it('deleteStaffDocument succeeds when society matches', async () => {
+      mockPrisma.staffMember.findFirst.mockResolvedValue({ id: 'sm-1' });
+      mockPrisma.staffDocument.findFirst.mockResolvedValue({ id: 'doc-1' });
+      mockPrisma.staffDocument.delete.mockResolvedValue({});
+
+      const result = await service.deleteStaffDocument('soc-1', 'sm-1', 'doc-1');
+      expect(result).toEqual({ deleted: true });
+      // Composite WHERE lock-in.
+      expect(mockPrisma.staffMember.findFirst).toHaveBeenCalledWith({
+        where: { id: 'sm-1', societyId: 'soc-1' },
+        select: { id: true },
+      });
+      expect(mockPrisma.staffDocument.delete).toHaveBeenCalledWith({ where: { id: 'doc-1' } });
+    });
+
+    it('verifyStaffDocument rejects cross-society access with NotFound', async () => {
+      mockPrisma.staffMember.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.verifyStaffDocument('soc-1', 'sm-from-other-society', 'doc-1', 'admin-u'),
+      ).rejects.toThrow(NotFoundException);
+      expect(mockPrisma.staffDocument.update).not.toHaveBeenCalled();
+    });
+
+    it('verifyStaffDocument succeeds when society matches', async () => {
+      mockPrisma.staffMember.findFirst.mockResolvedValue({ id: 'sm-1' });
+      mockPrisma.staffDocument.findFirst.mockResolvedValue({ id: 'doc-1' });
+      mockPrisma.staffDocument.update.mockResolvedValue({ id: 'doc-1', verifiedAt: new Date() });
+
+      const result = await service.verifyStaffDocument('soc-1', 'sm-1', 'doc-1', 'admin-u');
+      expect(result).toHaveProperty('verifiedAt');
+      // Composite WHERE lock-in.
+      expect(mockPrisma.staffMember.findFirst).toHaveBeenCalledWith({
+        where: { id: 'sm-1', societyId: 'soc-1' },
+        select: { id: true },
+      });
+      expect(mockPrisma.staffDocument.update).toHaveBeenCalledWith({
+        where: { id: 'doc-1' },
+        data: expect.objectContaining({ verifiedById: 'admin-u' }),
+      });
     });
   });
 

@@ -239,6 +239,7 @@ export class AdminController {
   @Patch('staff/:id')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   updateStaff(
+    @SocietyId() societyId: string,
     @Param('id') id: string,
     @Body() body: {
       salaryStructure?: Record<string, any>;
@@ -251,49 +252,50 @@ export class AdminController {
       emergencyContact?: { name: string; phone: string; relation?: string } | null;
     },
   ) {
-    return this.adminService.updateStaff(id, body);
+    return this.adminService.updateStaff(societyId, id, body);
   }
 
   @Get('staff/:id/documents')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  getStaffDocuments(@Param('id') id: string) {
-    return this.adminService.getStaffDocuments(id);
+  getStaffDocuments(@SocietyId() societyId: string, @Param('id') id: string) {
+    return this.adminService.getStaffDocuments(societyId, id);
   }
 
   @Post('staff/:id/documents')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   addStaffDocument(
+    @SocietyId() societyId: string,
     @Param('id') id: string,
     @Body() body: { documentType: string; fileUrl: string },
   ) {
-    return this.adminService.addStaffDocument(id, body.documentType, body.fileUrl, 'admin');
+    return this.adminService.addStaffDocument(societyId, id, body.documentType, body.fileUrl, 'admin');
   }
 
   @Delete('staff/:id/documents/:docId')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   deleteStaffDocument(
+    @SocietyId() societyId: string,
     @Param('id') id: string,
     @Param('docId') docId: string,
-    @SocietyId() societyId: string,
   ) {
-    return this.adminService.deleteStaffDocument(id, docId, societyId);
+    return this.adminService.deleteStaffDocument(societyId, id, docId);
   }
 
   @Patch('staff/:id/documents/:docId/verify')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   verifyStaffDocument(
+    @SocietyId() societyId: string,
     @Param('id') id: string,
     @Param('docId') docId: string,
     @CurrentUser() user: JwtPayload,
-    @SocietyId() societyId: string,
   ) {
-    return this.adminService.verifyStaffDocument(id, docId, user.sub, societyId);
+    return this.adminService.verifyStaffDocument(societyId, id, docId, user.sub);
   }
 
   @Patch('staff/:id/dismiss')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  dismissStaff(@Param('id') id: string) {
-    return this.adminService.dismissStaff(id);
+  dismissStaff(@SocietyId() societyId: string, @Param('id') id: string) {
+    return this.adminService.dismissStaff(societyId, id);
   }
 
   @Get('staff/:id/salary-slips')
@@ -304,17 +306,18 @@ export class AdminController {
 
   @Get('staff/:id/loans')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  getStaffLoans(@Param('id') id: string) {
-    return this.adminService.getStaffLoans(id);
+  getStaffLoans(@SocietyId() societyId: string, @Param('id') id: string) {
+    return this.adminService.getStaffLoans(societyId, id);
   }
 
   @Post('staff/:id/loans')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   createStaffLoan(
+    @SocietyId() societyId: string,
     @Param('id') id: string,
     @Body() body: { amount: number; reason?: string; status?: string },
   ) {
-    return this.adminService.createStaffLoan(id, body.amount, body.reason, body.status);
+    return this.adminService.createStaffLoan(societyId, id, body.amount, body.reason, body.status);
   }
 
   @Get('residents/:id/documents')

@@ -326,7 +326,9 @@ export class AdminService {
 
     const resignationTypes = ['RESIGNATION', 'TERMINATION', 'EMERGENCY', 'LEAVE_REQUESTED'];
     if (resignationTypes.includes(leave.type?.toUpperCase?.() ?? leave.type)) {
-      await this.dismissStaff(leave.staffId);
+      // requireLeavePendingInSociety above already pinned the leave to this society,
+      // so dismissStaff's composite WHERE will resolve the same tenant.
+      await this.dismissStaff(societyId, leave.staffId);
     }
 
     return updated;
@@ -1144,6 +1146,7 @@ async createStaff(
   }
 
   async updateStaff(
+    societyId: string,
     staffId: string,
     body: {
       salaryStructure?: Record<string, any>;
@@ -1156,8 +1159,13 @@ async createStaff(
       emergencyContact?: { name: string; phone: string; relation?: string } | null;
     },
   ) {
-    const staff = await this.prisma.staffMember.findUnique({ where: { id: staffId } });
-    if (!staff) throw new NotFoundException('Staff member not found');
+    // Composite (id, societyId) WHERE — defends against SUPER_ADMIN bypass
+    // because the WHERE is in `args` and applied by Prisma regardless of
+    // tenant.extension short-circuit.
+    const staff = await this.prisma.staffMember.findFirst({
+      where: { id: staffId, societyId },
+    });
+    if (!staff) throw new NotFoundException('Staff member not found in this society');
     const staffData: any = {};
     const userData: any = {};
 
@@ -1179,10 +1187,12 @@ async createStaff(
     return this.prisma.staffMember.update({ where: { id: staffId }, data: staffData, include: { user: true } });
   }
 
-  async getStaffDocuments(staffId: string) {
-    const staff = await this.prisma.staffMember.findUnique({ where: { id: staffId } });
-    if (!staff) throw new NotFoundException('Staff member not found');
-    // Return from the dedicated StaffDocument model
+  async getStaffDocuments(societyId: string, staffId: string) {
+    const staff = await this.prisma.staffMember.findFirst({
+      where: { id: staffId, societyId },
+      select: { id: true },
+    });
+    if (!staff) throw new NotFoundException('Staff member not found in this society');
     return this.prisma.staffDocument.findMany({
       where: { staffMemberId: staffId },
       orderBy: { uploadedAt: 'desc' },
@@ -1190,14 +1200,18 @@ async createStaff(
   }
 
   async addStaffDocument(
+    societyId: string,
     staffId: string,
     documentType: string,
     fileUrl: string,
     uploadedBy = 'admin',
     verifiedById?: string,
   ) {
-    const staff = await this.prisma.staffMember.findUnique({ where: { id: staffId } });
-    if (!staff) throw new NotFoundException('Staff member not found');
+    const staff = await this.prisma.staffMember.findFirst({
+      where: { id: staffId, societyId },
+      select: { id: true },
+    });
+    if (!staff) throw new NotFoundException('Staff member not found in this society');
     return this.prisma.staffDocument.create({
       data: {
         staffMemberId: staffId,
@@ -1209,12 +1223,15 @@ async createStaff(
     });
   }
 
-  async deleteStaffDocument(staffId: string, documentId: string, societyId?: string) {
-    const staff = await this.prisma.staffMember.findUnique({ where: { id: staffId } });
-    if (!staff) throw new NotFoundException('Staff member not found');
-    if (societyId && staff.societyId !== societyId) {
-      throw new ForbiddenException('Staff member belongs to another society');
-    }
+  // societyId is REQUIRED — previously was optional with an `if (societyId && ...)`
+  // guard, which silently no-op'd when callers didn't pass it. Required now so
+  // a future caller can't accidentally bypass the check.
+  async deleteStaffDocument(societyId: string, staffId: string, documentId: string) {
+    const staff = await this.prisma.staffMember.findFirst({
+      where: { id: staffId, societyId },
+      select: { id: true },
+    });
+    if (!staff) throw new NotFoundException('Staff member not found in this society');
     const doc = await this.prisma.staffDocument.findFirst({
       where: { id: documentId, staffMemberId: staffId },
     });
@@ -1223,12 +1240,18 @@ async createStaff(
     return { deleted: true };
   }
 
-  async verifyStaffDocument(staffId: string, documentId: string, verifiedById: string, societyId?: string) {
-    const staff = await this.prisma.staffMember.findUnique({ where: { id: staffId } });
-    if (!staff) throw new NotFoundException('Staff member not found');
-    if (societyId && staff.societyId !== societyId) {
-      throw new ForbiddenException('Staff member belongs to another society');
-    }
+  // societyId is REQUIRED (see deleteStaffDocument comment).
+  async verifyStaffDocument(
+    societyId: string,
+    staffId: string,
+    documentId: string,
+    verifiedById: string,
+  ) {
+    const staff = await this.prisma.staffMember.findFirst({
+      where: { id: staffId, societyId },
+      select: { id: true },
+    });
+    if (!staff) throw new NotFoundException('Staff member not found in this society');
     const doc = await this.prisma.staffDocument.findFirst({
       where: { id: documentId, staffMemberId: staffId },
     });
@@ -1243,9 +1266,11 @@ async createStaff(
     return type.toUpperCase().replace(/AADHAAR/g, 'AADHAR');
   }
 
-  async dismissStaff(staffId: string) {
-    const staff = await this.prisma.staffMember.findUnique({ where: { id: staffId } });
-    if (!staff) throw new NotFoundException('Staff member not found');
+  async dismissStaff(societyId: string, staffId: string) {
+    const staff = await this.prisma.staffMember.findFirst({
+      where: { id: staffId, societyId },
+    });
+    if (!staff) throw new NotFoundException('Staff member not found in this society');
     const now = new Date();
     await this.prisma.staffMember.update({
       where: { id: staffId },
@@ -1273,18 +1298,30 @@ async createStaff(
     });
   }
 
-  async getStaffLoans(staffId: string) {
-    const staff = await this.prisma.staffMember.findUnique({ where: { id: staffId } });
-    if (!staff) throw new NotFoundException('Staff member not found');
+  async getStaffLoans(societyId: string, staffId: string) {
+    const staff = await this.prisma.staffMember.findFirst({
+      where: { id: staffId, societyId },
+      select: { id: true },
+    });
+    if (!staff) throw new NotFoundException('Staff member not found in this society');
     return this.prisma.staffLoan.findMany({
       where: { staffMemberId: staffId },
       orderBy: { createdAt: 'desc' },
     });
   }
 
-  async createStaffLoan(staffId: string, amount: number, reason?: string, status?: string) {
-    const staff = await this.prisma.staffMember.findUnique({ where: { id: staffId } });
-    if (!staff) throw new NotFoundException('Staff member not found');
+  async createStaffLoan(
+    societyId: string,
+    staffId: string,
+    amount: number,
+    reason?: string,
+    status?: string,
+  ) {
+    const staff = await this.prisma.staffMember.findFirst({
+      where: { id: staffId, societyId },
+      select: { id: true },
+    });
+    if (!staff) throw new NotFoundException('Staff member not found in this society');
     return this.prisma.staffLoan.create({
       data: {
         staffMemberId: staffId,
