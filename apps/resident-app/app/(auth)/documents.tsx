@@ -17,14 +17,28 @@ import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
 
 type UploadState = {
-  // local preview while picking / uploading
+  // local preview shown while picking / uploading / on retry. Preserved across
+  // failed attempts so the user doesn't have to re-pick the image to retry.
   localUri: string;
+  // remembered between attempts so retry knows the contentType to upload.
+  mime: string;
   // populated only after a successful S3 PUT
   s3Url: string;
   uploading: boolean;
+  // human-friendly error message; non-null when the last attempt failed and
+  // the user has not yet retried or re-picked.
+  error: string | null;
 };
 
-const EMPTY: UploadState = { localUri: '', s3Url: '', uploading: false };
+const EMPTY: UploadState = { localUri: '', mime: '', s3Url: '', uploading: false, error: null };
+
+class UploadFailedError extends Error {
+  status?: number;
+  constructor(message: string, status?: number) {
+    super(message);
+    this.status = status;
+  }
+}
 
 async function presignAndUpload(uri: string, folder: string, contentType: string): Promise<string> {
   // 1. Ask backend for a presigned PUT URL
@@ -40,9 +54,38 @@ async function presignAndUpload(uri: string, folder: string, contentType: string
     headers: { 'Content-Type': contentType },
     body: blob,
   });
-  if (!putRes.ok) throw new Error(`Upload failed (${putRes.status})`);
+  if (!putRes.ok) throw new UploadFailedError(`Upload failed (${putRes.status})`, putRes.status);
 
   return presigned.publicUrl;
+}
+
+/** Map an upload error to a short user-facing string. */
+function describeUploadError(err: unknown): string {
+  if (typeof err !== 'object' || err === null) return 'Upload failed. Please try again.';
+  const e = err as { message?: string; name?: string; status?: number };
+  const msg = e.message ?? '';
+
+  // Network failure path — friendlyError on the api side already converts
+  // TypeError/"Network request failed" into the "Could not reach" message.
+  if (
+    e.name === 'TypeError' ||
+    msg.includes('Network request failed') ||
+    msg.includes('Could not reach the server') ||
+    msg.includes('connection')
+  ) {
+    return "Couldn't reach the server. Check your internet and try again.";
+  }
+  // S3 PUT failures bubble up as `Upload failed (NNN)` from presignAndUpload.
+  const status = e.status ?? (msg.match(/Upload failed \((\d+)\)/)?.[1]);
+  if (status) {
+    const n = Number(status);
+    if (n === 413) return 'That file is too large. Try a smaller image.';
+    if (n >= 400 && n < 500) return 'The file was rejected. Try a different image.';
+    if (n >= 500) return 'Storage is temporarily unavailable. Try again in a moment.';
+  }
+  // Backend "service hiccup" message comes through verbatim.
+  if (msg.includes('hiccup')) return msg;
+  return msg || 'Upload failed. Please try again.';
 }
 
 function UploadField({
@@ -58,6 +101,24 @@ function UploadField({
   onChange: (next: UploadState) => void;
   folder: string;
 }) {
+  const upload = async (localUri: string, mime: string) => {
+    onChange({ localUri, mime, s3Url: '', uploading: true, error: null });
+    try {
+      const s3Url = await presignAndUpload(localUri, folder, mime);
+      onChange({ localUri, mime, s3Url, uploading: false, error: null });
+    } catch (err) {
+      // Preserve localUri + mime so the user can retry without re-picking the
+      // image. Previously we wiped both, forcing a re-pick after every error.
+      onChange({
+        localUri,
+        mime,
+        s3Url: '',
+        uploading: false,
+        error: describeUploadError(err),
+      });
+    }
+  };
+
   const handlePick = async (mode: 'camera' | 'library') => {
     const perm =
       mode === 'camera'
@@ -75,20 +136,30 @@ function UploadField({
 
     const localUri = result.assets[0].uri;
     const mime = result.assets[0].mimeType ?? 'image/jpeg';
-    onChange({ localUri, s3Url: '', uploading: true });
-    try {
-      const s3Url = await presignAndUpload(localUri, folder, mime);
-      onChange({ localUri, s3Url, uploading: false });
-    } catch (err: any) {
-      Alert.alert('Upload failed', err.message ?? 'Could not upload to storage. Please try again.');
-      onChange({ localUri: '', s3Url: '', uploading: false });
-    }
+    await upload(localUri, mime);
+  };
+
+  const handleRetry = () => {
+    if (!state.localUri) return;
+    void upload(state.localUri, state.mime || 'image/jpeg');
   };
 
   return (
     <View className="bg-gray-50 rounded-2xl p-5 mb-4 border border-gray-200">
       <Text className="text-gray-900 text-base font-semibold mb-1">{label}</Text>
       <Text className="text-gray-400 text-sm mb-4">{subtitle}</Text>
+
+      {state.error && state.localUri ? (
+        // Inline error banner — distinct visually from success state. Stays
+        // visible until the user retries (handleRetry) or re-picks.
+        <View
+          accessibilityRole="alert"
+          className="bg-red-50 border border-red-200 rounded-xl px-3.5 py-3 mb-3 flex-row items-start"
+        >
+          <Ionicons name="warning-outline" size={16} color="#B91C1C" style={{ marginTop: 2 }} />
+          <Text className="text-red-700 text-sm flex-1 ml-2">{state.error}</Text>
+        </View>
+      ) : null}
 
       {state.localUri ? (
         <View className="flex-row items-center" style={{ gap: 16 }}>
@@ -112,6 +183,21 @@ function UploadField({
             ) : null}
           </View>
           <View className="flex-1" style={{ gap: 10 }}>
+            {state.error ? (
+              // Inline retry button — visible whenever the last attempt failed.
+              // Pre-existing behaviour Alert'd + wiped localUri, forcing a
+              // full re-pick. Now we keep the URI + offer a single-tap retry.
+              <TouchableOpacity
+                onPress={handleRetry}
+                disabled={state.uploading}
+                accessibilityRole="button"
+                accessibilityLabel={`Retry uploading ${label}`}
+                className="bg-primary-500 rounded-xl px-3.5 py-3 min-h-[52px] justify-center flex-row items-center"
+              >
+                <Ionicons name="refresh-outline" size={16} color="#FFFFFF" />
+                <Text className="text-white text-sm font-semibold text-center ml-1.5">Retry upload</Text>
+              </TouchableOpacity>
+            ) : null}
             <TouchableOpacity
               onPress={() => handlePick('camera')}
               disabled={state.uploading}
