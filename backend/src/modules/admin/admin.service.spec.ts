@@ -203,6 +203,40 @@ describe('AdminService', () => {
     });
   });
 
+  // ─── getStaffSalarySlips ───────────────────────────────────────────────────
+  // Locks in the ownership check added 2026-05 to prevent a SUPER_ADMIN
+  // with X-Society-Id switch (or any admin) from reading salary slips for
+  // a staff member in another society. SalarySlip is not in
+  // DIRECT_TENANT_SCOPED, so the Prisma extension can't auto-scope the
+  // findMany; the service guards via a composite (id, societyId) lookup
+  // on StaffMember first.
+
+  describe('getStaffSalarySlips — cross-tenant guard', () => {
+    it('throws NotFoundException when staff belongs to another society', async () => {
+      mockPrisma.staffMember.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.getStaffSalarySlips('soc-A', 'staff-from-soc-B'),
+      ).rejects.toThrow(NotFoundException);
+      expect(mockPrisma.salarySlip = mockPrisma.salarySlip ?? {}).toBeTruthy();
+    });
+
+    it('returns slips when staff belongs to caller society', async () => {
+      mockPrisma.staffMember.findFirst.mockResolvedValue({ id: 'sm-1' });
+      mockPrisma.salarySlip = {
+        findMany: jest.fn().mockResolvedValue([{ id: 'slip-1', staffId: 'sm-1' }]),
+      };
+
+      const result = await service.getStaffSalarySlips('soc-A', 'sm-1');
+
+      expect(mockPrisma.staffMember.findFirst).toHaveBeenCalledWith({
+        where: { id: 'sm-1', societyId: 'soc-A' },
+        select: { id: true },
+      });
+      expect(result).toEqual([{ id: 'slip-1', staffId: 'sm-1' }]);
+    });
+  });
+
   // ─── createStaffLoan ───────────────────────────────────────────────────────
 
   describe('createStaffLoan', () => {
@@ -651,6 +685,117 @@ describe('AdminService', () => {
       expect(mockPrisma.resident.update).toHaveBeenCalledWith({
         where: { id: 'res-1' },
         data: { deletedAt: expect.any(Date) },
+      });
+    });
+  });
+
+  // ─── approveResident / rejectResident — cross-tenant scoping ──────────────
+  // These tests lock in the fix for the 2026-05 cross-tenant leak: a regular
+  // admin (or SUPER_ADMIN with a stale tenant switch) could approve/reject a
+  // resident from another society by knowing the id. The service now requires
+  // a societyId arg and validates ownership via the composite WHERE.
+
+  describe('approveResident — cross-tenant guard', () => {
+    it('throws NotFoundException when the user id belongs to another society', async () => {
+      // user lookup scoped to (id, societyId) returns nothing → resident
+      // fallback also returns nothing → NotFoundException.
+      mockPrisma.user.findFirst.mockResolvedValue(null);
+      mockPrisma.resident.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.approveResident('soc-A', 'user-from-soc-B'),
+      ).rejects.toThrow(NotFoundException);
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('approves when the user id belongs to the caller society', async () => {
+      mockPrisma.user.findFirst.mockResolvedValue({ id: 'user-1' });
+      mockPrisma.user.update.mockResolvedValue({ id: 'user-1', status: 'ACTIVE', fcmToken: null });
+
+      const result = await service.approveResident('soc-A', 'user-1');
+
+      expect(mockPrisma.user.findFirst).toHaveBeenCalledWith({
+        where: { id: 'user-1', societyId: 'soc-A' },
+        select: { id: true },
+      });
+      expect(mockPrisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-1' },
+        data: { status: 'ACTIVE' },
+      });
+      expect(result.status).toBe('ACTIVE');
+    });
+
+    it('falls back to residentId lookup and still scopes by user.societyId', async () => {
+      mockPrisma.user.findFirst.mockResolvedValue(null);
+      mockPrisma.resident.findFirst.mockResolvedValue({ userId: 'user-2' });
+      mockPrisma.user.update.mockResolvedValue({ id: 'user-2', status: 'ACTIVE', fcmToken: null });
+
+      await service.approveResident('soc-A', 'resident-2');
+
+      expect(mockPrisma.resident.findFirst).toHaveBeenCalledWith({
+        where: { id: 'resident-2', user: { societyId: 'soc-A' } },
+        select: { userId: true },
+      });
+      expect(mockPrisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-2' },
+        data: { status: 'ACTIVE' },
+      });
+    });
+  });
+
+  describe('rejectResident — cross-tenant guard', () => {
+    it('throws NotFoundException when the user id belongs to another society', async () => {
+      mockPrisma.user.findFirst.mockResolvedValue(null);
+      mockPrisma.resident.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.rejectResident('soc-A', 'user-from-soc-B', 'spam'),
+      ).rejects.toThrow(NotFoundException);
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects with reason when user belongs to the caller society', async () => {
+      mockPrisma.user.findFirst.mockResolvedValue({ id: 'user-1' });
+      mockPrisma.user.update.mockResolvedValue({ id: 'user-1', status: 'REJECTED', fcmToken: null });
+
+      await service.rejectResident('soc-A', 'user-1', 'incomplete docs');
+
+      expect(mockPrisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-1' },
+        data: { status: 'REJECTED', adminNote: 'incomplete docs' },
+      });
+    });
+  });
+
+  describe('getResidentDocuments — cross-tenant guard', () => {
+    it('throws NotFoundException when resident belongs to another society', async () => {
+      mockPrisma.resident.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.getResidentDocuments('soc-A', 'res-from-soc-B'),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('verifyResidentDocuments — cross-tenant guard', () => {
+    it('throws NotFoundException when resident belongs to another society', async () => {
+      mockPrisma.resident.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.verifyResidentDocuments('soc-A', 'res-from-soc-B', 'VERIFIED'),
+      ).rejects.toThrow(NotFoundException);
+      expect(mockPrisma.resident.update).not.toHaveBeenCalled();
+    });
+
+    it('updates documentsStatus when caller owns the resident', async () => {
+      mockPrisma.resident.findFirst.mockResolvedValue({ id: 'res-1' });
+      mockPrisma.resident.update.mockResolvedValue({ id: 'res-1', documentsStatus: 'VERIFIED' });
+
+      await service.verifyResidentDocuments('soc-A', 'res-1', 'VERIFIED');
+
+      expect(mockPrisma.resident.update).toHaveBeenCalledWith({
+        where: { id: 'res-1' },
+        data: { documentsStatus: 'VERIFIED' },
       });
     });
   });

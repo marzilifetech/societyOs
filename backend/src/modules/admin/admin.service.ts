@@ -192,23 +192,34 @@ export class AdminService {
    * Accepts either a userId or a residentId — the admin-web list returns
    * userId-as-`id`, but the detail page uses residentId. Rather than force
    * a frontend migration, resolve both shapes here.
+   *
+   * MUST validate that the resolved User belongs to the caller's society —
+   * without this, any admin (regular or SUPER_ADMIN with a stale tenant
+   * switch) could approve/reject a User from another society by knowing the
+   * id. User is in `CROSS_TENANT_MODELS` so the Prisma tenant extension does
+   * NOT auto-scope it; the scope must be hand-rolled here.
    */
-  private async resolveUserIdFromResidentish(idOrResidentId: string): Promise<string> {
-    const userExists = await this.prisma.user.findUnique({
-      where: { id: idOrResidentId },
+  private async resolveUserIdFromResidentish(
+    societyId: string,
+    idOrResidentId: string,
+  ): Promise<string> {
+    const user = await this.prisma.user.findFirst({
+      where: { id: idOrResidentId, societyId },
       select: { id: true },
     });
-    if (userExists) return userExists.id;
-    const resident = await this.prisma.resident.findUnique({
-      where: { id: idOrResidentId },
+    if (user) return user.id;
+    // Fall back to treating the id as a residentId — assert society via the
+    // related User row, which has the canonical societyId column.
+    const resident = await this.prisma.resident.findFirst({
+      where: { id: idOrResidentId, user: { societyId } },
       select: { userId: true },
     });
-    if (!resident) throw new NotFoundException('Resident not found');
+    if (!resident) throw new NotFoundException('Resident not found in this society');
     return resident.userId;
   }
 
-  async approveResident(idOrResidentId: string) {
-    const userId = await this.resolveUserIdFromResidentish(idOrResidentId);
+  async approveResident(societyId: string, idOrResidentId: string) {
+    const userId = await this.resolveUserIdFromResidentish(societyId, idOrResidentId);
     const user = await this.prisma.user.update({
       where: { id: userId },
       data: { status: UserStatus.ACTIVE },
@@ -223,8 +234,8 @@ export class AdminService {
     return user;
   }
 
-  async rejectResident(idOrResidentId: string, reason: string) {
-    const userId = await this.resolveUserIdFromResidentish(idOrResidentId);
+  async rejectResident(societyId: string, idOrResidentId: string, reason: string) {
+    const userId = await this.resolveUserIdFromResidentish(societyId, idOrResidentId);
     const user = await this.prisma.user.update({
       where: { id: userId },
       data: { status: UserStatus.REJECTED, adminNote: reason },
@@ -1244,7 +1255,18 @@ async createStaff(
     return { ok: true };
   }
 
-  async getStaffSalarySlips(staffId: string) {
+  async getStaffSalarySlips(societyId: string, staffId: string) {
+    // Validate staff belongs to caller society before reading salary slips —
+    // SalarySlip is not in DIRECT_TENANT_SCOPED, so the Prisma extension
+    // won't auto-scope this query. Use findFirst with composite (id, societyId)
+    // on StaffMember (which DOES have a direct societyId column) so
+    // SUPER_ADMIN with X-Society-Id switch is bounded to the effective
+    // tenant just like every other route in this fix.
+    const staff = await this.prisma.staffMember.findFirst({
+      where: { id: staffId, societyId },
+      select: { id: true },
+    });
+    if (!staff) throw new NotFoundException('Staff member not found in this society');
     return this.prisma.salarySlip.findMany({
       where: { staffId },
       orderBy: { period: 'desc' },
@@ -1309,13 +1331,16 @@ async createStaff(
     });
   }
 
-  async getResidentDocuments(residentId: string) {
-    const resident = await this.prisma.resident.findUnique({
-      where: { id: residentId },
+  async getResidentDocuments(societyId: string, residentId: string) {
+    // Scope by joined User.societyId — Resident has no direct societyId column
+    // and the Prisma tenant extension intentionally excludes Resident from
+    // auto-scoping (see tenant.extension.ts:64-66).
+    const resident = await this.prisma.resident.findFirst({
+      where: { id: residentId, user: { societyId } },
       include: { user: true },
     });
-    if (!resident) throw new NotFoundException('Resident not found');
-    
+    if (!resident) throw new NotFoundException('Resident not found in this society');
+
     return {
       name: resident.user.name,
       idProof: resident.idProof,
@@ -1324,7 +1349,19 @@ async createStaff(
     };
   }
 
-  async verifyResidentDocuments(residentId: string, status: 'VERIFIED' | 'REJECTED', note?: string) {
+  async verifyResidentDocuments(
+    societyId: string,
+    residentId: string,
+    status: 'VERIFIED' | 'REJECTED',
+    _note?: string,
+  ) {
+    // Pre-check ownership before issuing the update — otherwise an admin
+    // from another society could flip any resident's documents status by id.
+    const resident = await this.prisma.resident.findFirst({
+      where: { id: residentId, user: { societyId } },
+      select: { id: true },
+    });
+    if (!resident) throw new NotFoundException('Resident not found in this society');
     return this.prisma.resident.update({
       where: { id: residentId },
       data: {

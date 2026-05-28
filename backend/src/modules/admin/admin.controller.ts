@@ -86,8 +86,8 @@ export class AdminController {
   }
 
   @Get('residents/pending')
-  getPendingResidents(@CurrentUser() user: JwtPayload) {
-    return this.adminService.getPendingResidents(user.societyId, user.managedBlocks);
+  getPendingResidents(@SocietyId() societyId: string, @CurrentUser() user: JwtPayload) {
+    return this.adminService.getPendingResidents(societyId, user.managedBlocks);
   }
 
   @Get('residents')
@@ -96,13 +96,17 @@ export class AdminController {
   }
 
   @Patch('residents/:id/approve')
-  approveResident(@Param('id') id: string) {
-    return this.adminService.approveResident(id);
+  approveResident(@SocietyId() societyId: string, @Param('id') id: string) {
+    return this.adminService.approveResident(societyId, id);
   }
 
   @Patch('residents/:id/reject')
-  rejectResident(@Param('id') id: string, @Body('reason') reason: string) {
-    return this.adminService.rejectResident(id, reason || 'No reason provided');
+  rejectResident(
+    @SocietyId() societyId: string,
+    @Param('id') id: string,
+    @Body('reason') reason: string,
+  ) {
+    return this.adminService.rejectResident(societyId, id, reason || 'No reason provided');
   }
 
   @Post('residents/:id/data-export')
@@ -294,8 +298,8 @@ export class AdminController {
 
   @Get('staff/:id/salary-slips')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  getStaffSalarySlips(@Param('id') id: string) {
-    return this.adminService.getStaffSalarySlips(id);
+  getStaffSalarySlips(@SocietyId() societyId: string, @Param('id') id: string) {
+    return this.adminService.getStaffSalarySlips(societyId, id);
   }
 
   @Get('staff/:id/loans')
@@ -315,17 +319,18 @@ export class AdminController {
 
   @Get('residents/:id/documents')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  getResidentDocuments(@Param('id') id: string) {
-    return this.adminService.getResidentDocuments(id);
+  getResidentDocuments(@SocietyId() societyId: string, @Param('id') id: string) {
+    return this.adminService.getResidentDocuments(societyId, id);
   }
 
   @Patch('residents/:id/documents/verify')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   verifyResidentDocuments(
+    @SocietyId() societyId: string,
     @Param('id') id: string,
     @Body() body: { status: 'VERIFIED' | 'REJECTED'; note?: string },
   ) {
-    return this.adminService.verifyResidentDocuments(id, body.status, body.note);
+    return this.adminService.verifyResidentDocuments(societyId, id, body.status, body.note);
   }
 
   @Patch('leaves/:id/reject')
