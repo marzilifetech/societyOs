@@ -64,7 +64,7 @@ exports[`ErrorCard snapshot with retry button 1`] = `
     onStartShouldSetResponder={[Function]}
     style={
       {
-        "backgroundColor": "#6C63FF",
+        "backgroundColor": "#821A52",
         "borderRadius": 12,
         "marginBottom": 16,
         "opacity": 1,

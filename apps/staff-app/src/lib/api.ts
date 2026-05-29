@@ -46,6 +46,6 @@ export const api = new ApiClient({
   onUnauthorized: () => {
     _cachedAccess = null;
     _cachedRefresh = null;
-    router.replace('/(auth)/phone-entry' as any);
+    router.replace('/(auth)/society-select' as any);
   },
 });

@@ -73,7 +73,9 @@ export class OtpService {
     }
 
     if (this.isDev) {
-      const code = '123456';
+      // 4 digits to match the mobile + admin login inputs. The Marzi proxy
+      // path also uses 4-digit OTPs, so frontend and local dev are aligned.
+      const code = '1234';
       await this.redis.set(`otp:code:${phone}`, code, OTP_TTL_SECONDS);
       this.logger.log(`[DEV] OTP for ${phone}: ${code}`);
       return 'dev-session';
@@ -91,11 +93,17 @@ export class OtpService {
     return 'no-delivery';
   }
 
-  /** Verify OTP previously sent. Returns true on match, throws on lockout. */
+  /**
+   * Verify OTP previously sent. Returns true on match, throws on lockout.
+   * In marzi-mode the AuthService bypasses this method and calls
+   * `marzi.verifyOtp` directly so it can capture the Marzi token pair.
+   * This boolean-shaped fallback is kept so older callers (tests, fallback
+   * paths) still work — we wrap the Marzi pair result back to a boolean.
+   */
   async verifyOtp(phone: string, otp: string): Promise<boolean> {
-    // OTP_PROVIDER=marzi — verification happens on the external Marzi backend.
     if (this.marzi.enabled) {
-      return this.marzi.verifyOtp(phone, otp);
+      const pair = await this.marzi.verifyOtp(phone, otp);
+      return pair !== null;
     }
 
     const locked = await this.redis.get(`otp:lock:${phone}`);
@@ -146,6 +154,6 @@ export class OtpService {
 
   /** @deprecated kept for backwards compat with old call sites */
   async verifyDevOtp(otp: string): Promise<boolean> {
-    return this.isDev && otp === '123456';
+    return this.isDev && otp === '1234';
   }
 }

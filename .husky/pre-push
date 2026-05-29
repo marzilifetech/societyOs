@@ -1,0 +1,17 @@
+#!/usr/bin/env sh
+# Pre-push gate: run the backend test suite before any push leaves this
+# machine. Catches the bulk of regressions in seconds (workspace-scoped to
+# avoid cold-starting the mobile builds). Skip with PRE_PUSH_SKIP=1.
+
+if [ "$PRE_PUSH_SKIP" = "1" ]; then
+  echo "→ PRE_PUSH_SKIP=1 — skipping backend test gate"
+  exit 0
+fi
+
+echo "→ pre-push: running backend tests…"
+if ! pnpm --filter @societyos/backend test; then
+  echo ""
+  echo "✗ Pre-push tests failed — fix or rerun with PRE_PUSH_SKIP=1 git push"
+  exit 1
+fi
+echo "✓ Backend tests passed"

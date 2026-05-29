@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { requireResidentByUserId } from '../../common/utils/resident-context';
+import { requireOwnedById } from '../../common/tenancy/require-owned.util';
 import { CreatePestControlDto } from './dto/create-pest-control.dto';
 
 @Injectable()
@@ -33,10 +34,12 @@ export class PestControlService {
     return { data, meta: { total, page, limit: take, totalPages: Math.ceil(total / take) } };
   }
 
-  async findOne(id: string) {
-    const schedule = await this.prisma.pestControlSchedule.findUnique({ where: { id } });
-    if (!schedule) throw new NotFoundException('Pest control schedule not found');
-    return schedule;
+  async findOne(id: string, societyId: string) {
+    return requireOwnedById(
+      () => this.prisma.pestControlSchedule.findUnique({ where: { id } }),
+      societyId,
+      'Pest control schedule',
+    );
   }
 
   async create(societyId: string, dto: CreatePestControlDto) {
@@ -52,16 +55,16 @@ export class PestControlService {
     });
   }
 
-  async complete(id: string) {
-    const schedule = await this.findOne(id);
+  async complete(id: string, societyId: string) {
+    const schedule = await this.findOne(id, societyId);
     return this.prisma.pestControlSchedule.update({
       where: { id: schedule.id },
       data: { status: 'COMPLETED' as any, completedAt: new Date() },
     });
   }
 
-  async cancel(id: string) {
-    const schedule = await this.findOne(id);
+  async cancel(id: string, societyId: string) {
+    const schedule = await this.findOne(id, societyId);
     return this.prisma.pestControlSchedule.update({
       where: { id: schedule.id },
       data: { status: 'CANCELLED' as any },

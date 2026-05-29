@@ -56,7 +56,9 @@ export default function SosPage() {
   const { data: active, isLoading, isError, refetch } = useQuery({
     queryKey: ['active-sos'],
     queryFn: () => api.get<any[]>('/sos/active'),
-    refetchInterval: 10_000,
+    // Backend `sos` throttler bucket = 5 req/min; 10s polling hit 429 in ~50s.
+    // 15s gives 4 req/min, leaving room for one ack/resolve PATCH per minute.
+    refetchInterval: 15_000,
   });
 
   const ackMutation = useMutation({

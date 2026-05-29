@@ -1,11 +1,15 @@
 import { ScrollView, View, Text, TouchableOpacity, ActivityIndicator, RefreshControl } from 'react-native';
 import { router } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
 import { useTheme } from '../../src/hooks/useTheme';
+import { ScreenHeader } from '../../src/components/ui';
+
+// Public Figma reference (Med Help Desk Appointments frame): node-id=56-6126
+// Behaviour-preserving redesign — same /medical/doctors + /medical/emergency-contacts
+// queries; new ScreenHeader (with SOS trailing affordance) primitive.
 
 type Doctor = {
   id: string;
@@ -44,32 +48,22 @@ export default function MedicalScreen() {
     setRefreshing(false);
   };
 
+  const sosButton = (
+    <TouchableOpacity
+      onPress={() => router.push('/medical/sos' as any)}
+      style={{ minHeight: t.touchTargetSm }}
+      className="bg-red-600 rounded-2xl px-4 py-3 flex-row items-center gap-1.5 justify-center"
+      accessibilityRole="button"
+      accessibilityLabel="Emergency SOS - call for immediate help"
+    >
+      <Ionicons name="warning" size={18} color="#FFFFFF" />
+      <Text className="text-white font-semibold text-sm">SOS</Text>
+    </TouchableOpacity>
+  );
+
   return (
-    <SafeAreaView className="flex-1 bg-white">
-      <View className="px-6 pt-4 pb-3 flex-row items-center gap-3">
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={{ minHeight: t.touchTargetSm, minWidth: t.touchTargetSm, alignItems: 'center', justifyContent: 'center' }}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <Ionicons name="chevron-back" size={24} color="#821A52" />
-        </TouchableOpacity>
-        <View className="flex-1">
-          <Text className="text-2xl font-bold text-gray-900">Medical</Text>
-          <Text className="text-sm text-gray-500">Book a doctor appointment</Text>
-        </View>
-        <TouchableOpacity
-          onPress={() => router.push('/medical/sos' as any)}
-          style={{ minHeight: t.touchTargetSm }}
-          className="bg-red-600 rounded-2xl px-4 py-3 flex-row items-center gap-1.5 justify-center"
-          accessibilityRole="button"
-          accessibilityLabel="Emergency SOS - call for immediate help"
-        >
-          <Ionicons name="warning" size={18} color="#FFFFFF" />
-          <Text className="text-white font-semibold text-sm">SOS</Text>
-        </TouchableOpacity>
-      </View>
+    <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+      <ScreenHeader title="Medical" subtitle="Book a doctor appointment" trailing={sosButton} />
 
       <ScrollView
         showsVerticalScrollIndicator={false}
@@ -203,6 +197,6 @@ export default function MedicalScreen() {
           </View>
         ) : null}
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }

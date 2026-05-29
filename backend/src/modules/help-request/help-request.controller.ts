@@ -34,14 +34,22 @@ export class HelpRequestController {
 
   @Get(':id')
   @Roles(UserRole.RESIDENT)
-  getHelpRequestById(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
-    return this.helpService.getHelpRequestById(id, user.sub);
+  getHelpRequestById(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @SocietyId() societyId: string,
+  ) {
+    return this.helpService.getHelpRequestById(id, user.sub, societyId);
   }
 
   @Get(':id/photo-upload-url')
   @Roles(UserRole.RESIDENT, UserRole.STAFF)
-  getPhotoUploadUrl(@Param('id') id: string, @Query('contentType') contentType?: string) {
-    return this.helpService.getHelpRequestPhotoUploadUrl(id, contentType);
+  getPhotoUploadUrl(
+    @Param('id') id: string,
+    @SocietyId() societyId: string,
+    @Query('contentType') contentType?: string,
+  ) {
+    return this.helpService.getHelpRequestPhotoUploadUrl(id, societyId, contentType);
   }
 }
 
@@ -60,29 +68,42 @@ export class StaffHelpRequestController {
 
   @Get(':id')
   @Roles(UserRole.STAFF)
-  getMyHelpRequestById(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
-    return this.helpService.getMyHelpRequestById(user.sub, id);
+  getMyHelpRequestById(
+    @CurrentUser() user: JwtPayload,
+    @SocietyId() societyId: string,
+    @Param('id') id: string,
+  ) {
+    return this.helpService.getMyHelpRequestById(user.sub, id, societyId);
   }
 
   @Post(':id/accept')
   @Roles(UserRole.STAFF)
-  accept(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
-    return this.helpService.acceptHelpRequest(user.sub, id);
+  accept(
+    @CurrentUser() user: JwtPayload,
+    @SocietyId() societyId: string,
+    @Param('id') id: string,
+  ) {
+    return this.helpService.acceptHelpRequest(user.sub, id, societyId);
   }
 
   @Patch(':id/status')
   @Roles(UserRole.STAFF)
   updateStatus(
     @CurrentUser() user: JwtPayload,
+    @SocietyId() societyId: string,
     @Param('id') id: string,
     @Body() dto: UpdateHelpRequestStatusDto,
   ) {
-    return this.helpService.updateHelpRequestStatus(user.sub, id, dto.status);
+    return this.helpService.updateHelpRequestStatus(user.sub, id, societyId, dto.status);
   }
 
   @Post(':id/complete')
   @Roles(UserRole.STAFF)
-  complete(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
-    return this.helpService.completeHelpRequest(user.sub, id);
+  complete(
+    @CurrentUser() user: JwtPayload,
+    @SocietyId() societyId: string,
+    @Param('id') id: string,
+  ) {
+    return this.helpService.completeHelpRequest(user.sub, id, societyId);
   }
 }

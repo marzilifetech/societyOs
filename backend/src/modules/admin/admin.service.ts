@@ -1,4 +1,5 @@
 import { Injectable, Logger, NotFoundException, BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
 import { PushService } from '../../common/notification/push.service';
@@ -6,6 +7,14 @@ import { UserStatus, UserRole, ComplaintStatus, TravelPauseStatus } from '@prism
 import { requireLeavePendingInSociety } from '../../common/utils/leave-admin.util';
 import { ComplianceService } from '../compliance/compliance.service';
 import { AuditService } from '../../common/audit/audit.service';
+import { parseCsv, rowToRecord, toCsvRow } from '../../common/utils/csv.util';
+import { SocietySeederService } from '../society/society-seeder.service';
+import { runWithTenantContext, getTenantContext } from '../../common/tenancy/tenant.context';
+import { asyncPool } from '../../common/utils/async-pool';
+
+// Concurrency ceiling for fan-out push delivery — keeps a 1k-resident society
+// from saturating FCM rate limits while still finishing well under a minute.
+const PUSH_CONCURRENCY = 25;
 
 /** Valid admin-driven status moves (corner case SR2: no arbitrary jumps). */
 const COMPLAINT_TRANSITIONS: Record<ComplaintStatus, ComplaintStatus[]> = {
@@ -26,6 +35,7 @@ export class AdminService {
     private push: PushService,
     private compliance: ComplianceService,
     private audit: AuditService,
+    private societySeeder: SocietySeederService,
   ) {}
 
   async exportResidentDataAsAdmin(
@@ -72,6 +82,7 @@ export class AdminService {
       pincode?: string;
       contactEmail?: string;
       contactPhone?: string;
+      showInDirectory?: boolean;
       config?: Record<string, unknown>;
     },
   ) {
@@ -83,6 +94,7 @@ export class AdminService {
     if (dto.address !== undefined) data.address = dto.address;
     if (dto.city !== undefined) data.city = dto.city;
     if (dto.pincode !== undefined) data.pincode = dto.pincode;
+    if (dto.showInDirectory !== undefined) data.showInDirectory = dto.showInDirectory;
 
     // Merge nested config rather than overwrite to avoid losing other keys.
     const existingConfig = (society.config as Record<string, unknown> | null) ?? {};
@@ -176,7 +188,38 @@ export class AdminService {
     }));
   }
 
-  async approveResident(userId: string) {
+  /**
+   * Accepts either a userId or a residentId — the admin-web list returns
+   * userId-as-`id`, but the detail page uses residentId. Rather than force
+   * a frontend migration, resolve both shapes here.
+   *
+   * MUST validate that the resolved User belongs to the caller's society —
+   * without this, any admin (regular or SUPER_ADMIN with a stale tenant
+   * switch) could approve/reject a User from another society by knowing the
+   * id. User is in `CROSS_TENANT_MODELS` so the Prisma tenant extension does
+   * NOT auto-scope it; the scope must be hand-rolled here.
+   */
+  private async resolveUserIdFromResidentish(
+    societyId: string,
+    idOrResidentId: string,
+  ): Promise<string> {
+    const user = await this.prisma.user.findFirst({
+      where: { id: idOrResidentId, societyId },
+      select: { id: true },
+    });
+    if (user) return user.id;
+    // Fall back to treating the id as a residentId — assert society via the
+    // related User row, which has the canonical societyId column.
+    const resident = await this.prisma.resident.findFirst({
+      where: { id: idOrResidentId, user: { societyId } },
+      select: { userId: true },
+    });
+    if (!resident) throw new NotFoundException('Resident not found in this society');
+    return resident.userId;
+  }
+
+  async approveResident(societyId: string, idOrResidentId: string) {
+    const userId = await this.resolveUserIdFromResidentish(societyId, idOrResidentId);
     const user = await this.prisma.user.update({
       where: { id: userId },
       data: { status: UserStatus.ACTIVE },
@@ -191,7 +234,8 @@ export class AdminService {
     return user;
   }
 
-  async rejectResident(userId: string, reason: string) {
+  async rejectResident(societyId: string, idOrResidentId: string, reason: string) {
+    const userId = await this.resolveUserIdFromResidentish(societyId, idOrResidentId);
     const user = await this.prisma.user.update({
       where: { id: userId },
       data: { status: UserStatus.REJECTED, adminNote: reason },
@@ -282,7 +326,9 @@ export class AdminService {
 
     const resignationTypes = ['RESIGNATION', 'TERMINATION', 'EMERGENCY', 'LEAVE_REQUESTED'];
     if (resignationTypes.includes(leave.type?.toUpperCase?.() ?? leave.type)) {
-      await this.dismissStaff(leave.staffId);
+      // requireLeavePendingInSociety above already pinned the leave to this society,
+      // so dismissStaff's composite WHERE will resolve the same tenant.
+      await this.dismissStaff(societyId, leave.staffId);
     }
 
     return updated;
@@ -333,11 +379,20 @@ export class AdminService {
   }
 
   async getComplaints(societyId: string, status?: string) {
-    return this.prisma.complaint.findMany({
+    const rows = await this.prisma.complaint.findMany({
       where: { societyId, ...(status ? { status: status as any } : {}) },
-      include: { resident: { include: { user: true, flat: true } } },
+      include: {
+        resident: { include: { user: true, flat: true } },
+        assignedTo: { include: { user: { select: { id: true, name: true } } } },
+      },
       orderBy: { createdAt: 'desc' },
     });
+    return rows.map((c: any) => ({
+      ...c,
+      assignedTo: c.assignedTo
+        ? { id: c.assignedTo.id, name: c.assignedTo.user?.name ?? null }
+        : null,
+    }));
   }
 
   async updateComplaintStatus(id: string, societyId: string, status: string, adminNote?: string) {
@@ -388,17 +443,30 @@ export class AdminService {
     });
   }
 
-  async assignComplaint(id: string, societyId: string, staffId: string, staffName: string) {
+  async assignComplaint(id: string, societyId: string, staffId: string, _staffName?: string) {
     const complaint = await this.prisma.complaint.findUnique({ where: { id } });
     if (!complaint) throw new NotFoundException('Complaint not found');
     if (complaint.societyId !== societyId) {
       throw new ForbiddenException({ code: 'COMPLAINT_SOCIETY_MISMATCH', message: 'Complaint belongs to another society' });
     }
-    const assignNote = `Assigned to: ${staffName} (${staffId})`;
+    // Verify staff exists in this society — defense against cross-tenant
+    // assignment via a stale or guessed staffId.
+    const staff = await this.prisma.staffMember.findFirst({
+      where: { id: staffId, societyId },
+      include: { user: { select: { name: true } } },
+    });
+    if (!staff) {
+      throw new NotFoundException({ code: 'STAFF_NOT_FOUND', message: 'Staff not found in this society' });
+    }
+    // H1: write a real assignedToId — never clobber adminNote (admins use
+    // that for free-text resolution context).
     const statusUpdate = complaint.status === 'OPEN' ? { status: 'UNDER_REVIEW' as any } : {};
     return this.prisma.complaint.update({
       where: { id },
-      data: { adminNote: assignNote, ...statusUpdate },
+      data: { assignedToId: staffId, ...statusUpdate },
+      include: {
+        assignedTo: { include: { user: { select: { id: true, name: true } } } },
+      },
     });
   }
 
@@ -502,13 +570,23 @@ export class AdminService {
       },
     });
 
+    return this.computeCreditFromPauses(pauses, periodStart, periodEnd, daysInMonth, baseAmount);
+  }
+
+  /** Pure helper: sum overlap of pauses with the period and convert to credit. */
+  private computeCreditFromPauses(
+    pauses: Array<{ startDate: Date; returnDate: Date }>,
+    periodStart: Date,
+    periodEnd: Date,
+    daysInMonth: number,
+    baseAmount: number,
+  ): { credit: number; days: number } {
     let pausedMs = 0;
     for (const p of pauses) {
       const start = p.startDate < periodStart ? periodStart : p.startDate;
       const end = p.returnDate > periodEnd ? periodEnd : p.returnDate;
       pausedMs += Math.max(0, end.getTime() - start.getTime());
     }
-
     const pausedDays = Math.round(pausedMs / 86_400_000);
     const credit = baseAmount > 0 ? Math.round((pausedDays / daysInMonth) * baseAmount * 100) / 100 : 0;
     return { credit, days: pausedDays };
@@ -517,46 +595,81 @@ export class AdminService {
   async generateBills(societyId: string, year: number, month: number) {
     const period = `${year}-${String(month).padStart(2, '0')}`;
     const dueDate = new Date(year, month - 1, 28);
+    const periodStart = new Date(year, month - 1, 1);
+    const periodEnd = new Date(year, month, 1);
+    const daysInMonth = (periodEnd.getTime() - periodStart.getTime()) / 86_400_000;
 
     const flats = await this.prisma.flat.findMany({
       where: { societyId },
       include: { residents: true },
     });
 
+    const residentIds = flats.flatMap((f) => f.residents.map((r) => r.id));
+
+    // Pre-fetch all relevant travel pauses ONCE — was O(residents) queries
+    // due to per-resident computeTravelPauseCredit calls.
+    const allPauses = residentIds.length
+      ? await this.prisma.travelPause.findMany({
+          where: {
+            residentId: { in: residentIds },
+            status: { in: [TravelPauseStatus.ACTIVE, TravelPauseStatus.COMPLETED] },
+            startDate: { lt: periodEnd },
+            returnDate: { gt: periodStart },
+          },
+          select: { residentId: true, startDate: true, returnDate: true },
+        })
+      : [];
+
+    const pausesByResident = new Map<string, Array<{ startDate: Date; returnDate: Date }>>();
+    for (const p of allPauses) {
+      const list = pausesByResident.get(p.residentId) ?? [];
+      list.push({ startDate: p.startDate, returnDate: p.returnDate });
+      pausesByResident.set(p.residentId, list);
+    }
+
     const existingBills = await this.prisma.maintenanceBill.findMany({
       where: { flat: { societyId }, period },
       select: { flatId: true, residentId: true },
     });
-
     const existingKeys = new Set(existingBills.map((b) => `${b.flatId}:${b.residentId}`));
 
     const toCreate: any[] = [];
     for (const flat of flats) {
       for (const resident of flat.residents) {
         const key = `${flat.id}:${resident.id}`;
-        if (!existingKeys.has(key)) {
-          const baseAmount = 0; // base amount set by society config; credit computed when non-zero
-          const { credit: travelPauseCredit, days: pausedDays } = await this.computeTravelPauseCredit(resident.id, year, month, baseAmount);
-          const breakdown: Record<string, any> = {};
-          if (pausedDays > 0) {
-            breakdown.travelPauseCredit = travelPauseCredit;
-            breakdown.pausedDays = pausedDays;
-          }
-          toCreate.push({
-            flatId: flat.id,
-            residentId: resident.id,
-            period,
-            breakdown,
-            total: Math.max(0, baseAmount - travelPauseCredit),
-            dueDate,
-            status: 'PENDING',
-          });
+        if (existingKeys.has(key)) continue;
+        const baseAmount = 0; // base amount set by society config; credit computed when non-zero
+        const { credit: travelPauseCredit, days: pausedDays } = this.computeCreditFromPauses(
+          pausesByResident.get(resident.id) ?? [],
+          periodStart,
+          periodEnd,
+          daysInMonth,
+          baseAmount,
+        );
+        const breakdown: Record<string, any> = {};
+        if (pausedDays > 0) {
+          breakdown.travelPauseCredit = travelPauseCredit;
+          breakdown.pausedDays = pausedDays;
         }
+        toCreate.push({
+          flatId: flat.id,
+          residentId: resident.id,
+          period,
+          breakdown,
+          total: Math.max(0, baseAmount - travelPauseCredit),
+          dueDate,
+          status: 'PENDING',
+        });
       }
     }
 
+    // Atomic: if createMany fails halfway we don't want a partial month of
+    // bills. Wrap the (single) write in $transaction for forward-compat with
+    // any additional writes we may need to add to bill generation.
     if (toCreate.length > 0) {
-      await this.prisma.maintenanceBill.createMany({ data: toCreate });
+      await this.prisma.$transaction(async (tx) => {
+        await tx.maintenanceBill.createMany({ data: toCreate });
+      });
     }
 
     return { created: toCreate.length, period };
@@ -860,42 +973,24 @@ async createStaff(
       salary?: number;
       gender?: string;
       dateOfBirth?: string;
+      emergencyContact?: { name: string; phone: string; relation?: string };
     },
   ) {
-    const existing = await this.prisma.user.findFirst({ where: { phone: dto.phone } });
+    const phone = dto.phone.trim();
+    const existing = await this.prisma.user.findFirst({ where: { phone, societyId } });
 
     if (existing) {
       const existingStaff = await this.prisma.staffMember.findUnique({ where: { userId: existing.id } });
       if (existingStaff) {
-        throw new ConflictException('User is already a staff member');
+        throw new ConflictException('Staff member with this phone already exists in this society');
       }
-      if (dto.gender || dto.dateOfBirth) {
-        await this.prisma.user.update({
-          where: { id: existing.id },
-          data: {
-            ...(dto.gender ? { gender: dto.gender } : {}),
-            ...(dto.dateOfBirth ? { dateOfBirth: new Date(dto.dateOfBirth) } : {}),
-          } as any,
-        });
-      }
-      return this.prisma.staffMember.create({
-        data: {
-          userId: existing.id,
-          societyId,
-          designation: dto.designation,
-          department: dto.department,
-          categories: dto.categories,
-          salaryStructure: dto.salary ? { base: dto.salary } : undefined,
-          joiningDate: new Date(),
-        },
-        include: { user: true },
-      });
+      throw new ConflictException('Phone number is already registered in this society');
     }
 
     const user = await this.prisma.user.create({
       data: {
-        phone: dto.phone,
-        name: dto.name,
+        phone,
+        name: dto.name.trim(),
         role: 'STAFF',
         status: 'ACTIVE',
         societyId,
@@ -913,46 +1008,117 @@ async createStaff(
         categories: dto.categories,
         salaryStructure: dto.salary ? { base: dto.salary } : undefined,
         joiningDate: new Date(),
+        ...(dto.emergencyContact ? { emergencyContact: dto.emergencyContact as any } : {}),
       },
       include: { user: true },
     });
   }
 
-  async transferStaff(staffId: string, toSocietyId: string, reason?: string) {
-    const staff = await this.prisma.staffMember.findUnique({ where: { id: staffId } });
-    if (!staff) throw new NotFoundException('Staff member not found');
-    
-    await this.prisma.staffMember.update({
+  /**
+   * Cross-society staff transfer (SUPER_ADMIN only — gated at controller).
+   *
+   * Hardens the previous wide-open implementation:
+   *   1. Verifies the staff member lives in the caller's source society.
+   *   2. Verifies the destination society exists AND is ACTIVE (cannot
+   *      transfer into SUSPENDED/ARCHIVED).
+   *   3. Wraps both row updates in a transaction so a partial transfer
+   *      (staff in society B, user still in society A) cannot persist.
+   *   4. Writes an audit entry with before/after societyId for traceability.
+   */
+  async transferStaff(
+    staffId: string,
+    fromSocietyId: string,
+    toSocietyId: string,
+    actor: { id: string; role: string },
+    reason?: string,
+  ) {
+    if (toSocietyId === fromSocietyId) {
+      throw new BadRequestException({
+        code: 'TRANSFER_NOOP',
+        message: 'Source and destination societies are identical',
+      });
+    }
+
+    const staff = await this.prisma.staffMember.findUnique({
       where: { id: staffId },
-      data: { societyId: toSocietyId },
+      select: { id: true, userId: true, societyId: true },
     });
-    
-    await this.prisma.user.update({
-      where: { id: staff.userId },
-      data: { societyId: toSocietyId },
+    if (!staff) throw new NotFoundException('Staff member not found');
+    if (staff.societyId !== fromSocietyId) {
+      throw new ForbiddenException({
+        code: 'STAFF_SOCIETY_MISMATCH',
+        message: 'Staff member does not belong to the source society',
+      });
+    }
+
+    const target = await this.prisma.society.findUnique({
+      where: { id: toSocietyId },
+      select: { id: true, status: true },
     });
-    
+    if (!target) {
+      throw new NotFoundException({ code: 'TARGET_SOCIETY_NOT_FOUND', message: 'Target society does not exist' });
+    }
+    if (target.status !== 'ACTIVE') {
+      throw new BadRequestException({
+        code: 'TARGET_SOCIETY_INACTIVE',
+        message: `Target society is ${target.status} — cannot transfer staff`,
+      });
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.staffMember.update({
+        where: { id: staffId },
+        data: { societyId: toSocietyId },
+      }),
+      this.prisma.user.update({
+        where: { id: staff.userId },
+        data: { societyId: toSocietyId },
+      }),
+    ]);
+
+    await this.audit.write({
+      entityType: 'StaffMember',
+      entityId: staffId,
+      action: 'STAFF_TRANSFERRED',
+      module: 'admin',
+      actorId: actor.id,
+      actorRole: actor.role,
+      societyId: fromSocietyId,
+      before: { societyId: fromSocietyId },
+      after: { societyId: toSocietyId, reason: reason ?? null },
+    });
+
     return { success: true, message: 'Staff transferred successfully' };
   }
 
-  async deactivateStaff(staffId: string) {
+  async deactivateStaff(staffId: string, societyId: string) {
+    // Tenant scope: prisma.staffMember.findUnique is NOT auto-scoped by the
+    // tenant extension (it skips findUnique/update/delete). Caller passes
+    // their own societyId; we reject any staff record from a different one.
     const staff = await this.prisma.staffMember.findUnique({ where: { id: staffId } });
     if (!staff) throw new NotFoundException('Staff member not found');
-    
+    if (staff.societyId !== societyId) {
+      throw new ForbiddenException({ code: 'CROSS_TENANT_ACCESS' });
+    }
+
     await this.prisma.user.update({
       where: { id: staff.userId },
       data: { status: UserStatus.INACTIVE },
     });
-    
+
     return { success: true, message: 'Staff deactivated successfully' };
   }
 
-  async getStaffDetail(staffId: string) {
+  async getStaffDetail(staffId: string, societyId: string) {
+    // Tenant scope — see deactivateStaff for the rationale.
     const staff = await this.prisma.staffMember.findUnique({
       where: { id: staffId },
       include: { user: true },
     });
     if (!staff) throw new NotFoundException('Staff member not found');
+    if (staff.societyId !== societyId) {
+      throw new ForbiddenException({ code: 'CROSS_TENANT_ACCESS' });
+    }
 
     const pendingLoansCount = await this.prisma.staffLoan.count({
       where: { staffMemberId: staffId, status: 'PENDING' },
@@ -980,6 +1146,7 @@ async createStaff(
   }
 
   async updateStaff(
+    societyId: string,
     staffId: string,
     body: {
       salaryStructure?: Record<string, any>;
@@ -989,10 +1156,16 @@ async createStaff(
       familyDetails?: any;
       gender?: string;
       dateOfBirth?: string | null;
+      emergencyContact?: { name: string; phone: string; relation?: string } | null;
     },
   ) {
-    const staff = await this.prisma.staffMember.findUnique({ where: { id: staffId } });
-    if (!staff) throw new NotFoundException('Staff member not found');
+    // Composite (id, societyId) WHERE — defends against SUPER_ADMIN bypass
+    // because the WHERE is in `args` and applied by Prisma regardless of
+    // tenant.extension short-circuit.
+    const staff = await this.prisma.staffMember.findFirst({
+      where: { id: staffId, societyId },
+    });
+    if (!staff) throw new NotFoundException('Staff member not found in this society');
     const staffData: any = {};
     const userData: any = {};
 
@@ -1004,6 +1177,7 @@ async createStaff(
     if (body.designation !== undefined) staffData.designation = body.designation;
     if (body.leavingDate !== undefined) staffData.leavingDate = body.leavingDate ? new Date(body.leavingDate) : null;
     if (body.familyDetails !== undefined) staffData.familyDetails = body.familyDetails;
+    if (body.emergencyContact !== undefined) staffData.emergencyContact = body.emergencyContact;
     if (body.gender !== undefined) userData.gender = body.gender;
     if (body.dateOfBirth !== undefined) userData.dateOfBirth = body.dateOfBirth ? new Date(body.dateOfBirth) : null;
 
@@ -1013,27 +1187,90 @@ async createStaff(
     return this.prisma.staffMember.update({ where: { id: staffId }, data: staffData, include: { user: true } });
   }
 
-  async getStaffDocuments(staffId: string) {
-    const staff = await this.prisma.staffMember.findUnique({ where: { id: staffId } });
-    if (!staff) throw new NotFoundException('Staff member not found');
-    // Return from the dedicated StaffDocument model
+  async getStaffDocuments(societyId: string, staffId: string) {
+    const staff = await this.prisma.staffMember.findFirst({
+      where: { id: staffId, societyId },
+      select: { id: true },
+    });
+    if (!staff) throw new NotFoundException('Staff member not found in this society');
     return this.prisma.staffDocument.findMany({
       where: { staffMemberId: staffId },
       orderBy: { uploadedAt: 'desc' },
     });
   }
 
-  async addStaffDocument(staffId: string, documentType: string, fileUrl: string) {
-    const staff = await this.prisma.staffMember.findUnique({ where: { id: staffId } });
-    if (!staff) throw new NotFoundException('Staff member not found');
+  async addStaffDocument(
+    societyId: string,
+    staffId: string,
+    documentType: string,
+    fileUrl: string,
+    uploadedBy = 'admin',
+    verifiedById?: string,
+  ) {
+    const staff = await this.prisma.staffMember.findFirst({
+      where: { id: staffId, societyId },
+      select: { id: true },
+    });
+    if (!staff) throw new NotFoundException('Staff member not found in this society');
     return this.prisma.staffDocument.create({
-      data: { staffMemberId: staffId, documentType, fileUrl },
+      data: {
+        staffMemberId: staffId,
+        documentType: this.normalizeDocumentType(documentType),
+        fileUrl,
+        uploadedBy,
+        ...(verifiedById ? { verifiedAt: new Date(), verifiedById } : {}),
+      },
     });
   }
 
-  async dismissStaff(staffId: string) {
-    const staff = await this.prisma.staffMember.findUnique({ where: { id: staffId } });
-    if (!staff) throw new NotFoundException('Staff member not found');
+  // societyId is REQUIRED — previously was optional with an `if (societyId && ...)`
+  // guard, which silently no-op'd when callers didn't pass it. Required now so
+  // a future caller can't accidentally bypass the check.
+  async deleteStaffDocument(societyId: string, staffId: string, documentId: string) {
+    const staff = await this.prisma.staffMember.findFirst({
+      where: { id: staffId, societyId },
+      select: { id: true },
+    });
+    if (!staff) throw new NotFoundException('Staff member not found in this society');
+    const doc = await this.prisma.staffDocument.findFirst({
+      where: { id: documentId, staffMemberId: staffId },
+    });
+    if (!doc) throw new NotFoundException('Document not found');
+    await this.prisma.staffDocument.delete({ where: { id: documentId } });
+    return { deleted: true };
+  }
+
+  // societyId is REQUIRED (see deleteStaffDocument comment).
+  async verifyStaffDocument(
+    societyId: string,
+    staffId: string,
+    documentId: string,
+    verifiedById: string,
+  ) {
+    const staff = await this.prisma.staffMember.findFirst({
+      where: { id: staffId, societyId },
+      select: { id: true },
+    });
+    if (!staff) throw new NotFoundException('Staff member not found in this society');
+    const doc = await this.prisma.staffDocument.findFirst({
+      where: { id: documentId, staffMemberId: staffId },
+    });
+    if (!doc) throw new NotFoundException('Document not found');
+    return this.prisma.staffDocument.update({
+      where: { id: documentId },
+      data: { verifiedAt: new Date(), verifiedById },
+    });
+  }
+
+  private normalizeDocumentType(type: string): string {
+    return type.toUpperCase().replace(/AADHAAR/g, 'AADHAR');
+  }
+
+  async dismissStaff(societyId: string, staffId: string) {
+    const staff = await this.prisma.staffMember.findFirst({
+      where: { id: staffId, societyId },
+    });
+    if (!staff) throw new NotFoundException('Staff member not found in this society');
     const now = new Date();
     await this.prisma.staffMember.update({
       where: { id: staffId },
@@ -1043,25 +1280,48 @@ async createStaff(
     return { ok: true };
   }
 
-  async getStaffSalarySlips(staffId: string) {
+  async getStaffSalarySlips(societyId: string, staffId: string) {
+    // Validate staff belongs to caller society before reading salary slips —
+    // SalarySlip is not in DIRECT_TENANT_SCOPED, so the Prisma extension
+    // won't auto-scope this query. Use findFirst with composite (id, societyId)
+    // on StaffMember (which DOES have a direct societyId column) so
+    // SUPER_ADMIN with X-Society-Id switch is bounded to the effective
+    // tenant just like every other route in this fix.
+    const staff = await this.prisma.staffMember.findFirst({
+      where: { id: staffId, societyId },
+      select: { id: true },
+    });
+    if (!staff) throw new NotFoundException('Staff member not found in this society');
     return this.prisma.salarySlip.findMany({
       where: { staffId },
       orderBy: { period: 'desc' },
     });
   }
 
-  async getStaffLoans(staffId: string) {
-    const staff = await this.prisma.staffMember.findUnique({ where: { id: staffId } });
-    if (!staff) throw new NotFoundException('Staff member not found');
+  async getStaffLoans(societyId: string, staffId: string) {
+    const staff = await this.prisma.staffMember.findFirst({
+      where: { id: staffId, societyId },
+      select: { id: true },
+    });
+    if (!staff) throw new NotFoundException('Staff member not found in this society');
     return this.prisma.staffLoan.findMany({
       where: { staffMemberId: staffId },
       orderBy: { createdAt: 'desc' },
     });
   }
 
-  async createStaffLoan(staffId: string, amount: number, reason?: string, status?: string) {
-    const staff = await this.prisma.staffMember.findUnique({ where: { id: staffId } });
-    if (!staff) throw new NotFoundException('Staff member not found');
+  async createStaffLoan(
+    societyId: string,
+    staffId: string,
+    amount: number,
+    reason?: string,
+    status?: string,
+  ) {
+    const staff = await this.prisma.staffMember.findFirst({
+      where: { id: staffId, societyId },
+      select: { id: true },
+    });
+    if (!staff) throw new NotFoundException('Staff member not found in this society');
     return this.prisma.staffLoan.create({
       data: {
         staffMemberId: staffId,
@@ -1108,13 +1368,16 @@ async createStaff(
     });
   }
 
-  async getResidentDocuments(residentId: string) {
-    const resident = await this.prisma.resident.findUnique({
-      where: { id: residentId },
+  async getResidentDocuments(societyId: string, residentId: string) {
+    // Scope by joined User.societyId — Resident has no direct societyId column
+    // and the Prisma tenant extension intentionally excludes Resident from
+    // auto-scoping (see tenant.extension.ts:64-66).
+    const resident = await this.prisma.resident.findFirst({
+      where: { id: residentId, user: { societyId } },
       include: { user: true },
     });
-    if (!resident) throw new NotFoundException('Resident not found');
-    
+    if (!resident) throw new NotFoundException('Resident not found in this society');
+
     return {
       name: resident.user.name,
       idProof: resident.idProof,
@@ -1123,7 +1386,19 @@ async createStaff(
     };
   }
 
-  async verifyResidentDocuments(residentId: string, status: 'VERIFIED' | 'REJECTED', note?: string) {
+  async verifyResidentDocuments(
+    societyId: string,
+    residentId: string,
+    status: 'VERIFIED' | 'REJECTED',
+    _note?: string,
+  ) {
+    // Pre-check ownership before issuing the update — otherwise an admin
+    // from another society could flip any resident's documents status by id.
+    const resident = await this.prisma.resident.findFirst({
+      where: { id: residentId, user: { societyId } },
+      select: { id: true },
+    });
+    if (!resident) throw new NotFoundException('Resident not found in this society');
     return this.prisma.resident.update({
       where: { id: residentId },
       data: {
@@ -1364,6 +1639,64 @@ async createStaff(
     return buckets;
   }
 
+  /**
+   * F6: dashboard birthdays widget. Returns active residents whose
+   * `User.dateOfBirth` matches today's month+day, scoped to the caller's
+   * society. We use raw SQL because Prisma's `where` doesn't support
+   * EXTRACT(MONTH|DAY ...) cleanly — a JS-side filter would force loading
+   * every resident for the month every page render.
+   */
+  async getBirthdays(societyId: string, on: string) {
+    const target = on === 'today' || !on ? new Date() : new Date(on);
+    if (Number.isNaN(target.getTime())) {
+      throw new BadRequestException({ code: 'INVALID_DATE', message: 'Invalid date for ?on' });
+    }
+    const month = target.getMonth() + 1;
+    const day = target.getDate();
+
+    // residents joined to users + flats; user.dateOfBirth carries the canonical
+    // value (resident.dateOfBirth is legacy and may be null).
+    const rows: Array<{
+      residentId: string;
+      name: string | null;
+      dob: Date;
+      block: string | null;
+      number: string | null;
+    }> = await this.prisma.$queryRaw`
+      SELECT r."id"        AS "residentId",
+             u."name"      AS "name",
+             u."dateOfBirth" AS "dob",
+             f."block"     AS "block",
+             f."number"    AS "number"
+      FROM   "residents" r
+      JOIN   "users" u ON u."id" = r."userId"
+      LEFT JOIN "flats" f ON f."id" = r."flatId"
+      WHERE  u."societyId" = ${societyId}
+        AND  r."deletedAt" IS NULL
+        AND  u."dateOfBirth" IS NOT NULL
+        AND  EXTRACT(MONTH FROM u."dateOfBirth") = ${month}
+        AND  EXTRACT(DAY   FROM u."dateOfBirth") = ${day}
+      ORDER BY u."name" ASC
+    `;
+
+    const today = new Date();
+    return rows.map((r) => {
+      const dob = new Date(r.dob);
+      let age = today.getFullYear() - dob.getFullYear();
+      // If the birthday hasn't yet happened "today" in calendar terms it's
+      // still their birthday — we already filtered by month+day, so just
+      // subtract one if the source year was after target year (improbable
+      // but safe).
+      if (age < 0) age = 0;
+      return {
+        id: r.residentId,
+        name: r.name ?? 'Resident',
+        flat: r.number ? `${r.block ?? ''}${r.number}` : null,
+        age,
+      };
+    });
+  }
+
   // ─── M6: Push Notifications ──────────────────────────────────────────────────
 
   async sendPushNotification(
@@ -1397,34 +1730,44 @@ async createStaff(
       }
     }
 
-    // Immediate send
+    // Immediate send.
+    // H6: replaced the serial for-loop with a bounded async pool. A serial
+    // send over 500+ residents could stall the request thread for minutes
+    // and any single push failure (transient FCM 5xx) would short-circuit
+    // the rest of the broadcast.
     const notification = { title, body, category: 'admin_push' };
+
     if (targetType === 'ALL') {
       await this.push.sendToSociety(societyId, null, notification, { type: 'ADMIN_PUSH' });
-    } else if (targetType === 'BLOCK' && targetIds?.length) {
-      // Find users in block
+      return { scheduled: false, sent: true };
+    }
+
+    let userIds: string[] = [];
+    if (targetType === 'BLOCK' && targetIds?.length) {
       const residents = await this.prisma.resident.findMany({
         where: { user: { societyId }, flat: { block: { in: targetIds } } },
         include: { user: { select: { id: true } } },
       });
-      for (const r of residents) {
-        await this.push.send(r.user.id, notification, { type: 'ADMIN_PUSH' });
-      }
+      userIds = residents.map((r) => r.user.id);
     } else if (targetType === 'FLAT' && targetIds?.length) {
       const residents = await this.prisma.resident.findMany({
         where: { user: { societyId }, flat: { number: { in: targetIds } } },
         include: { user: { select: { id: true } } },
       });
-      for (const r of residents) {
-        await this.push.send(r.user.id, notification, { type: 'ADMIN_PUSH' });
-      }
+      userIds = residents.map((r) => r.user.id);
     } else if (targetType === 'INDIVIDUAL' && targetIds?.length) {
-      for (const userId of targetIds) {
-        await this.push.send(userId, notification, { type: 'ADMIN_PUSH' });
-      }
+      userIds = targetIds;
     }
 
-    return { scheduled: false, sent: true };
+    if (userIds.length === 0) {
+      return { scheduled: false, sent: 0, failed: 0 };
+    }
+
+    const { sent, failed } = await asyncPool(userIds, PUSH_CONCURRENCY, async (uid) => {
+      return this.push.send(uid, notification, { type: 'ADMIN_PUSH' });
+    });
+
+    return { scheduled: false, sent, failed };
   }
 
   // ─── M12: SOS Recipients ─────────────────────────────────────────────────────
@@ -1444,7 +1787,9 @@ async createStaff(
     if (!society) throw new NotFoundException('Society not found');
     const cfg = (society.config as Record<string, unknown> | null) ?? {};
     const recipients: any[] = Array.isArray(cfg.sosRecipients) ? [...cfg.sosRecipients] : [];
-    const newRecipient = { id: `sos_${Date.now()}`, ...dto };
+    // H2: switch off `sos_${Date.now()}` — two recipients added in the same
+    // millisecond collided and the second would overwrite the first on removal.
+    const newRecipient = { id: `sos_${randomUUID()}`, ...dto };
     recipients.push(newRecipient);
     await this.prisma.society.update({
       where: { id: societyId },
@@ -1470,34 +1815,55 @@ async createStaff(
 
   async exportResidentsCsv(societyId: string): Promise<string> {
     const residents = await this.prisma.resident.findMany({
-      where: { user: { societyId } },
+      where: { user: { societyId }, deletedAt: null },
       include: { user: true, flat: true },
       orderBy: { createdAt: 'desc' },
     });
 
-    const header = 'Name,Phone,Email,Flat,Block,Floor,Status\n';
+    const header = 'name,phone,email,block,flatNumber,type,status\n';
     const body = residents
-      .map((r) => {
-        const name = r.user.name ?? '';
-        const phone = r.user.phone ?? '';
-        const email = r.user.email ?? '';
-        const flat = r.flat?.number ?? '';
-        const block = r.flat?.block ?? '';
-        const floor = r.flat?.floor != null ? String(r.flat.floor) : '';
-        const status = r.user.status ?? '';
-        return [
-          `"${name.replace(/"/g, '""')}"`,
-          phone,
-          email,
-          flat,
-          block,
-          floor,
-          status,
-        ].join(',');
-      })
+      .map((r) =>
+        toCsvRow([
+          r.user.name ?? '',
+          r.user.phone ?? '',
+          r.user.email ?? '',
+          r.flat?.block ?? '',
+          r.flat?.number ?? '',
+          r.type ?? 'TENANT',
+          r.user.status ?? '',
+        ]),
+      )
       .join('\n');
 
     return header + body;
+  }
+
+  residentsImportTemplate(): string {
+    return 'name,phone,email,block,flatNumber,type\nJane Doe,+919876543210,jane@example.com,A,101,OWNER\n';
+  }
+
+  flatsImportTemplate(): string {
+    return 'block,floor,number,areaSqft\nA,1,101,1200\nA,1,102,1150\n';
+  }
+
+  staffImportTemplate(): string {
+    return 'name,phone,designation,department,categories,salary\nJohn Guard,+919876543210,Security Guard,SECURITY,SECURITY,18000\n';
+  }
+
+  async previewResidentsCsv(societyId: string, csvText: string) {
+    return this.processResidentsCsv(societyId, csvText, true);
+  }
+
+  async importResidentsCsv(societyId: string, csvText: string) {
+    return this.processResidentsCsv(societyId, csvText, false);
+  }
+
+  private async processResidentsCsv(
+    societyId: string,
+    csvText: string,
+    previewOnly: boolean,
+  ) {
+    return this.processResidentsCsvWithClient(this.prisma, societyId, csvText, previewOnly);
   }
 
   async bulkMessageResidents(
@@ -1644,20 +2010,24 @@ async createStaff(
     const existing = await this.prisma.user.findFirst({ where: { phone: dto.phone, societyId } });
     if (existing) throw new ConflictException('A user with this phone already exists in the society');
 
-    const user = await this.prisma.user.create({
-      data: {
-        phone: dto.phone,
-        name: dto.name,
-        email: dto.email,
-        role: UserRole.RESIDENT,
-        status: UserStatus.PENDING,
-        societyId,
-      },
-    });
+    // Atomic: avoid creating an orphan User row if the Resident create fails
+    // (e.g. flat got deleted between checks, FK violation, etc.).
+    const resident = await this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          phone: dto.phone,
+          name: dto.name,
+          email: dto.email,
+          role: UserRole.RESIDENT,
+          status: UserStatus.PENDING,
+          societyId,
+        },
+      });
 
-    const resident = await this.prisma.resident.create({
-      data: { userId: user.id, flatId: dto.flatId, type: dto.type as any },
-      include: { user: true, flat: true },
+      return tx.resident.create({
+        data: { userId: user.id, flatId: dto.flatId, type: dto.type as any },
+        include: { user: true, flat: true },
+      });
     });
 
     return {
@@ -1708,20 +2078,748 @@ async createStaff(
     return { deleted: true };
   }
 
-  async importResidentsCsv(societyId: string, csvText: string) {
-    const lines = csvText.split('\n').map((l) => l.trim()).filter(Boolean);
-    if (lines.length <= 1) throw new BadRequestException('CSV is empty or has only a header');
+  // ── Maintenance bill status update ─────────────────────────────────────────
 
-    // Skip header row
-    const dataLines = lines.slice(1);
+  /**
+   * Allowed bill-status transitions (H4). Anything outside this map is
+   * rejected with INVALID_BILL_TRANSITION. SUCCESS → PENDING is reserved
+   * for SUPER_ADMIN reversal (e.g. an erroneously marked-paid bill); the
+   * change is always audited with full before/after snapshot.
+   */
+  private static readonly BILL_TRANSITIONS: Record<string, string[]> = {
+    PENDING: ['SUCCESS', 'WAIVED', 'FAILED'],
+    SUCCESS: [], // terminal for normal admins
+    WAIVED: ['PENDING'],
+    FAILED: ['PENDING', 'SUCCESS'],
+  };
+
+  async updateBillStatus(
+    billId: string,
+    societyId: string,
+    status: string,
+    actor: { id: string; role: string },
+    paymentMethod?: string,
+  ) {
+    const normalizedStatus = status === 'PAID' ? 'SUCCESS' : status;
+    const allowed = ['PENDING', 'SUCCESS', 'WAIVED', 'FAILED'];
+    if (!allowed.includes(normalizedStatus)) {
+      throw new BadRequestException({
+        code: 'INVALID_BILL_STATUS',
+        message: `Status must be one of: PENDING, SUCCESS (or PAID), WAIVED, FAILED`,
+      });
+    }
+    const bill = await this.prisma.maintenanceBill.findUnique({
+      where: { id: billId },
+      include: { flat: true },
+    });
+    if (!bill) throw new NotFoundException('Bill not found');
+    if (bill.flat.societyId !== societyId) {
+      throw new ForbiddenException({ code: 'BILL_SOCIETY_MISMATCH', message: 'Bill belongs to another society' });
+    }
+
+    const current = String(bill.status);
+    const isSuperAdmin = actor.role === 'SUPER_ADMIN';
+    if (current !== normalizedStatus) {
+      const transitions = AdminService.BILL_TRANSITIONS[current] ?? [];
+      const reversingPaid = current === 'SUCCESS' && normalizedStatus === 'PENDING';
+      const allowedNow = reversingPaid
+        ? isSuperAdmin
+        : transitions.includes(normalizedStatus);
+      if (!allowedNow) {
+        throw new ConflictException({
+          code: 'INVALID_BILL_TRANSITION',
+          message: `Cannot move bill from ${current} to ${normalizedStatus}`,
+          from: current,
+          to: normalizedStatus,
+          allowedNext: transitions,
+          requiresSuperAdmin: reversingPaid ? true : undefined,
+        });
+      }
+    }
+
+    const updated = await this.prisma.maintenanceBill.update({
+      where: { id: billId },
+      data: {
+        status: normalizedStatus as any,
+        ...(paymentMethod !== undefined ? { paymentMethod } : {}),
+      },
+      include: { resident: { include: { user: true, flat: true } } },
+    });
+
+    await this.audit.write({
+      entityType: 'MaintenanceBill',
+      entityId: billId,
+      action: 'BILL_STATUS_CHANGED',
+      module: 'admin',
+      actorId: actor.id,
+      actorRole: actor.role,
+      societyId,
+      before: { status: current, paymentMethod: (bill as any).paymentMethod ?? null },
+      after: { status: normalizedStatus, paymentMethod: paymentMethod ?? (bill as any).paymentMethod ?? null },
+    });
+
+    return updated;
+  }
+
+  // ── Society CRUD (SUPER_ADMIN) ─────────────────────────────────────────────
+
+  async listAllSocieties(query?: {
+    search?: string;
+    includeArchived?: boolean;
+    status?: 'ACTIVE' | 'SUSPENDED' | 'ARCHIVED';
+  }) {
+    const where: Record<string, unknown> = {};
+    if (query?.status) {
+      where.status = query.status;
+    } else if (!query?.includeArchived) {
+      where.status = { not: 'ARCHIVED' };
+    }
+    if (query?.search?.trim()) {
+      where.OR = [
+        { name: { contains: query.search.trim(), mode: 'insensitive' } },
+        { city: { contains: query.search.trim(), mode: 'insensitive' } },
+        { shortCode: { contains: query.search.trim(), mode: 'insensitive' } },
+      ];
+    }
+
+    const societies = await this.prisma.society.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        _count: { select: { flats: true, users: true } },
+      },
+    });
+
+    return societies.map((s) => ({
+      id: s.id,
+      name: s.name,
+      shortCode: (s as any).shortCode ?? null,
+      address: s.address,
+      city: s.city,
+      pincode: s.pincode,
+      showInDirectory: s.showInDirectory,
+      status: (s as any).status,
+      suspendedAt: (s as any).suspendedAt,
+      suspendedReason: (s as any).suspendedReason,
+      contactEmail: (s as any).contactEmail ?? null,
+      contactPhone: (s as any).contactPhone ?? null,
+      archivedAt: s.archivedAt,
+      createdAt: s.createdAt,
+      flatCount: s._count.flats,
+      userCount: s._count.users,
+    }));
+  }
+
+  /**
+   * Platform-level stats for the SUPER_ADMIN console — totals across all
+   * societies plus per-status counts. Caller is SUPER_ADMIN (RolesGuard at
+   * the controller); we explicitly flip `superAdminBypass` in the tenant
+   * context here so `flat.count()` (a directly-scoped model) returns the
+   * global count instead of being silently filtered to the super-admin's
+   * home Platform society — which has 0 flats and would mislead the UI.
+   */
+  async getPlatformStats() {
+    return this.withSuperAdminBypass(async () => this.computePlatformStats());
+  }
+
+  private async withSuperAdminBypass<T>(fn: () => Promise<T>): Promise<T> {
+    const ctx = getTenantContext();
+    return runWithTenantContext(
+      {
+        societyId: ctx?.societyId ?? null,
+        userId: ctx?.userId ?? null,
+        role: 'SUPER_ADMIN',
+        superAdminBypass: true,
+        reAuthConfirmed: true,
+        requestId: ctx?.requestId,
+      },
+      fn,
+    );
+  }
+
+  private async computePlatformStats() {
+    const [byStatus, totalUsers, totalFlats, recentSocieties] = await Promise.all([
+      this.prisma.society.groupBy({
+        by: ['status'],
+        _count: { _all: true },
+      }),
+      this.prisma.user.count(),
+      this.prisma.flat.count(),
+      this.prisma.society.findMany({
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+        select: {
+          id: true,
+          name: true,
+          city: true,
+          status: true,
+          createdAt: true,
+          _count: { select: { users: true } },
+        },
+      }),
+    ]);
+
+    const counts = { ACTIVE: 0, SUSPENDED: 0, ARCHIVED: 0 } as Record<string, number>;
+    for (const row of byStatus) counts[row.status] = row._count._all;
+
+    return {
+      societies: {
+        total: counts.ACTIVE + counts.SUSPENDED + counts.ARCHIVED,
+        active: counts.ACTIVE,
+        suspended: counts.SUSPENDED,
+        archived: counts.ARCHIVED,
+      },
+      users: { total: totalUsers },
+      flats: { total: totalFlats },
+      recentSocieties: recentSocieties.map((s) => ({
+        id: s.id,
+        name: s.name,
+        city: s.city,
+        status: s.status,
+        createdAt: s.createdAt,
+        userCount: s._count.users,
+      })),
+    };
+  }
+
+  async getSocietyDetail(societyId: string) {
+    const society = await this.prisma.society.findUnique({
+      where: { id: societyId },
+      include: {
+        _count: { select: { flats: true, users: true, staff: true } },
+      },
+    });
+    if (!society) throw new NotFoundException('Society not found');
+
+    const activeResidents = await this.prisma.resident.count({
+      where: { user: { societyId, status: UserStatus.ACTIVE }, deletedAt: null },
+    });
+
+    return {
+      id: society.id,
+      name: society.name,
+      shortCode: (society as any).shortCode ?? null,
+      address: society.address,
+      city: society.city,
+      pincode: society.pincode,
+      contactEmail: (society as any).contactEmail ?? null,
+      contactPhone: (society as any).contactPhone ?? null,
+      config: society.config,
+      showInDirectory: society.showInDirectory,
+      status: (society as any).status,
+      suspendedAt: (society as any).suspendedAt,
+      suspendedReason: (society as any).suspendedReason,
+      archivedAt: society.archivedAt,
+      createdAt: society.createdAt,
+      updatedAt: society.updatedAt,
+      stats: {
+        flats: society._count.flats,
+        users: society._count.users,
+        staff: society._count.staff,
+        activeResidents,
+      },
+    };
+  }
+
+  async createSociety(dto: {
+    name: string;
+    address: string;
+    city: string;
+    pincode: string;
+    showInDirectory?: boolean;
+    adminName: string;
+    adminPhone: string;
+    adminEmail?: string;
+    config?: Record<string, unknown>;
+    flatsCsv?: string;
+    residentsCsv?: string;
+  }) {
+    if (!dto.name?.trim() || !dto.address?.trim() || !dto.city?.trim() || !dto.pincode?.trim()) {
+      throw new BadRequestException('Society name, address, city, and pincode are required');
+    }
+    if (!dto.adminName?.trim() || !dto.adminPhone?.trim()) {
+      throw new BadRequestException('Admin name and phone are required');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const society = await tx.society.create({
+        data: {
+          name: dto.name.trim(),
+          address: dto.address.trim(),
+          city: dto.city.trim(),
+          pincode: dto.pincode.trim(),
+          showInDirectory: dto.showInDirectory ?? false,
+          config: this.societySeeder.buildDefaultConfig(dto.config) as any,
+        },
+      });
+
+      const admin = await tx.user.create({
+        data: {
+          phone: dto.adminPhone.trim(),
+          name: dto.adminName.trim(),
+          email: dto.adminEmail?.trim() || undefined,
+          role: UserRole.ADMIN,
+          status: UserStatus.ACTIVE,
+          societyId: society.id,
+        },
+      });
+
+      let flatsResult = { created: 0, skipped: 0, errors: [] as { row: number; reason: string }[] };
+      let residentsResult = { created: 0, skipped: 0, errors: [] as { row: number; reason: string }[], valid: [] as unknown[] };
+
+      if (dto.flatsCsv?.trim()) {
+        flatsResult = await this.importFlatsCsvWithClient(tx, society.id, dto.flatsCsv, false);
+      }
+      if (dto.residentsCsv?.trim()) {
+        residentsResult = await this.processResidentsCsvWithClient(tx, society.id, dto.residentsCsv, false);
+      }
+
+      return { society, admin, flats: flatsResult, residents: residentsResult };
+    });
+  }
+
+  async updateSocietyAdmin(
+    societyId: string,
+    dto: {
+      name?: string;
+      address?: string;
+      city?: string;
+      pincode?: string;
+      showInDirectory?: boolean;
+      contactEmail?: string | null;
+      contactPhone?: string | null;
+      config?: Record<string, unknown>;
+    },
+  ) {
+    const society = await this.prisma.society.findUnique({ where: { id: societyId } });
+    if (!society) throw new NotFoundException('Society not found');
+
+    const data: Record<string, unknown> = {};
+    if (dto.name !== undefined) data.name = dto.name;
+    if (dto.address !== undefined) data.address = dto.address;
+    if (dto.city !== undefined) data.city = dto.city;
+    if (dto.pincode !== undefined) data.pincode = dto.pincode;
+    if (dto.showInDirectory !== undefined) data.showInDirectory = dto.showInDirectory;
+    if (dto.contactEmail !== undefined) data.contactEmail = dto.contactEmail?.trim() || null;
+    if (dto.contactPhone !== undefined) data.contactPhone = dto.contactPhone?.trim() || null;
+    if (dto.config !== undefined) {
+      const existingConfig = (society.config as Record<string, unknown> | null) ?? {};
+      data.config = { ...existingConfig, ...dto.config };
+    }
+
+    return this.prisma.society.update({ where: { id: societyId }, data });
+  }
+
+  async archiveSociety(societyId: string, actorId?: string) {
+    const society = await this.prisma.society.findUnique({ where: { id: societyId } });
+    if (!society) throw new NotFoundException('Society not found');
+    if ((society as any).status === 'ARCHIVED') {
+      throw new BadRequestException('Society is already archived');
+    }
+    await this.assertNotPlatformSociety(societyId, 'archive');
+
+    const before = { status: (society as any).status, archivedAt: society.archivedAt };
+    await this.prisma.$transaction([
+      this.prisma.society.update({
+        where: { id: societyId },
+        data: { status: 'ARCHIVED', archivedAt: new Date(), showInDirectory: false } as any,
+      }),
+      // Soft-revoke all users in the archived society — login is already
+      // blocked by the society gate, but this also flips API access for
+      // any cached JWTs that haven't expired yet.
+      this.prisma.user.updateMany({
+        where: { societyId },
+        data: { status: UserStatus.INACTIVE },
+      }),
+    ]);
+
+    await this.audit.write({
+      entityType: 'Society',
+      entityId: societyId,
+      action: 'SOCIETY_ARCHIVED',
+      module: 'platform',
+      actorId: actorId ?? null,
+      actorRole: 'SUPER_ADMIN',
+      before,
+      after: { status: 'ARCHIVED' },
+      societyId,
+    });
+
+    return { archived: true };
+  }
+
+  async restoreSociety(societyId: string, actorId?: string) {
+    const society = await this.prisma.society.findUnique({ where: { id: societyId } });
+    if (!society) throw new NotFoundException('Society not found');
+    if ((society as any).status !== 'ARCHIVED') {
+      throw new BadRequestException('Society is not archived');
+    }
+
+    await this.prisma.society.update({
+      where: { id: societyId },
+      data: { status: 'ACTIVE', archivedAt: null } as any,
+    });
+
+    await this.audit.write({
+      entityType: 'Society',
+      entityId: societyId,
+      action: 'SOCIETY_RESTORED',
+      module: 'platform',
+      actorId: actorId ?? null,
+      actorRole: 'SUPER_ADMIN',
+      before: { status: 'ARCHIVED' },
+      after: { status: 'ACTIVE' },
+      societyId,
+    });
+
+    return { restored: true };
+  }
+
+  /**
+   * Reversible lifecycle: SUSPENDED means logins are blocked but data is
+   * preserved exactly as-is. Use cases: non-payment, security incident,
+   * compliance hold. Distinct from ARCHIVED which implies end-of-life.
+   */
+  async suspendSociety(societyId: string, actorId: string, reason?: string) {
+    // Hard cap on reason to prevent oversize writes from controller-side JSON.
+    if (reason && reason.length > 500) {
+      throw new BadRequestException('Suspension reason cannot exceed 500 characters');
+    }
+
+    const society = await this.prisma.society.findUnique({ where: { id: societyId } });
+    if (!society) throw new NotFoundException('Society not found');
+    const status = (society as any).status;
+    if (status === 'SUSPENDED') {
+      throw new BadRequestException('Society is already suspended');
+    }
+    if (status === 'ARCHIVED') {
+      throw new BadRequestException('Cannot suspend an archived society — restore it first');
+    }
+    await this.assertNotPlatformSociety(societyId, 'suspend');
+
+    const before = { status: (society as any).status };
+    await this.prisma.society.update({
+      where: { id: societyId },
+      data: {
+        status: 'SUSPENDED',
+        suspendedAt: new Date(),
+        suspendedReason: reason?.trim() || null,
+        suspendedById: actorId,
+      } as any,
+    });
+
+    await this.audit.write({
+      entityType: 'Society',
+      entityId: societyId,
+      action: 'SOCIETY_SUSPENDED',
+      module: 'platform',
+      actorId,
+      actorRole: 'SUPER_ADMIN',
+      before,
+      after: { status: 'SUSPENDED', reason: reason?.trim() || null },
+      societyId,
+    });
+
+    return { suspended: true };
+  }
+
+  /**
+   * Refuses to lock down any society that hosts a SUPER_ADMIN — otherwise the
+   * platform's only operator would be locked out of their own JWT-refresh and
+   * recovery would require direct DB access. Errs on the safe side: ANY
+   * super-admin in the target society blocks the operation.
+   */
+  private async assertNotPlatformSociety(
+    societyId: string,
+    operation: 'suspend' | 'archive',
+  ): Promise<void> {
+    const platformAdminCount = await this.prisma.user.count({
+      where: { societyId, role: UserRole.SUPER_ADMIN },
+    });
+    if (platformAdminCount > 0) {
+      throw new BadRequestException({
+        code: 'PLATFORM_SOCIETY_PROTECTED',
+        message: `Cannot ${operation} a society that hosts platform super-admins. Move them to another society first.`,
+      });
+    }
+  }
+
+  async resumeSociety(societyId: string, actorId?: string) {
+    const society = await this.prisma.society.findUnique({ where: { id: societyId } });
+    if (!society) throw new NotFoundException('Society not found');
+    if ((society as any).status !== 'SUSPENDED') {
+      throw new BadRequestException('Society is not suspended');
+    }
+
+    const before = {
+      status: 'SUSPENDED',
+      suspendedAt: (society as any).suspendedAt,
+      suspendedReason: (society as any).suspendedReason,
+    };
+    await this.prisma.society.update({
+      where: { id: societyId },
+      data: {
+        status: 'ACTIVE',
+        suspendedAt: null,
+        suspendedReason: null,
+        suspendedById: null,
+      } as any,
+    });
+
+    await this.audit.write({
+      entityType: 'Society',
+      entityId: societyId,
+      action: 'SOCIETY_RESUMED',
+      module: 'platform',
+      actorId: actorId ?? null,
+      actorRole: 'SUPER_ADMIN',
+      before,
+      after: { status: 'ACTIVE' },
+      societyId,
+    });
+
+    return { resumed: true };
+  }
+
+  // ── Flat CRUD ──────────────────────────────────────────────────────────────
+
+  async listFlats(societyId: string, query?: { block?: string; search?: string }) {
+    const where: Record<string, unknown> = { societyId };
+    if (query?.block) where.block = query.block;
+    if (query?.search?.trim()) {
+      where.OR = [
+        { number: { contains: query.search.trim(), mode: 'insensitive' } },
+        { block: { contains: query.search.trim(), mode: 'insensitive' } },
+      ];
+    }
+
+    const flats = await this.prisma.flat.findMany({
+      where,
+      orderBy: [{ block: 'asc' }, { floor: 'asc' }, { number: 'asc' }],
+      include: {
+        _count: { select: { residents: { where: { deletedAt: null } } } },
+      },
+    });
+
+    return flats.map((f) => ({
+      id: f.id,
+      block: f.block,
+      floor: f.floor,
+      number: f.number,
+      areaSqft: f.areaSqft,
+      residentCount: f._count.residents,
+      occupied: f._count.residents > 0,
+    }));
+  }
+
+  async getFlat(societyId: string, flatId: string) {
+    const flat = await this.prisma.flat.findFirst({
+      where: { id: flatId, societyId },
+      include: {
+        residents: {
+          where: { deletedAt: null },
+          include: { user: { select: { id: true, name: true, phone: true, status: true } } },
+        },
+      },
+    });
+    if (!flat) throw new NotFoundException('Flat not found');
+    return flat;
+  }
+
+  async createFlat(
+    societyId: string,
+    dto: { block: string; floor: number; number: string; areaSqft?: number },
+  ) {
+    try {
+      return await this.prisma.flat.create({
+        data: {
+          societyId,
+          block: dto.block.trim(),
+          floor: dto.floor,
+          number: dto.number.trim(),
+          areaSqft: dto.areaSqft,
+        },
+      });
+    } catch {
+      throw new ConflictException('Flat already exists for this block and number');
+    }
+  }
+
+  async updateFlat(
+    societyId: string,
+    flatId: string,
+    dto: { block?: string; floor?: number; number?: string; areaSqft?: number | null },
+  ) {
+    const flat = await this.prisma.flat.findFirst({ where: { id: flatId, societyId } });
+    if (!flat) throw new NotFoundException('Flat not found');
+
+    try {
+      return await this.prisma.flat.update({
+        where: { id: flatId },
+        data: {
+          ...(dto.block !== undefined ? { block: dto.block.trim() } : {}),
+          ...(dto.floor !== undefined ? { floor: dto.floor } : {}),
+          ...(dto.number !== undefined ? { number: dto.number.trim() } : {}),
+          ...(dto.areaSqft !== undefined ? { areaSqft: dto.areaSqft } : {}),
+        },
+      });
+    } catch {
+      throw new ConflictException('Flat already exists for this block and number');
+    }
+  }
+
+  async deleteFlat(societyId: string, flatId: string) {
+    const flat = await this.prisma.flat.findFirst({
+      where: { id: flatId, societyId },
+      include: { residents: { where: { deletedAt: null } } },
+    });
+    if (!flat) throw new NotFoundException('Flat not found');
+    if (flat.residents.length > 0) {
+      throw new BadRequestException('Cannot delete flat with active residents');
+    }
+    await this.prisma.flat.delete({ where: { id: flatId } });
+    return { deleted: true };
+  }
+
+  async listBlocks(societyId: string) {
+    const flats = await this.prisma.flat.findMany({
+      where: { societyId },
+      select: { block: true, residents: { where: { deletedAt: null }, select: { id: true } } },
+    });
+    const blockMap = new Map<string, { flatCount: number; occupiedCount: number }>();
+    for (const flat of flats) {
+      const entry = blockMap.get(flat.block) ?? { flatCount: 0, occupiedCount: 0 };
+      entry.flatCount++;
+      if (flat.residents.length > 0) entry.occupiedCount++;
+      blockMap.set(flat.block, entry);
+    }
+    return Array.from(blockMap.entries())
+      .map(([block, stats]) => ({ block, ...stats }))
+      .sort((a, b) => a.block.localeCompare(b.block));
+  }
+
+  async exportFlatsCsv(societyId: string): Promise<string> {
+    const flats = await this.prisma.flat.findMany({
+      where: { societyId },
+      orderBy: [{ block: 'asc' }, { floor: 'asc' }, { number: 'asc' }],
+    });
+    const header = 'block,floor,number,areaSqft\n';
+    const body = flats
+      .map((f) => toCsvRow([f.block, String(f.floor), f.number, f.areaSqft != null ? String(f.areaSqft) : '']))
+      .join('\n');
+    return header + body;
+  }
+
+  async previewFlatsCsv(societyId: string, csvText: string) {
+    return this.importFlatsCsv(societyId, csvText, true);
+  }
+
+  async importFlatsCsv(societyId: string, csvText: string, previewOnly = false) {
+    return this.importFlatsCsvWithClient(this.prisma, societyId, csvText, previewOnly);
+  }
+
+  private async importFlatsCsvWithClient(
+    client: { flat: PrismaService['flat'] },
+    societyId: string,
+    csvText: string,
+    previewOnly: boolean,
+  ) {
+    const { headers, rows } = parseCsv(csvText);
+    if (headers.length === 0 || rows.length === 0) {
+      throw new BadRequestException('CSV is empty or has only a header');
+    }
+
     let created = 0;
     let skipped = 0;
     const errors: { row: number; reason: string }[] = [];
+    const valid: { row: number; block: string; floor: number; number: string }[] = [];
 
-    for (let i = 0; i < dataLines.length; i++) {
-      const row = dataLines[i];
-      const parts = row.split(',').map((p) => p.replace(/^"|"$/g, '').trim());
-      const [name, email, phone, flatNumber] = parts;
+    for (let i = 0; i < rows.length; i++) {
+      const record = rowToRecord(headers, rows[i]);
+      const block = record['block']?.trim();
+      const floorRaw = record['floor']?.trim();
+      const number = record['number']?.trim() || record['flatnumber']?.trim();
+      const areaRaw = record['areasqft']?.trim() || record['area']?.trim();
+
+      if (!block || !number || !floorRaw) {
+        errors.push({ row: i + 2, reason: 'Missing block, floor, or number' });
+        continue;
+      }
+
+      const floor = parseInt(floorRaw, 10);
+      if (Number.isNaN(floor)) {
+        errors.push({ row: i + 2, reason: 'Invalid floor' });
+        continue;
+      }
+
+      const areaSqft = areaRaw ? parseFloat(areaRaw) : undefined;
+
+      try {
+        const existing = await client.flat.findFirst({
+          where: { societyId, block, number },
+        });
+        if (existing) {
+          skipped++;
+          continue;
+        }
+
+        valid.push({ row: i + 2, block, floor, number });
+        if (previewOnly) continue;
+
+        await client.flat.create({
+          data: {
+            societyId,
+            block,
+            floor,
+            number,
+            areaSqft: areaSqft != null && !Number.isNaN(areaSqft) ? areaSqft : undefined,
+          },
+        });
+        created++;
+      } catch (err) {
+        errors.push({ row: i + 2, reason: (err as Error).message });
+      }
+    }
+
+    return { created, skipped, errors, valid, preview: previewOnly };
+  }
+
+  private async processResidentsCsvWithClient(
+    client: {
+      user: PrismaService['user'];
+      flat: PrismaService['flat'];
+      resident: PrismaService['resident'];
+    },
+    societyId: string,
+    csvText: string,
+    previewOnly: boolean,
+  ) {
+    const { headers, rows } = parseCsv(csvText);
+    if (headers.length === 0 || rows.length === 0) {
+      throw new BadRequestException('CSV is empty or has only a header');
+    }
+
+    const nameKey = headers.find((h) => ['name', 'fullname'].includes(h)) ?? 'name';
+    const phoneKey = headers.find((h) => ['phone', 'mobile', 'phonenumber'].includes(h)) ?? 'phone';
+    const emailKey = headers.find((h) => ['email', 'emailaddress'].includes(h)) ?? 'email';
+    const blockKey = headers.find((h) => ['block', 'tower', 'wing'].includes(h)) ?? 'block';
+    const flatKey = headers.find((h) => ['flatnumber', 'flat', 'unit', 'number'].includes(h)) ?? 'flatnumber';
+    const typeKey = headers.find((h) => ['type', 'residenttype'].includes(h)) ?? 'type';
+
+    let created = 0;
+    let skipped = 0;
+    const errors: { row: number; reason: string }[] = [];
+    const valid: unknown[] = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const record = rowToRecord(headers, rows[i]);
+      const name = record[nameKey] || record['name'];
+      const phone = record[phoneKey] || record['phone'];
+      const email = record[emailKey] || record['email'];
+      const block = record[blockKey] || record['block'];
+      const flatNumber = record[flatKey] || record['flatnumber'] || record['flat'];
+      const typeRaw = (record[typeKey] || record['type'] || 'TENANT').toUpperCase();
+      const type = typeRaw === 'OWNER' ? 'OWNER' : 'TENANT';
 
       if (!name || !phone) {
         errors.push({ row: i + 2, reason: 'Missing name or phone' });
@@ -1729,14 +2827,28 @@ async createStaff(
       }
 
       try {
-        const existing = await this.prisma.user.findFirst({ where: { phone, societyId } });
-        if (existing) { skipped++; continue; }
+        const existing = await client.user.findFirst({ where: { phone, societyId } });
+        if (existing) {
+          skipped++;
+          continue;
+        }
 
-        const flat = flatNumber
-          ? await this.prisma.flat.findFirst({ where: { societyId, number: flatNumber } })
-          : null;
+        const flatWhere: { societyId: string; number: string; block?: string } = {
+          societyId,
+          number: flatNumber,
+        };
+        if (block) flatWhere.block = block;
+        const flat = flatNumber ? await client.flat.findFirst({ where: flatWhere }) : null;
 
-        const user = await this.prisma.user.create({
+        if (flatNumber && !flat) {
+          errors.push({ row: i + 2, reason: `Flat not found: ${block ? `${block}-` : ''}${flatNumber}` });
+          continue;
+        }
+
+        valid.push({ row: i + 2, name, phone, flatNumber, block });
+        if (previewOnly) continue;
+
+        const user = await client.user.create({
           data: {
             phone,
             name,
@@ -1748,8 +2860,8 @@ async createStaff(
         });
 
         if (flat) {
-          await this.prisma.resident.create({
-            data: { userId: user.id, flatId: flat.id, type: 'TENANT' as any },
+          await client.resident.create({
+            data: { userId: user.id, flatId: flat.id, type: type as any },
           });
         }
         created++;
@@ -1758,38 +2870,74 @@ async createStaff(
       }
     }
 
-    return { created, skipped, errors };
+    return { created, skipped, errors, valid, preview: previewOnly };
   }
 
-  // ── Maintenance bill status update ─────────────────────────────────────────
+  // ── Staff bulk import ──────────────────────────────────────────────────────
 
-  async updateBillStatus(
-    billId: string,
-    societyId: string,
-    status: string,
-    paymentMethod?: string,
-  ) {
-    const normalizedStatus = status === 'PAID' ? 'SUCCESS' : status;
-    const allowed = ['PENDING', 'SUCCESS', 'WAIVED'];
-    if (!allowed.includes(normalizedStatus)) {
-      throw new BadRequestException(`Status must be one of: PENDING, SUCCESS (or PAID), WAIVED`);
-    }
-    const bill = await this.prisma.maintenanceBill.findUnique({
-      where: { id: billId },
-      include: { flat: true },
-    });
-    if (!bill) throw new NotFoundException('Bill not found');
-    if (bill.flat.societyId !== societyId) {
-      throw new ForbiddenException('Bill belongs to another society');
+  async previewStaffCsv(societyId: string, csvText: string) {
+    return this.importStaffCsv(societyId, csvText, true);
+  }
+
+  async importStaffCsv(societyId: string, csvText: string, previewOnly = false) {
+    const { headers, rows } = parseCsv(csvText);
+    if (headers.length === 0 || rows.length === 0) {
+      throw new BadRequestException('CSV is empty or has only a header');
     }
 
-    return this.prisma.maintenanceBill.update({
-      where: { id: billId },
-      data: {
-        status: normalizedStatus as any,
-        ...(paymentMethod !== undefined ? { paymentMethod } : {}),
-      },
-      include: { resident: { include: { user: true, flat: true } } },
-    });
+    let created = 0;
+    let skipped = 0;
+    const errors: { row: number; reason: string }[] = [];
+    const valid: { row: number; name: string; phone: string; designation: string }[] = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const record = rowToRecord(headers, rows[i]);
+      const name = record['name']?.trim();
+      const phone = record['phone']?.trim();
+      const designation = record['designation']?.trim();
+      const department = record['department']?.trim();
+      const categoriesRaw = record['categories']?.trim();
+      const salaryRaw = record['salary']?.trim();
+
+      if (!name || !phone || !designation) {
+        errors.push({ row: i + 2, reason: 'Missing name, phone, or designation' });
+        continue;
+      }
+
+      const categories = categoriesRaw
+        ? categoriesRaw.split(/[|,]/).map((c) => c.trim()).filter(Boolean)
+        : department
+          ? [department]
+          : ['OTHER'];
+
+      const salary = salaryRaw ? parseFloat(salaryRaw) : undefined;
+
+      try {
+        const existingStaff = await this.prisma.staffMember.findFirst({
+          where: { user: { phone }, societyId },
+        });
+        if (existingStaff) {
+          skipped++;
+          continue;
+        }
+
+        valid.push({ row: i + 2, name, phone, designation });
+        if (previewOnly) continue;
+
+        await this.createStaff(societyId, {
+          phone,
+          name,
+          designation,
+          department,
+          categories,
+          salary,
+        });
+        created++;
+      } catch (err) {
+        errors.push({ row: i + 2, reason: (err as Error).message });
+      }
+    }
+
+    return { created, skipped, errors, valid, preview: previewOnly };
   }
 }

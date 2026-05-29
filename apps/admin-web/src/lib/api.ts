@@ -2,15 +2,57 @@ import { ApiClient, ApiClientConfig } from '@societyos/api-client';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000/v1';
 
+// Friendly translations of backend auth error codes — the raw NestJS
+// `UnauthorizedException` message is just "Unauthorized" which is useless
+// to a user typing an OTP.
+const AUTH_FRIENDLY_MESSAGES: Record<string, string> = {
+  INVALID_OTP: 'The OTP you entered is incorrect or has expired. Please try again.',
+  OTP_EXPIRED: 'This OTP has expired. Tap "Resend OTP" to get a new one.',
+  OTP_LOCKED: 'Too many wrong attempts. Please wait a few minutes before trying again.',
+  ACCOUNT_SUSPENDED: 'Your account has been suspended. Please contact your administrator.',
+  SOCIETY_SUSPENDED: 'This society is currently paused. Please contact the platform team.',
+  SOCIETY_ARCHIVED: 'This society has been archived and is no longer active.',
+  USER_REVOKED: 'Your account is no longer active. Please contact support.',
+  '2FA_INVALID_CODE': 'The authenticator code is incorrect. Please try again.',
+};
+
 function friendlyError(status: number, serverMsg?: string, serverCode?: string): Error {
   if (status === 401) {
-    if (typeof window !== 'undefined') {
+    // Don't kick the user back to /login if they're already there — a 401
+    // during the login flow itself (wrong OTP, account suspended, etc.) is
+    // a normal error to render inline, not a "session expired" event.
+    const onLoginPage =
+      typeof window !== 'undefined' && window.location.pathname.startsWith('/login');
+    if (!onLoginPage && typeof window !== 'undefined') {
       localStorage.removeItem('auth-storage');
+      localStorage.removeItem('admin_token');
+      localStorage.removeItem('admin_refresh_token');
       window.location.href = '/login?reason=session-expired';
+      return new Error('Your session has ended. Please sign in again.');
     }
-    return new Error('Your session has ended. Please sign in again.');
+    // On /login: surface a useful message, preferring the friendly map.
+    const message =
+      (serverCode && AUTH_FRIENDLY_MESSAGES[serverCode]) ??
+      (serverMsg && serverMsg !== 'Unauthorized' && serverMsg !== 'Unauthorized Exception'
+        ? serverMsg
+        : 'Sign-in failed. Please try again.');
+    const e: Error & { code?: string } = new Error(message);
+    if (serverCode) e.code = serverCode;
+    return e;
   }
-  // Prefer API envelope messages for actionable admin errors (conflicts, transitions, etc.).
+  // Per-status messages with explicit codes so users get actionable feedback
+  // for the common failure modes. 429 in particular was previously falling
+  // through to "An unexpected error occurred" which mis-classified as CORS
+  // in the browser console — see senior-frontend review (2026-05-28).
+  if (status === 429) {
+    const e: Error & { code?: string } = new Error(
+      serverMsg ||
+        'Too many requests — please wait a few seconds and try again.',
+    );
+    e.code = serverCode ?? 'RATE_LIMITED';
+    return e;
+  }
+  // Prefer API envelope messages for other actionable admin 4xx (conflicts, transitions, etc.).
   if (serverMsg && status >= 400 && status < 500) {
     const e: Error & { code?: string } = new Error(serverMsg);
     if (serverCode) e.code = serverCode;
@@ -24,6 +66,11 @@ function friendlyError(status: number, serverMsg?: string, serverCode?: string):
   }
   if (status === 409) {
     return new Error(serverMsg ?? 'This record already exists. Please check and try again.');
+  }
+  if (status === 503) {
+    return new Error(
+      'Service is temporarily unavailable. Please try again in a moment.',
+    );
   }
   if (status >= 500) {
     return new Error('Something went wrong on our end. Please try again in a moment.');
@@ -70,14 +117,25 @@ class AdminApiClient extends ApiClient {
     try {
       return await fn();
     } catch (err: any) {
-      // Network / timeout errors
+      // Network / timeout errors. Differentiate "user is offline" from
+      // "server unreachable" so the message tells the user something useful;
+      // previously every network-class failure (real offline, server down,
+      // CORS reject, browser block) showed the same opaque "check your
+      // internet" line.
       if (
         err instanceof TypeError ||
         err?.code === 'ECONNABORTED' ||
         err?.code === 'ERR_NETWORK'
       ) {
+        const browserOffline =
+          typeof navigator !== 'undefined' && navigator.onLine === false;
+        if (browserOffline) {
+          throw new Error(
+            "You're offline. The dashboard will retry automatically once you're back online.",
+          );
+        }
         throw new Error(
-          'Could not connect to the server. Please check your internet connection and try again.',
+          'The server is unreachable. This is usually temporary — please retry in a moment.',
         );
       }
       const msg: string = err?.message ?? '';
@@ -122,10 +180,76 @@ export const api = new AdminApiClient({
     if (typeof window === 'undefined') return null;
     return localStorage.getItem('admin_token');
   },
+  // Wire refresh-token rotation so a stale access token does NOT immediately
+  // log the user out. Without these two callbacks, client.ts:tryRefresh
+  // early-returns null and fires onUnauthorized() → /login bounce. The keys
+  // here must stay in sync with auth.store.ts (ACCESS_KEY, REFRESH_KEY).
+  getRefreshToken: () => {
+    if (typeof window === 'undefined') return null;
+    return localStorage.getItem('admin_refresh_token');
+  },
+  setTokens: (pair) => {
+    if (typeof window === 'undefined') return;
+    if (pair === null) {
+      localStorage.removeItem('admin_token');
+      localStorage.removeItem('admin_refresh_token');
+      return;
+    }
+    localStorage.setItem('admin_token', pair.accessToken);
+    localStorage.setItem('admin_refresh_token', pair.refreshToken);
+  },
+  getExtraHeaders: () => {
+    if (typeof window === 'undefined') return {};
+    const societyId = localStorage.getItem('admin_selected_society_id');
+    if (!societyId) return {};
+    const headers: Record<string, string> = { 'X-Society-Id': societyId };
+    // C1: never stamp X-ReAuth-Confirmed automatically — it was trivially
+    // spoofable and defeated the tenant-switch gate. Instead, the
+    // SocietySwitcher writes a short-lived one-shot reauth token to
+    // sessionStorage; we forward it ONCE (the backend consumes the jti).
+    const reauth = sessionStorage.getItem('admin_reauth_token');
+    if (reauth) {
+      headers['X-ReAuth-Token'] = reauth;
+      // Drop after read — the backend is one-shot anyway, but this keeps
+      // dev tools from showing a stale token after the switch lands.
+      sessionStorage.removeItem('admin_reauth_token');
+    }
+    return headers;
+  },
   onUnauthorized: () => {
     if (typeof window !== 'undefined') {
       localStorage.removeItem('auth-storage');
+      localStorage.removeItem('admin_token');
+      localStorage.removeItem('admin_refresh_token');
       window.location.href = '/login?reason=session-expired';
     }
   },
 });
+
+/** Download a CSV/binary admin endpoint with auth + tenant headers. */
+export async function downloadAdminFile(path: string, filename: string): Promise<void> {
+  if (typeof window === 'undefined') return;
+  const token = localStorage.getItem('admin_token');
+  const societyId = localStorage.getItem('admin_selected_society_id');
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (societyId) {
+    headers['X-Society-Id'] = societyId;
+    const reauth = sessionStorage.getItem('admin_reauth_token');
+    if (reauth) {
+      headers['X-ReAuth-Token'] = reauth;
+      sessionStorage.removeItem('admin_reauth_token');
+    }
+  }
+  const res = await fetch(`${BASE_URL}${path}`, { headers });
+  if (!res.ok) {
+    throw new Error('Could not download file. Please try again.');
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}

@@ -68,17 +68,22 @@ export class HousekeepingController {
 
   @Patch(':id/status')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.STAFF)
-  updateStatus(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateHousekeepingStatusDto) {
-    return this.housekeepingService.updateStatus(id, dto);
+  updateStatus(
+    @Param('id', ParseUUIDPipe) id: string,
+    @SocietyId() societyId: string,
+    @Body() dto: UpdateHousekeepingStatusDto,
+  ) {
+    return this.housekeepingService.updateStatus(id, societyId, dto);
   }
 
   @Get(':id/photo-upload-url')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.STAFF)
   getPhotoUploadUrl(
     @Param('id', ParseUUIDPipe) id: string,
+    @SocietyId() societyId: string,
     @Query('phase') phase?: string,
     @Query('contentType') contentType?: string,
   ) {
-    return this.housekeepingService.getPhotoUploadUrl(id, phase, contentType);
+    return this.housekeepingService.getPhotoUploadUrl(id, societyId, phase, contentType);
   }
 }

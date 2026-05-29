@@ -81,6 +81,8 @@ export default function SettingsPage() {
     Object.fromEntries(BILLING_FIELDS.map((f) => [f.key, ''])) as Record<BillingKey, string>,
   );
   const [contact, setContact] = useState<ContactForm>({ contactEmail: '', contactPhone: '' });
+  const [profile, setProfile] = useState({ name: '', address: '', city: '', pincode: '', showInDirectory: false });
+  const [profileSaved, setProfileSaved] = useState(false);
   const [sla, setSla] = useState<Record<SlaKey, string>>({ ...SLA_DEFAULTS });
   const [contactSaved, setContactSaved] = useState(false);
   const [featuresSaved, setFeaturesSaved] = useState(false);
@@ -119,6 +121,13 @@ export default function SettingsPage() {
       contactEmail: readConfig<string>(cfg, 'contactEmail', ''),
       contactPhone: readConfig<string>(cfg, 'contactPhone', ''),
     });
+    setProfile({
+      name: society.name ?? '',
+      address: society.address ?? '',
+      city: society.city ?? '',
+      pincode: society.pincode ?? '',
+      showInDirectory: society.showInDirectory ?? false,
+    });
     const slaCfg = readConfig<Record<string, unknown>>(cfg, 'slaConfig', {});
     setSla((prev) => {
       const next = { ...prev };
@@ -129,6 +138,17 @@ export default function SettingsPage() {
       return next;
     });
   }, [society]);
+
+  const profileMutation = useMutation({
+    mutationFn: () => api.patch('/admin/society', profile),
+    onSuccess: () => {
+      setProfileSaved(true);
+      qc.invalidateQueries({ queryKey: ['society-info'] });
+      toast.success('Society profile saved');
+      setTimeout(() => setProfileSaved(false), 2000);
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
 
   const contactMutation = useMutation({
     mutationFn: (data: ContactForm) =>
@@ -205,10 +225,10 @@ export default function SettingsPage() {
   }
 
   const infoRows = [
-    { label: 'Name', value: society?.name },
-    { label: 'Address', value: society?.address },
-    { label: 'City', value: society?.city },
-    { label: 'Pincode', value: society?.pincode },
+    { key: 'name' as const, label: 'Name' },
+    { key: 'address' as const, label: 'Address' },
+    { key: 'city' as const, label: 'City' },
+    { key: 'pincode' as const, label: 'Pincode' },
   ];
 
   return (
@@ -223,14 +243,38 @@ export default function SettingsPage() {
         {isLoading ? (
           <p className="text-sm text-gray-400">Loading…</p>
         ) : (
-          <div className="grid grid-cols-2 gap-4">
-            {infoRows.map(({ label, value }) => (
-              <div key={label}>
-                <p className="text-xs text-gray-400 mb-1">{label}</p>
-                <p className="text-sm font-medium text-gray-800">{value ?? '—'}</p>
-              </div>
-            ))}
-          </div>
+          <>
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              {infoRows.map(({ key, label }) => (
+                <div key={key} className={key === 'address' ? 'col-span-2' : ''}>
+                  <label className="text-xs text-gray-400 mb-1 block">{label}</label>
+                  <input
+                    value={profile[key]}
+                    onChange={(e) => setProfile((p) => ({ ...p, [key]: e.target.value }))}
+                    className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-800 outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-100"
+                  />
+                </div>
+              ))}
+            </div>
+            <label className="inline-flex items-center gap-2 text-sm text-gray-700 mb-4">
+              <input
+                type="checkbox"
+                checked={profile.showInDirectory}
+                onChange={(e) => setProfile((p) => ({ ...p, showInDirectory: e.target.checked }))}
+              />
+              Show in resident app directory
+            </label>
+            <button
+              onClick={() => profileMutation.mutate()}
+              disabled={profileMutation.isPending}
+              className={cn(
+                'px-4 py-2 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50',
+                profileSaved ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-primary-500 text-white hover:bg-primary-600',
+              )}
+            >
+              {profileMutation.isPending ? 'Saving…' : profileSaved ? 'Saved' : 'Save Profile'}
+            </button>
+          </>
         )}
       </div>
 

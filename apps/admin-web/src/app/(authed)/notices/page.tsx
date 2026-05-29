@@ -238,6 +238,12 @@ export default function NoticesPage() {
     onError: (err: any) => toast.error(err?.message ?? 'Failed to unpin notice'),
   });
 
+  const pinMutation = useMutation({
+    mutationFn: (id: string) => api.patch(`/notices/${id}/pin`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-notices'] }),
+    onError: (err: any) => toast.error(err?.message ?? 'Failed to toggle pin'),
+  });
+
   const handleDelete = (id: string) => {
     if (window.confirm('Delete this notice? This cannot be undone.')) {
       deleteMutation.mutate(id);
@@ -483,15 +489,21 @@ export default function NoticesPage() {
                   <span className="text-xs text-gray-400">
                     {new Date(notice.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
                   </span>
-                  {notice.isPinned && (
-                    <button
-                      className="text-xs text-amber-600 hover:text-amber-700 border border-amber-200 hover:border-amber-300 px-2.5 py-1 rounded-lg transition-colors"
-                      onClick={() => unpinMutation.mutate(notice.id)}
-                      disabled={unpinMutation.isPending}
-                    >
-                      Unpin
-                    </button>
-                  )}
+                  <button
+                    className={cn(
+                      'text-xs px-2.5 py-1 rounded-lg transition-colors border inline-flex items-center gap-1',
+                      notice.isPinned
+                        ? 'text-amber-600 hover:text-amber-700 border-amber-200 hover:border-amber-300 bg-amber-50'
+                        : 'text-gray-500 hover:text-gray-700 border-gray-200 hover:border-gray-300',
+                    )}
+                    onClick={() => pinMutation.mutate(notice.id)}
+                    disabled={pinMutation.isPending}
+                    title={notice.isPinned ? 'Unpin' : 'Pin to top'}
+                    aria-label={notice.isPinned ? 'Unpin notice' : 'Pin notice'}
+                  >
+                    <Pin className="w-3.5 h-3.5" />
+                    {notice.isPinned ? 'Unpin' : 'Pin'}
+                  </button>
                   <button
                     className="text-xs text-gray-600 hover:text-gray-700 border border-gray-200 hover:border-gray-300 px-2.5 py-1 rounded-lg transition-colors"
                     onClick={() => setEditingNotice(notice)}

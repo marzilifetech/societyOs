@@ -1,12 +1,16 @@
 import { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Image } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ScrollView, Alert, Image } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
 import { useTheme } from '../../src/hooks/useTheme';
 import { pickImageFromLibrary, uploadToPresignedUrl } from '../../src/lib/photo-upload';
+import { ScreenHeader, BottomActionBar } from '../../src/components/ui';
+
+// Public Figma reference (Utility Service Request frame): node-id=35-433
+// Behaviour-preserving redesign — same /service-requests POST + photo presign
+// flow; new ScreenHeader + BottomActionBar primitives.
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
 
@@ -77,20 +81,10 @@ export default function NewServiceRequestScreen() {
   const isValid = category.trim().length > 0 && description.trim().length >= 10;
 
   return (
-    <SafeAreaView className="flex-1 bg-white">
+    <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+      <ScreenHeader title="New Service Request" subtitle="What needs fixing?" />
       <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-        <View className="px-6 pt-4 pb-3">
-          <TouchableOpacity
-            onPress={() => router.back()}
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-            className="flex-row items-center mb-4"
-          >
-            <Ionicons name="chevron-back" size={20} color="#3B82F6" />
-            <Text className="text-primary-500 ml-1" style={{ fontSize: t.fontBase }}>Back</Text>
-          </TouchableOpacity>
-          <Text className="text-2xl font-bold text-gray-900 mb-2">New Service Request</Text>
-          <Text className="text-gray-500 mb-6" style={{ fontSize: t.fontBase }}>What needs fixing?</Text>
+        <View className="px-6 pt-2 pb-3">
 
           {/* Category picker */}
           <Text className="font-medium text-gray-700 mb-3" style={{ fontSize: t.fontSm }}>Category *</Text>
@@ -187,24 +181,18 @@ export default function NewServiceRequestScreen() {
             </TouchableOpacity>
           )}
 
-          <TouchableOpacity
-            className={`rounded-2xl py-4 items-center mt-6 mb-4 ${isValid ? 'bg-primary-500' : 'bg-gray-200'}`}
-            onPress={() => mutation.mutate()}
-            disabled={!isValid || mutation.isPending || photoUploading}
-            style={{ minHeight: t.touchTarget }}
-            accessibilityRole="button"
-            accessibilityLabel="Submit service request"
-          >
-            {mutation.isPending || photoUploading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text className={`font-semibold ${isValid ? 'text-white' : 'text-gray-400'}`} style={{ fontSize: t.fontBase }}>
-                Submit Request
-              </Text>
-            )}
-          </TouchableOpacity>
         </View>
       </ScrollView>
-    </SafeAreaView>
+
+      <BottomActionBar
+        primary={{
+          label: mutation.isPending ? (photoUploading ? 'Uploading photo…' : 'Submitting…') : 'Submit Request',
+          onPress: () => mutation.mutate(),
+          loading: mutation.isPending || photoUploading,
+          disabled: !isValid || mutation.isPending || photoUploading,
+          accessibilityLabel: 'Submit service request',
+        }}
+      />
+    </View>
   );
 }

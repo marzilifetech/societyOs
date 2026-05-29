@@ -4,8 +4,8 @@ import { Fragment, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, HardHat, CalendarDays, DollarSign } from 'lucide-react';
-import { api } from '@/lib/api';
+import { Plus, HardHat, CalendarDays, DollarSign, Upload } from 'lucide-react';
+import { api, downloadAdminFile } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { ErrorState } from '@/components/ui/ErrorState';
 import type { StaffUser, LeaveRequest, LeaveStatus } from '@societyos/api-client';
@@ -231,6 +231,9 @@ export default function StaffPage() {
   const qc = useQueryClient();
   const [leaveFilterTab, setLeaveFilterTab] = useState<LeaveFilterTab>('All');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [showImport, setShowImport] = useState(false);
+  const [importCsv, setImportCsv] = useState('');
+  const [importPreview, setImportPreview] = useState<any>(null);
 
   const { data: staff, isLoading, isError, refetch } = useQuery({
     queryKey: ['admin-staff'],
@@ -270,6 +273,24 @@ export default function StaffPage() {
     onError: (err: any) => toast.error(err?.message ?? 'Failed to deactivate staff'),
   });
 
+  const previewStaffImport = useMutation({
+    mutationFn: (csv: string) => api.post('/admin/staff/import/preview', { csv }),
+    onSuccess: (data) => setImportPreview(data),
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const importStaffMutation = useMutation({
+    mutationFn: (csv: string) => api.post('/admin/staff/import', { csv }),
+    onSuccess: (data: any) => {
+      qc.invalidateQueries({ queryKey: ['admin-staff'] });
+      setShowImport(false);
+      setImportCsv('');
+      setImportPreview(null);
+      toast.success(`Imported ${data.created} staff (${data.skipped} skipped)`);
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
   const leaveCounts: Record<LeaveFilterTab, number> = {
     All: allLeaves?.length ?? 0,
     PENDING: allLeaves?.filter(l => l.status === 'PENDING').length ?? 0,
@@ -299,12 +320,27 @@ export default function StaffPage() {
             <h1 className="text-2xl font-bold text-gray-900">Staff</h1>
             <p className="text-gray-500 text-sm mt-1">{staff?.length ?? 0} staff members</p>
           </div>
-          <button
-            onClick={() => router.push('/staff/add')}
-            className="bg-primary-500 hover:bg-primary-600 text-white px-4 py-2 rounded-xl text-sm font-medium inline-flex items-center gap-1.5 transition-colors"
-          >
-            <Plus className="w-4 h-4" /> Add Staff
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setShowImport(true)}
+              className="border border-gray-200 hover:border-gray-300 text-gray-700 px-4 py-2 rounded-xl text-sm font-medium inline-flex items-center gap-1.5"
+            >
+              <Upload className="w-4 h-4" /> Import CSV
+            </button>
+            <button
+              type="button"
+              onClick={() => downloadAdminFile('/admin/staff/import/template', 'staff-import-template.csv').catch((e: Error) => toast.error(e.message))}
+              className="border border-gray-200 text-gray-700 px-3 py-2 rounded-xl text-sm"
+            >
+              Template
+            </button>
+            <button
+              onClick={() => router.push('/staff/add')}
+              className="bg-primary-500 hover:bg-primary-600 text-white px-4 py-2 rounded-xl text-sm font-medium inline-flex items-center gap-1.5 transition-colors"
+            >
+              <Plus className="w-4 h-4" /> Add Staff
+            </button>
+          </div>
         </div>
       </div>
 
@@ -482,6 +518,48 @@ export default function StaffPage() {
           </div>
         )}
       </div>
+
+      {showImport && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4">
+            <h2 className="text-lg font-semibold mb-2">Import Staff CSV</h2>
+            <p className="text-xs text-gray-500 mb-3">name, phone, designation, department, categories, salary</p>
+            <input
+              type="file"
+              accept=".csv"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = () => {
+                  const csv = String(reader.result ?? '');
+                  setImportCsv(csv);
+                  previewStaffImport.mutate(csv);
+                };
+                reader.readAsText(file);
+              }}
+            />
+            {importPreview && (
+              <div className="mt-3 text-xs bg-gray-50 rounded-xl p-3 max-h-32 overflow-y-auto">
+                <p>{importPreview.valid?.length ?? 0} valid, {importPreview.errors?.length ?? 0} errors</p>
+                {importPreview.errors?.map((e: any) => (
+                  <p key={e.row} className="text-red-600">Row {e.row}: {e.reason}</p>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2 mt-4 justify-end">
+              <button onClick={() => { setShowImport(false); setImportPreview(null); }} className="text-sm text-gray-500 px-3 py-2">Cancel</button>
+              <button
+                disabled={!importCsv || importStaffMutation.isPending}
+                onClick={() => importStaffMutation.mutate(importCsv)}
+                className="bg-primary-500 text-white text-sm px-4 py-2 rounded-xl disabled:opacity-50"
+              >
+                Import
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

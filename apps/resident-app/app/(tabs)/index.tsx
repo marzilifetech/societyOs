@@ -1,8 +1,9 @@
-import { ScrollView, View, Text, TouchableOpacity, RefreshControl } from 'react-native';
+import { ScrollView, View, Text, TouchableOpacity, RefreshControl, Linking } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../src/store/auth.store';
 import { api } from '../../src/lib/api';
@@ -22,6 +23,20 @@ type ServiceRequestSummary = {
 };
 
 type Notice = { id: string; isRead: boolean };
+type PinnedNotice = { id: string; title: string; body: string; isPinned: boolean; category?: string };
+type EmergencyContact = { id?: string; label: string; phone: string; icon?: IoniconName; tint?: string };
+type SocietyResponse = { id: string; config?: { emergencyContacts?: EmergencyContact[] } };
+
+const DISMISSED_PINNED_KEY = 'dismissed_pinned_notice_ids';
+
+const DEFAULT_CONTACT_META: Record<string, { icon: IoniconName; tint: string }> = {
+  Medical: { icon: 'medkit', tint: '#16A34A' },
+  Security: { icon: 'shield-checkmark', tint: '#2563EB' },
+  Fire: { icon: 'flame', tint: '#DC2626' },
+  Manager: { icon: 'person', tint: '#7C3AED' },
+  Plumber: { icon: 'water', tint: '#0EA5E9' },
+  Electrician: { icon: 'flash', tint: '#F59E0B' },
+};
 
 type QuickAction = { icon: IoniconName; label: string; route: string; tint: string };
 
@@ -66,6 +81,35 @@ export default function HomeScreen() {
     queryFn: () => api.get<Notice[]>('/notices?limit=20'),
   });
 
+  const { data: pinnedNotices } = useQuery<PinnedNotice[]>({
+    queryKey: ['notices-pinned'],
+    queryFn: () => api.get<PinnedNotice[]>('/notices?pinned=true&limit=1'),
+  });
+
+  const { data: societyContacts } = useQuery<SocietyResponse>({
+    queryKey: ['resident-society-contacts'],
+    queryFn: () => api.get<SocietyResponse>('/residents/society/emergency-contacts'),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const [dismissedPinnedIds, setDismissedPinnedIds] = useState<string[]>([]);
+  useEffect(() => {
+    AsyncStorage.getItem(DISMISSED_PINNED_KEY).then((raw) => {
+      if (!raw) return;
+      try { setDismissedPinnedIds(JSON.parse(raw)); } catch { /* ignore */ }
+    });
+  }, []);
+
+  const visiblePinned = pinnedNotices?.find((n) => !dismissedPinnedIds.includes(n.id));
+
+  const dismissPinned = async (id: string) => {
+    const next = [...dismissedPinnedIds, id];
+    setDismissedPinnedIds(next);
+    await AsyncStorage.setItem(DISMISSED_PINNED_KEY, JSON.stringify(next));
+  };
+
+  const emergencyContacts: EmergencyContact[] = (societyContacts?.config?.emergencyContacts ?? []).slice(0, 4);
+
   const handleRefresh = async () => {
     setRefreshing(true);
     await Promise.all([refetchProfile(), refetchRequests()]);
@@ -109,6 +153,37 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
 
+          {/* Pinned notice banner */}
+          {visiblePinned && (
+            <View className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 mb-4 flex-row items-start">
+              <View className="bg-amber-500 rounded-full w-8 h-8 items-center justify-center mr-3 mt-0.5">
+                <Ionicons name="megaphone" size={16} color="#FFFFFF" />
+              </View>
+              <TouchableOpacity
+                onPress={() => router.push('/notices' as any)}
+                className="flex-1"
+                accessibilityRole="button"
+                accessibilityLabel={`Pinned notice: ${visiblePinned.title}`}
+              >
+                <Text className="text-amber-900 font-semibold text-sm" numberOfLines={1}>
+                  {visiblePinned.title}
+                </Text>
+                <Text className="text-amber-800 text-xs mt-0.5" numberOfLines={2}>
+                  {visiblePinned.body}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => dismissPinned(visiblePinned.id)}
+                hitSlop={8}
+                className="ml-2 p-1"
+                accessibilityRole="button"
+                accessibilityLabel="Dismiss pinned notice"
+              >
+                <Ionicons name="close" size={18} color="#92400E" />
+              </TouchableOpacity>
+            </View>
+          )}
+
           {/* SOS Button */}
           <TouchableOpacity
             className="bg-red-600 rounded-2xl py-4 flex-row items-center justify-center gap-3"
@@ -124,6 +199,47 @@ export default function HomeScreen() {
             </View>
           </TouchableOpacity>
         </View>
+
+        {/* Emergency contacts grid */}
+        {emergencyContacts.length > 0 && (
+          <View className="px-6 mb-6">
+            <Text className="text-xl font-semibold text-gray-900 mb-4">Emergency Contacts</Text>
+            <View className="flex-row flex-wrap" style={{ marginHorizontal: -6 }}>
+              {emergencyContacts.map((c, idx) => {
+                const meta = DEFAULT_CONTACT_META[c.label] ?? {
+                  icon: 'call' as IoniconName,
+                  tint: '#0EA5E9',
+                };
+                const icon = c.icon ?? meta.icon;
+                const tint = c.tint ?? meta.tint;
+                return (
+                  <View key={c.id ?? `${c.label}-${idx}`} style={{ width: '50%', padding: 6 }}>
+                    <TouchableOpacity
+                      onPress={() => Linking.openURL(`tel:${c.phone}`)}
+                      className="bg-gray-50 border border-gray-200 rounded-2xl p-4 flex-row items-center"
+                      activeOpacity={0.7}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Call ${c.label} at ${c.phone}`}
+                    >
+                      <View
+                        className="w-10 h-10 rounded-xl items-center justify-center mr-3"
+                        style={{ backgroundColor: `${tint}1A` }}
+                      >
+                        <Ionicons name={icon} size={20} color={tint} />
+                      </View>
+                      <View className="flex-1">
+                        <Text className="text-sm font-semibold text-gray-900">{c.label}</Text>
+                        <Text className="text-xs text-gray-500 mt-0.5" numberOfLines={1}>
+                          {c.phone}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+        )}
 
         {/* Quick Actions */}
         <View className="px-6 mb-6">

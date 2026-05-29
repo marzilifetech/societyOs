@@ -3,6 +3,7 @@ import { LaundryBookingStatus, LaundryType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { S3Service } from '../../common/storage/s3.service';
 import { requireResidentByUserId } from '../../common/utils/resident-context';
+import { requireOwnedById } from '../../common/tenancy/require-owned.util';
 
 const SLOTS = ['09:00', '11:00', '14:00', '16:00'];
 
@@ -10,25 +11,39 @@ const SLOTS = ['09:00', '11:00', '14:00', '16:00'];
 export class LaundryService {
   constructor(private prisma: PrismaService, private s3: S3Service) {}
 
-  async getBookingById(id: string) {
-    const booking = await this.prisma.laundryBooking.findUnique({
-      where: { id },
-      include: { resident: { include: { user: true, flat: true } } },
-    });
-    if (!booking) throw new NotFoundException('Booking not found');
-    return booking;
+  async getBookingById(id: string, societyId: string) {
+    return requireOwnedById(
+      () =>
+        this.prisma.laundryBooking.findUnique({
+          where: { id },
+          include: { resident: { include: { user: true, flat: true } } },
+        }),
+      societyId,
+      'Booking',
+    );
   }
 
-  async markPickedUp(id: string) {
-    const booking = await this.prisma.laundryBooking.findUnique({ where: { id } });
-    if (!booking) throw new NotFoundException('Booking not found');
+  async markPickedUp(id: string, societyId: string) {
+    await requireOwnedById(
+      () => this.prisma.laundryBooking.findUnique({ where: { id } }),
+      societyId,
+      'Booking',
+    );
     return this.prisma.laundryBooking.update({
       where: { id },
       data: { status: LaundryBookingStatus.PICKED_UP },
     });
   }
 
-  async getPhotoUploadUrl(id: string, contentType?: string) {
+  async getPhotoUploadUrl(id: string, societyId: string, contentType?: string) {
+    // Verify the booking belongs to the caller's society before minting an
+    // upload URL — otherwise any staff could upload photos against any
+    // tenant's booking id.
+    await requireOwnedById(
+      () => this.prisma.laundryBooking.findUnique({ where: { id } }),
+      societyId,
+      'Booking',
+    );
     return this.s3.getPresignedUploadUrl(`laundry/${id}`, contentType);
   }
 
@@ -85,10 +100,13 @@ export class LaundryService {
     });
   }
 
-  async cancelBooking(userId: string, id: string) {
+  async cancelBooking(userId: string, id: string, societyId: string) {
     const resident = await requireResidentByUserId(this.prisma, userId);
-    const booking = await this.prisma.laundryBooking.findUnique({ where: { id } });
-    if (!booking) throw new NotFoundException('Booking not found');
+    const booking = await requireOwnedById(
+      () => this.prisma.laundryBooking.findUnique({ where: { id } }),
+      societyId,
+      'Booking',
+    );
     if (booking.residentId !== resident.id) throw new ForbiddenException();
     if (booking.status !== LaundryBookingStatus.SCHEDULED) {
       throw new ForbiddenException('Only SCHEDULED bookings can be cancelled');
@@ -107,7 +125,12 @@ export class LaundryService {
     });
   }
 
-  async updateStatus(id: string, status: LaundryBookingStatus) {
+  async updateStatus(id: string, societyId: string, status: LaundryBookingStatus) {
+    await requireOwnedById(
+      () => this.prisma.laundryBooking.findUnique({ where: { id } }),
+      societyId,
+      'Booking',
+    );
     return this.prisma.laundryBooking.update({
       where: { id },
       data: { status },

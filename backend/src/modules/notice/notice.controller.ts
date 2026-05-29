@@ -19,8 +19,14 @@ export class NoticeController {
   constructor(private noticeService: NoticeService) {}
 
   @Get()
-  getNotices(@SocietyId() societyId: string) {
-    return this.noticeService.getNotices(societyId);
+  getNotices(
+    @SocietyId() societyId: string,
+    @Query('pinned') pinned?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const onlyPinned = pinned === 'true' || pinned === '1';
+    const parsedLimit = limit ? Math.max(1, Math.min(50, parseInt(limit, 10) || 0)) : undefined;
+    return this.noticeService.getNotices(societyId, { onlyPinned, limit: parsedLimit });
   }
 
   @Post()
@@ -49,6 +55,12 @@ export class NoticeController {
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   unpinNotice(@Param('id', ParseUUIDPipe) id: string, @SocietyId() societyId: string) {
     return this.noticeService.updateNotice(id, societyId, { isPinned: false } as UpdateNoticeDto);
+  }
+
+  @Patch(':id/pin')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  pinNotice(@Param('id', ParseUUIDPipe) id: string, @SocietyId() societyId: string) {
+    return this.noticeService.pinNotice(id, societyId);
   }
 
   @Post('broadcast')
@@ -126,8 +138,8 @@ export class NoticeController {
 
   @Patch('/admin/polls/:id/close')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  closePoll(@Param('id') pollId: string) {
-    return this.noticeService.closePoll(pollId);
+  closePoll(@Param('id') pollId: string, @SocietyId() societyId: string) {
+    return this.noticeService.closePoll(pollId, societyId);
   }
 
   // ── Property admin endpoints ─────────────────────────────────────────────────
@@ -140,14 +152,18 @@ export class NoticeController {
 
   @Post('/admin/property/listings/:id/approve')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  approvePropertyListing(@Param('id') id: string) {
-    return this.noticeService.approvePropertyListing(id);
+  approvePropertyListing(@Param('id') id: string, @SocietyId() societyId: string) {
+    return this.noticeService.approvePropertyListing(id, societyId);
   }
 
   @Patch('/admin/property/listings/:id/reject')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  rejectPropertyListing(@Param('id') id: string, @Body() body: { reason?: string }) {
-    return this.noticeService.rejectPropertyListing(id, body?.reason);
+  rejectPropertyListing(
+    @Param('id') id: string,
+    @SocietyId() societyId: string,
+    @Body() body: { reason?: string },
+  ) {
+    return this.noticeService.rejectPropertyListing(id, societyId, body?.reason);
   }
 
   // ── Travel admin endpoints ───────────────────────────────────────────────────

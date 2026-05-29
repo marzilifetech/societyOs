@@ -1,0 +1,57 @@
+/** Parse a single CSV line respecting quoted fields. */
+function parseCsvLine(line: string): string[] {
+  const result: string[] = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"' && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else if (ch === '"') {
+        inQuotes = false;
+      } else {
+        current += ch;
+      }
+    } else if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === ',') {
+      result.push(current.trim());
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  result.push(current.trim());
+  return result;
+}
+
+export function parseCsv(text: string): { headers: string[]; rows: string[][] } {
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (lines.length === 0) return { headers: [], rows: [] };
+
+  const headers = parseCsvLine(lines[0]).map((h) => h.toLowerCase().replace(/\s+/g, ''));
+  const rows = lines.slice(1).map(parseCsvLine);
+  return { headers, rows };
+}
+
+export function rowToRecord(headers: string[], row: string[]): Record<string, string> {
+  const record: Record<string, string> = {};
+  headers.forEach((header, index) => {
+    record[header] = (row[index] ?? '').trim();
+  });
+  return record;
+}
+
+export function escapeCsvField(value: string): string {
+  if (/[",\n]/.test(value)) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+}
+
+export function toCsvRow(values: string[]): string {
+  return values.map((v) => escapeCsvField(v)).join(',');
+}

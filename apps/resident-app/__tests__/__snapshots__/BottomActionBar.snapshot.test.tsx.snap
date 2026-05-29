@@ -1,0 +1,296 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`BottomActionBar primary + secondary snapshot 1`] = `
+<RNCSafeAreaView
+  edges={
+    {
+      "bottom": "additive",
+      "left": "off",
+      "right": "off",
+      "top": "off",
+    }
+  }
+  style={
+    {
+      "backgroundColor": "#FFFFFF",
+    }
+  }
+>
+  <View
+    style={
+      [
+        {
+          "backgroundColor": "#FFFFFF",
+          "borderTopColor": "rgba(0,0,0,0.08)",
+          "borderTopWidth": 1,
+          "paddingBottom": 12,
+          "paddingHorizontal": 20,
+          "paddingTop": 12,
+        },
+        undefined,
+      ]
+    }
+  >
+    <View
+      style={
+        {
+          "flexDirection": "row",
+          "gap": 12,
+        }
+      }
+    >
+      <View
+        style={
+          {
+            "flex": 1,
+          }
+        }
+      >
+        <View
+          accessibilityLabel="Cancel"
+          accessibilityRole="button"
+          accessibilityState={
+            {
+              "busy": undefined,
+              "checked": undefined,
+              "disabled": undefined,
+              "expanded": undefined,
+              "selected": undefined,
+            }
+          }
+          accessibilityValue={
+            {
+              "max": undefined,
+              "min": undefined,
+              "now": undefined,
+              "text": undefined,
+            }
+          }
+          accessible={true}
+          collapsable={false}
+          focusable={true}
+          onClick={[Function]}
+          onResponderGrant={[Function]}
+          onResponderMove={[Function]}
+          onResponderRelease={[Function]}
+          onResponderTerminate={[Function]}
+          onResponderTerminationRequest={[Function]}
+          onStartShouldSetResponder={[Function]}
+          style={
+            {
+              "alignItems": "center",
+              "backgroundColor": "#E8E8EC",
+              "borderColor": "rgba(0,0,0,0.12)",
+              "borderRadius": 16,
+              "borderWidth": 1,
+              "justifyContent": "center",
+              "minHeight": 52,
+              "opacity": 1,
+              "paddingHorizontal": 16,
+              "width": "100%",
+            }
+          }
+        >
+          <Text
+            style={
+              [
+                {
+                  "color": "#000000",
+                  "fontSize": 16,
+                  "fontWeight": "600",
+                  "letterSpacing": 0.3,
+                },
+                undefined,
+              ]
+            }
+          >
+            Cancel
+          </Text>
+        </View>
+      </View>
+      <View
+        style={
+          {
+            "flex": 1,
+          }
+        }
+      >
+        <View
+          accessibilityLabel="Confirm"
+          accessibilityRole="button"
+          accessibilityState={
+            {
+              "busy": undefined,
+              "checked": undefined,
+              "disabled": undefined,
+              "expanded": undefined,
+              "selected": undefined,
+            }
+          }
+          accessibilityValue={
+            {
+              "max": undefined,
+              "min": undefined,
+              "now": undefined,
+              "text": undefined,
+            }
+          }
+          accessible={true}
+          collapsable={false}
+          focusable={true}
+          onClick={[Function]}
+          onResponderGrant={[Function]}
+          onResponderMove={[Function]}
+          onResponderRelease={[Function]}
+          onResponderTerminate={[Function]}
+          onResponderTerminationRequest={[Function]}
+          onStartShouldSetResponder={[Function]}
+          style={
+            {
+              "alignItems": "center",
+              "backgroundColor": "#821A52",
+              "borderColor": "transparent",
+              "borderRadius": 16,
+              "borderWidth": 0,
+              "justifyContent": "center",
+              "minHeight": 52,
+              "opacity": 1,
+              "paddingHorizontal": 16,
+              "width": "100%",
+            }
+          }
+        >
+          <Text
+            style={
+              [
+                {
+                  "color": "#FFFFFF",
+                  "fontSize": 16,
+                  "fontWeight": "600",
+                  "letterSpacing": 0.3,
+                },
+                undefined,
+              ]
+            }
+          >
+            Confirm
+          </Text>
+        </View>
+      </View>
+    </View>
+  </View>
+</RNCSafeAreaView>
+`;
+
+exports[`BottomActionBar primary-only snapshot 1`] = `
+<RNCSafeAreaView
+  edges={
+    {
+      "bottom": "additive",
+      "left": "off",
+      "right": "off",
+      "top": "off",
+    }
+  }
+  style={
+    {
+      "backgroundColor": "#FFFFFF",
+    }
+  }
+>
+  <View
+    style={
+      [
+        {
+          "backgroundColor": "#FFFFFF",
+          "borderTopColor": "rgba(0,0,0,0.08)",
+          "borderTopWidth": 1,
+          "paddingBottom": 12,
+          "paddingHorizontal": 20,
+          "paddingTop": 12,
+        },
+        undefined,
+      ]
+    }
+  >
+    <View
+      style={
+        {
+          "flexDirection": "row",
+          "gap": 12,
+        }
+      }
+    >
+      <View
+        style={
+          {
+            "flex": 1,
+          }
+        }
+      >
+        <View
+          accessibilityLabel="Send SOS"
+          accessibilityRole="button"
+          accessibilityState={
+            {
+              "busy": undefined,
+              "checked": undefined,
+              "disabled": undefined,
+              "expanded": undefined,
+              "selected": undefined,
+            }
+          }
+          accessibilityValue={
+            {
+              "max": undefined,
+              "min": undefined,
+              "now": undefined,
+              "text": undefined,
+            }
+          }
+          accessible={true}
+          collapsable={false}
+          focusable={true}
+          onClick={[Function]}
+          onResponderGrant={[Function]}
+          onResponderMove={[Function]}
+          onResponderRelease={[Function]}
+          onResponderTerminate={[Function]}
+          onResponderTerminationRequest={[Function]}
+          onStartShouldSetResponder={[Function]}
+          style={
+            {
+              "alignItems": "center",
+              "backgroundColor": "#821A52",
+              "borderColor": "transparent",
+              "borderRadius": 16,
+              "borderWidth": 0,
+              "justifyContent": "center",
+              "minHeight": 52,
+              "opacity": 1,
+              "paddingHorizontal": 16,
+              "width": "100%",
+            }
+          }
+        >
+          <Text
+            style={
+              [
+                {
+                  "color": "#FFFFFF",
+                  "fontSize": 16,
+                  "fontWeight": "600",
+                  "letterSpacing": 0.3,
+                },
+                undefined,
+              ]
+            }
+          >
+            Send SOS
+          </Text>
+        </View>
+      </View>
+    </View>
+  </View>
+</RNCSafeAreaView>
+`;

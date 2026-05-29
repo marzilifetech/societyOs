@@ -19,15 +19,52 @@ export interface ApiClientConfig {
   refreshUrl?: string;
   /** Called when authentication has hard-failed (refresh attempted and rejected). */
   onUnauthorized?: () => void;
+  /** Optional extra headers (e.g. super-admin tenant switch). */
+  getExtraHeaders?: () => Record<string, string>;
 }
 
 /**
- * Backend error codes that mean "the access token is expired but the session
- * may still be valid" — these trigger a refresh attempt. Anything else on a
- * 401 (token revoked, refresh family revoked, replay detected, malformed
- * token) is a hard failure and the user must sign in again.
+ * Backend error codes that mean "the access token is expired or stale, but
+ * the session may still be valid" — refresh and retry once. Anything else
+ * (USER_REVOKED, REFRESH_REUSE_DETECTED, malformed token, INVALID_REFRESH)
+ * is a hard sign-out.
+ *
+ * REAUTH_REQUIRED is included because the backend's super-admin tenant-switch
+ * gate fires when the access token's `iat` is older than the fresh-login
+ * window. A successful refresh produces a token with a new `iat` (fresh by
+ * definition), so retrying after refresh passes the gate without needing
+ * the user to enter another OTP.
+ *
+ * REAUTH_REQUIRES_VALID_BEARER fires when the bearer signature is invalid
+ * at the middleware pre-check (before JwtAuthGuard). Refreshing produces
+ * a fresh, properly-signed bearer that clears this too.
  */
-const REFRESHABLE_CODES = new Set(['TOKEN_EXPIRED', 'TOKEN_SKEW']);
+const REFRESHABLE_CODES = new Set([
+  'TOKEN_EXPIRED',
+  'TOKEN_SKEW',
+  'REAUTH_REQUIRED',
+  'REAUTH_REQUIRES_VALID_BEARER',
+]);
+
+/**
+ * 401 codes that are TERMINAL — the session is definitively gone and no
+ * refresh attempt can recover it. Anything else on a 401 (including the
+ * generic `UNAUTHORIZED` produced by passport-jwt rejections, or a missing
+ * code entirely) should attempt a silent refresh ONCE before bouncing the
+ * user out. Without this, every transient bearer hiccup — clock skew, a
+ * stale token loaded from localStorage one tick before a fresh one — would
+ * dump the user back to /login with their refresh token unused.
+ */
+const TERMINAL_401_CODES = new Set([
+  'USER_REVOKED',
+  'TOKEN_REVOKED',
+  'INVALID_REFRESH',
+  'REFRESH_REUSE_DETECTED',
+  'ACCOUNT_SUSPENDED',
+  'SOCIETY_SUSPENDED',
+  'SOCIETY_ARCHIVED',
+  'SESSION_TIMEOUT',
+]);
 
 export class ApiClient {
   private config: ApiClientConfig;
@@ -47,12 +84,42 @@ export class ApiClient {
         const refreshToken = this.config.getRefreshToken!();
         if (!refreshToken) return null;
         const url = `${this.config.baseUrl}${this.config.refreshUrl ?? '/auth/refresh'}`;
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ refreshToken }),
-        });
+
+        // Up to 3 attempts with backoff so a single network blip or transient
+        // 5xx on the refresh endpoint does not sign the user out unnecessarily.
+        // We only retry on network errors and 5xx — 4xx is treated as terminal
+        // immediately (the server has made a definitive decision).
+        const MAX_ATTEMPTS = 3;
+        const BACKOFF_MS = [0, 400, 1200];
+        let res: Response | null = null;
+        let lastNetworkError: unknown = null;
+        for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+          if (BACKOFF_MS[attempt] > 0) {
+            await new Promise((r) => setTimeout(r, BACKOFF_MS[attempt]));
+          }
+          try {
+            res = await fetch(url, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ refreshToken }),
+            });
+          } catch (err) {
+            lastNetworkError = err;
+            res = null;
+            continue;
+          }
+          // Retry on 5xx only — 4xx is definitive.
+          if (res.status < 500) break;
+        }
+
+        if (!res) {
+          // All attempts failed at the network layer — do NOT wipe tokens.
+          // The refresh JWT is still valid; the user can retry when online.
+          void lastNetworkError;
+          return null;
+        }
         if (!res.ok) {
+          // Definitive server rejection — terminal.
           await this.config.setTokens!(null);
           return null;
         }
@@ -67,9 +134,8 @@ export class ApiClient {
         await this.config.setTokens!({ accessToken, refreshToken: newRefresh });
         return accessToken;
       } catch {
-        // Network error during refresh — don't wipe tokens; let the caller
-        // surface the network-error path. Returning null still falls through
-        // to onUnauthorized though, so distinguish: only wipe on a 4xx above.
+        // Defensive: anything unexpected — don't wipe tokens. Caller will
+        // surface the error path; user can retry.
         return null;
       } finally {
         this._refreshInFlight = null;
@@ -80,11 +146,30 @@ export class ApiClient {
   }
 
   private async request<T>(method: string, path: string, body?: unknown, _retried = false): Promise<T> {
-    const token = this.config.getToken();
+    // Only the PUBLIC auth routes are credential-stripped. Sending stale
+    // Authorization or X-Society-Id / X-ReAuth-Token headers to send-otp /
+    // verify-otp / refresh trips the backend's tenant-switch reauth gate,
+    // returning 400 REAUTH_REQUIRED → infinite refresh loop on the login
+    // page itself. The OTHER /auth/* routes (me, reauth, logout) REQUIRE a
+    // bearer and must NOT be filtered — stripping credentials there turns
+    // a normal dashboard load into a forced sign-out (the very bug we just
+    // fixed: /auth/me fired by SocietySwitcher returned 401 in 0ms with no
+    // bearer, friendlyError hard-redirected to /login).
+    const PUBLIC_AUTH_PATHS = new Set([
+      '/auth/send-otp',
+      '/auth/verify-otp',
+      '/auth/refresh',
+    ]);
+    const isAuthRoute = PUBLIC_AUTH_PATHS.has(path);
+    const token = isAuthRoute ? null : this.config.getToken();
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
     if (token) headers['Authorization'] = `Bearer ${token}`;
+    if (!isAuthRoute) {
+      const extra = this.config.getExtraHeaders?.() ?? {};
+      Object.assign(headers, extra);
+    }
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -107,22 +192,56 @@ export class ApiClient {
       clearTimeout(timeoutId);
     }
 
-    if (res.status === 401) {
-      // Inspect the envelope to decide whether to refresh or hard-logout.
+    // Auth-related failures can land as either 401 (expired/invalid bearer)
+    // OR 400 (e.g. REAUTH_REQUIRED — bearer valid but `iat` too old for a
+    // privileged action). For 4xx with one of the refreshable codes, attempt
+    // a silent refresh + retry once. Pure-401 with no code is treated as
+    // legacy/ambiguous and refresh is also tried.
+    //
+    // BUT: /auth/* routes are the LOGIN flow itself. A 401 there means
+    // "your OTP is wrong" or "your account is suspended" — surface the
+    // server message inline; do NOT fire onUnauthorized (which would
+    // hard-reload /login and lose the entered phone/OTP).
+    if (res.status === 401 || res.status === 400) {
       let code: string | undefined;
+      let serverBody: any;
       try {
-        const serverBody = await res.json();
+        serverBody = await res.json();
         code = serverBody?.error?.code;
       } catch {
         /* not JSON */
       }
 
+      if (isAuthRoute) {
+        // Login-flow 4xx — let the caller render the real error inline.
+        const e: any = new Error(
+          serverBody?.error?.message ?? `Request failed: ${res.status}`,
+        );
+        e.status = res.status;
+        e.body = serverBody;
+        if (code) e.code = code;
+        throw e;
+      }
+
+      // 401 default = try refresh, EXCEPT for known-terminal codes (revoked
+      // user, suspended society, reused refresh, etc.) where refresh cannot
+      // possibly succeed. The generic `UNAUTHORIZED` code emitted by the
+      // backend's exception filter for a passport-rejected bearer falls
+      // through to "refresh" — that is the path a routinely-expired token
+      // takes and the user must NOT be bounced to /login for it.
+      //
+      // 400 only refreshes when the code is explicitly REFRESHABLE — don't
+      // refresh on every random 400.
+      const isAuth4xx =
+        res.status === 401
+          ? !code || !TERMINAL_401_CODES.has(code)
+          : !!code && REFRESHABLE_CODES.has(code);
+
       const canRefresh =
         !_retried &&
         !!this.config.getRefreshToken &&
         !!this.config.setTokens &&
-        // Treat 401 with no code as legacy/ambiguous — try a refresh once.
-        (code === undefined || REFRESHABLE_CODES.has(code));
+        isAuth4xx;
 
       if (canRefresh) {
         const newAccess = await this.tryRefresh();
@@ -132,9 +251,19 @@ export class ApiClient {
         }
       }
 
+      // If this wasn't an auth 4xx, fall through to the generic error path
+      // below so the caller sees the real message (e.g. validation errors).
+      if (res.status === 400 && !isAuth4xx) {
+        const e: any = new Error(serverBody?.error?.message ?? `Request failed: 400`);
+        e.status = 400;
+        e.body = serverBody;
+        if (code) e.code = code;
+        throw e;
+      }
+
       this.config.onUnauthorized?.();
       const e: any = new Error('Your session ended. Please sign in again.');
-      e.status = 401;
+      e.status = res.status;
       if (code) e.code = code;
       throw e;
     }

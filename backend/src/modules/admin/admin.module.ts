@@ -7,9 +7,11 @@ import { ComplianceModule } from '../compliance/compliance.module';
 import { AuditModule } from '../../common/audit/audit.module';
 import { ServiceRequestModule } from '../service-request/service-request.module';
 
+import { SocietySeederService } from '../society/society-seeder.service';
+
 @Module({
   imports: [PrismaModule, NotificationModule, ComplianceModule, AuditModule, ServiceRequestModule],
   controllers: [AdminController],
-  providers: [AdminService],
+  providers: [AdminService, SocietySeederService],
 })
 export class AdminModule {}

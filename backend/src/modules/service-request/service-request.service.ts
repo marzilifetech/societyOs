@@ -566,15 +566,25 @@ export class ServiceRequestService {
         { category: 'SERVICE_REQUEST', data: { serviceRequestId: req.id } },
       );
 
-      for (const staffId of req.assignedToIds) {
-        const staff = await this.prisma.staffMember.findUnique({ where: { id: staffId } });
-        if (staff) {
-          await this.notificationService.notifyUser(
-            staff.userId,
-            'Upcoming service task',
-            `${req.category} at ${req.scheduledTime.toLocaleString('en-IN')}`,
-            { category: 'SERVICE_REQUEST', data: { serviceRequestId: req.id } },
-          );
+      // Batch-load all assignees in one query instead of N findUniques. The
+      // assignees must belong to the same society as the request — the tenant
+      // extension scopes the findMany automatically, but we double-belt with
+      // an explicit societyId filter to be safe.
+      if (req.assignedToIds.length > 0) {
+        const staffMembers = await this.prisma.staffMember.findMany({
+          where: { id: { in: req.assignedToIds }, societyId: req.societyId },
+        });
+        const staffById = new Map(staffMembers.map((s) => [s.id, s]));
+        for (const staffId of req.assignedToIds) {
+          const staff = staffById.get(staffId);
+          if (staff) {
+            await this.notificationService.notifyUser(
+              staff.userId,
+              'Upcoming service task',
+              `${req.category} at ${req.scheduledTime.toLocaleString('en-IN')}`,
+              { category: 'SERVICE_REQUEST', data: { serviceRequestId: req.id } },
+            );
+          }
         }
       }
 

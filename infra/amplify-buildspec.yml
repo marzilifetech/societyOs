@@ -1,0 +1,23 @@
+# AWS Amplify build spec for the admin web app (apps/admin-web).
+# Paste this into the Amplify console → App settings → Build settings, if the
+# monorepo isn't auto-detected. See infra/README.md Step 4.
+version: 1
+applications:
+  - appRoot: apps/admin-web
+    frontend:
+      phases:
+        preBuild:
+          commands:
+            - corepack enable
+            - pnpm install --frozen-lockfile
+        build:
+          commands:
+            - pnpm run build
+      artifacts:
+        baseDirectory: .next
+        files:
+          - '**/*'
+      cache:
+        paths:
+          - .next/cache/**/*
+          - node_modules/**/*

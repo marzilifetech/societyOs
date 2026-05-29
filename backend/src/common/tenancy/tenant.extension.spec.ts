@@ -103,4 +103,74 @@ describe('tenant.extension', () => {
     );
     expect(captured.where.societyId).toBe('soc-2');
   });
+
+  // Regression: 8 models with direct `societyId` were missing from the
+  // DIRECT_TENANT_SCOPED set, allowing a forgotten `where` clause to leak
+  // across tenants. Added 2026-05.
+  describe.each([
+    'ConciergeRequest',
+    'LaundryBooking',
+    'SecurityIncident',
+    'HousekeepingRequest',
+    'PestControlSchedule',
+    'CanteenPreOrder',
+    'Vendor',
+    'VendorOrder',
+  ])('newly tenant-scoped model: %s', (model) => {
+    it('auto-injects societyId on findMany when caller forgets it', async () => {
+      if (!op) return;
+      let captured: any;
+      const query = (a: any) => {
+        captured = a;
+        return Promise.resolve(a);
+      };
+      await withCtx({ societyId: 'soc-1', userId: 'u', role: 'ADMIN' }, async () => {
+        await op({ model, operation: 'findMany', args: { where: {} }, query });
+      });
+      expect(captured.where.societyId).toBe('soc-1');
+    });
+
+    it('rejects mismatched societyId on findMany', async () => {
+      if (!op) return;
+      const query = (a: any) => Promise.resolve(a);
+      await withCtx({ societyId: 'soc-1', userId: 'u', role: 'ADMIN' }, async () => {
+        await expect(
+          op({
+            model,
+            operation: 'findMany',
+            args: { where: { societyId: 'soc-2' } },
+            query,
+          }),
+        ).rejects.toBeInstanceOf(ForbiddenException);
+      });
+    });
+
+    it('stamps societyId on create when missing', async () => {
+      if (!op) return;
+      let captured: any;
+      const query = (a: any) => {
+        captured = a;
+        return Promise.resolve(a);
+      };
+      await withCtx({ societyId: 'soc-1', userId: 'u', role: 'ADMIN' }, async () => {
+        await op({ model, operation: 'create', args: { data: { foo: 'bar' } }, query });
+      });
+      expect(captured.data.societyId).toBe('soc-1');
+    });
+
+    it('rejects cross-tenant create', async () => {
+      if (!op) return;
+      const query = (a: any) => Promise.resolve(a);
+      await withCtx({ societyId: 'soc-1', userId: 'u', role: 'ADMIN' }, async () => {
+        await expect(
+          op({
+            model,
+            operation: 'create',
+            args: { data: { societyId: 'soc-2', foo: 'bar' } },
+            query,
+          }),
+        ).rejects.toBeInstanceOf(ForbiddenException);
+      });
+    });
+  });
 });

@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { requireOwnedById } from '../../common/tenancy/require-owned.util';
 
 @Injectable()
 export class SecurityService {
@@ -26,9 +27,12 @@ export class SecurityService {
     });
   }
 
-  async updateIncident(id: string, dto: { status?: string; resolution?: string }) {
-    const incident = await this.prisma.securityIncident.findUnique({ where: { id } });
-    if (!incident) throw new NotFoundException('Incident not found');
+  async updateIncident(id: string, societyId: string, dto: { status?: string; resolution?: string }) {
+    await requireOwnedById(
+      () => this.prisma.securityIncident.findUnique({ where: { id } }),
+      societyId,
+      'Incident',
+    );
     return this.prisma.securityIncident.update({
       where: { id },
       data: {
@@ -48,9 +52,12 @@ export class SecurityService {
     });
   }
 
-  async completeRound(roundId: string, staffUserId: string, notes?: string) {
-    const round = await this.prisma.securityRound.findUnique({ where: { id: roundId } });
-    if (!round) throw new NotFoundException('Round not found');
+  async completeRound(roundId: string, societyId: string, staffUserId: string, notes?: string) {
+    const round = await requireOwnedById(
+      () => this.prisma.securityRound.findUnique({ where: { id: roundId } }),
+      societyId,
+      'Round',
+    );
     const completedAt = new Date();
     const durationMin = Math.round((completedAt.getTime() - round.startedAt.getTime()) / 60000);
     return this.prisma.securityRound.update({

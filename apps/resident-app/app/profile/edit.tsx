@@ -63,6 +63,9 @@ export default function EditProfileScreen() {
             onChangeText={setName}
             placeholder="Your name"
             placeholderTextColor="#9CA3AF"
+            textContentType="name"
+            autoComplete="name"
+            autoCapitalize="words"
             className="bg-gray-100 border border-gray-200 rounded-xl px-4 text-base text-gray-900 mb-5"
             style={{ minHeight: 52, paddingVertical: 14 }}
           />
@@ -75,6 +78,11 @@ export default function EditProfileScreen() {
             placeholderTextColor="#9CA3AF"
             keyboardType="email-address"
             autoCapitalize="none"
+            autoCorrect={false}
+            // textContentType + autoComplete prevent iOS/Android from
+            // autofilling the user's phone here.
+            textContentType="emailAddress"
+            autoComplete="email"
             className="bg-gray-100 border border-gray-200 rounded-xl px-4 text-base text-gray-900 mb-5"
             style={{ minHeight: 52, paddingVertical: 14 }}
           />

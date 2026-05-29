@@ -26,6 +26,7 @@ const DOCUMENT_TYPES = [
   'DRIVING_LICENSE',
   'VOTER_ID',
   'POLICE_VERIFICATION',
+  'INSURANCE',
   'OFFER_LETTER',
   'OTHER',
 ];
@@ -88,6 +89,8 @@ export default function StaffDetailPage() {
   // Family state
   const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
   const [familyEdited, setFamilyEdited] = useState(false);
+  const [emergencyContact, setEmergencyContact] = useState({ name: '', phone: '', relation: '' });
+  const [ecEdited, setEcEdited] = useState(false);
 
   const { data: staff, isLoading, isError, refetch } = useQuery({
     queryKey: ['staff-detail', staffId],
@@ -119,6 +122,13 @@ export default function StaffDetailPage() {
       setFamilyMembers(staff.familyDetails as FamilyMember[]);
     }
     setFamilyEdited(false);
+    const ec = (staff as any).emergencyContact;
+    setEmergencyContact({
+      name: ec?.name ?? '',
+      phone: ec?.phone ?? '',
+      relation: ec?.relation ?? '',
+    });
+    setEcEdited(false);
   }, [staff]);
 
   const { data: documents } = useQuery({
@@ -212,6 +222,43 @@ export default function StaffDetailPage() {
     },
     onError: (err: Error) => toast.error(err.message),
   });
+
+
+  const updateEmergencyContactMutation = useMutation({
+    mutationFn: () =>
+      api.patch(`/admin/staff/${staffId}`, {
+        emergencyContact: emergencyContact.name || emergencyContact.phone
+          ? emergencyContact
+          : null,
+      }),
+    onSuccess: () => {
+      setEcEdited(false);
+      qc.invalidateQueries({ queryKey: ['staff-detail', staffId] });
+      toast.success('Emergency contact saved');
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const deleteDocMutation = useMutation({
+    mutationFn: (docId: string) => api.delete(`/admin/staff/${staffId}/documents/${docId}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['staff-documents', staffId] });
+      toast.success('Document deleted');
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const verifyDocMutation = useMutation({
+    // Use /review (alias of /verify) — see backend admin.controller.ts comment.
+    // Brave + EasyList block URLs with "verify" as a tracking-pixel false-positive.
+    mutationFn: (docId: string) => api.patch(`/admin/staff/${staffId}/documents/${docId}/review`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['staff-documents', staffId] });
+      toast.success('Document verified');
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
 
   const uploadDocMutation = useMutation({
     mutationFn: async () => {
@@ -438,6 +485,39 @@ export default function StaffDetailPage() {
             </button>
           </div>
 
+
+          <div className="bg-white rounded-2xl border border-gray-100 p-5 mb-4">
+            <h2 className="font-semibold text-gray-900 mb-3">Emergency Contact</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <input
+                placeholder="Name"
+                value={emergencyContact.name}
+                onChange={(e) => { setEmergencyContact((c) => ({ ...c, name: e.target.value })); setEcEdited(true); }}
+                className="border border-gray-200 rounded-xl px-3 py-2 text-sm"
+              />
+              <input
+                placeholder="Phone"
+                value={emergencyContact.phone}
+                onChange={(e) => { setEmergencyContact((c) => ({ ...c, phone: e.target.value })); setEcEdited(true); }}
+                className="border border-gray-200 rounded-xl px-3 py-2 text-sm"
+              />
+              <input
+                placeholder="Relation"
+                value={emergencyContact.relation}
+                onChange={(e) => { setEmergencyContact((c) => ({ ...c, relation: e.target.value })); setEcEdited(true); }}
+                className="border border-gray-200 rounded-xl px-3 py-2 text-sm"
+              />
+            </div>
+            <button
+              onClick={() => updateEmergencyContactMutation.mutate()}
+              disabled={!ecEdited || updateEmergencyContactMutation.isPending}
+              className="mt-3 px-4 py-2 bg-primary-500 text-white rounded-xl text-sm font-semibold disabled:opacity-50"
+            >
+              Save Emergency Contact
+            </button>
+          </div>
+
+
           <Link
             href={`/staff/${staffId}/attendance`}
             className="w-full py-3 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-left px-4 flex items-center gap-2.5 text-sm text-gray-700 transition-colors"
@@ -531,24 +611,35 @@ export default function StaffDetailPage() {
             <div className="space-y-3">
               {documents.map((doc: any, i: number) => (
                 <div key={doc.id ?? i} className="flex items-center justify-between py-2.5 border-b border-gray-50 last:border-0">
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 flex-wrap">
                     <span className="text-xs bg-indigo-100 text-indigo-700 px-2.5 py-1 rounded-full font-medium">
                       {(doc.documentType ?? doc.type ?? '').replace('_', ' ')}
                     </span>
+                    {doc.verifiedAt && (
+                      <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Verified</span>
+                    )}
                     {doc.uploadedAt && (
                       <span className="text-xs text-gray-400">{new Date(doc.uploadedAt).toLocaleDateString('en-IN')}</span>
                     )}
                   </div>
-                  {(doc.fileUrl ?? doc.url) && (
-                    <a
-                      href={doc.fileUrl ?? doc.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs text-primary-500 hover:underline"
-                    >
-                      View
-                    </a>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {(doc.fileUrl ?? doc.url) && (
+                      <a
+                        href={doc.fileUrl ?? doc.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-primary-500 hover:underline"
+                      >
+                        View
+                      </a>
+                    )}
+                    {doc.id && !doc.verifiedAt && (
+                      <button onClick={() => verifyDocMutation.mutate(doc.id)} className="text-xs text-green-600">Verify</button>
+                    )}
+                    {doc.id && (
+                      <button onClick={() => deleteDocMutation.mutate(doc.id)} className="text-xs text-red-600">Delete</button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>

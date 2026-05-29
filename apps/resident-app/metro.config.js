@@ -1,10 +1,11 @@
 const path = require('path');
-const fs = require('fs');
 const { getDefaultConfig } = require('expo/metro-config');
 const { withNativeWind } = require('nativewind/metro');
 
 const projectRoot = __dirname;
 const workspaceRoot = path.resolve(projectRoot, '../..');
+const appNodeModules = path.resolve(projectRoot, 'node_modules');
+const rootNodeModules = path.resolve(workspaceRoot, 'node_modules');
 const base = getDefaultConfig(projectRoot);
 
 const config = withNativeWind(base, { input: './app/global.css' });
@@ -14,24 +15,22 @@ const config = withNativeWind(base, { input: './app/global.css' });
 config.watchFolders = [
   projectRoot,
   path.resolve(workspaceRoot, 'packages'),
-  path.resolve(workspaceRoot, 'node_modules'),
+  rootNodeModules,
 ];
 
-// Force react / react-native to always resolve from this app's node_modules,
-// preventing duplicate instances when workspace packages (e.g. @societyos/ui)
-// have their own peer-dep copy installed by pnpm.
-const appNodeModules = path.resolve(projectRoot, 'node_modules');
-config.resolver.nodeModulesPaths = [appNodeModules];
+// .npmrc uses `node-linker=hoisted`, so dependencies are flattened into the
+// monorepo-root node_modules (this app's own node_modules holds only the
+// @societyos/* workspace symlinks). Resolve from the app's node_modules first,
+// then fall back to the hoisted root.
+config.resolver.nodeModulesPaths = [appNodeModules, rootNodeModules];
 
-// expo-asset lives as a peer of expo in the pnpm virtual store (not hoisted).
-// Resolve expo's real path via symlink, then find expo-asset as a sibling.
-const expoAssetPath = path.resolve(fs.realpathSync(path.resolve(appNodeModules, 'expo')), '..', 'expo-asset');
-
+// Hoisting yields a single flat copy of each package, but pin react /
+// react-native to the root copy so workspace packages can never bundle a
+// duplicate React instance.
 config.resolver.extraNodeModules = {
   ...config.resolver.extraNodeModules,
-  react: path.resolve(appNodeModules, 'react'),
-  'react-native': path.resolve(appNodeModules, 'react-native'),
-  'expo-asset': expoAssetPath,
+  react: path.resolve(rootNodeModules, 'react'),
+  'react-native': path.resolve(rootNodeModules, 'react-native'),
 };
 
 module.exports = config;

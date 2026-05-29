@@ -49,6 +49,18 @@ const DIRECT_TENANT_SCOPED = new Set<string>([
   'SecurityRound',
   'SocietyBudget',
   'HelpRequest',
+  // Models added 2026-05 to close cross-tenant leakage risk: each has a
+  // direct `societyId` column and a `Society` relation but was missing
+  // from this list. Without auto-scoping, a forgotten `where` clause
+  // would return rows across societies.
+  'ConciergeRequest',
+  'LaundryBooking',
+  'SecurityIncident',
+  'HousekeepingRequest',
+  'PestControlSchedule',
+  'CanteenPreOrder',
+  'Vendor',
+  'VendorOrder',
   // NOTE: `Resident` is intentionally NOT here. The schema scopes Resident
   // indirectly via `user.societyId` / `flat.societyId` — there is no direct
   // `societyId` column. Callers must hand-roll scope (e.g. `where.user.societyId`).

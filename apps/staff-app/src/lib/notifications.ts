@@ -27,15 +27,46 @@ export async function registerForPushNotifications(): Promise<string | null> {
     const { status: existing } = await Notifications.getPermissionsAsync();
     let final = existing;
     if (existing !== 'granted') {
-      const req = await Notifications.requestPermissionsAsync();
+      // Critical-alerts entitlement (iOS) requires Apple approval against the
+      // bundle ID. The request below is harmless without it — iOS just falls
+      // back to the standard alert/sound/badge permissions.
+      const req = await Notifications.requestPermissionsAsync({
+        ios: {
+          allowAlert: true,
+          allowBadge: true,
+          allowSound: true,
+          allowCriticalAlerts: true,
+          allowProvisional: false,
+        },
+      });
       final = req.status;
     }
     if (final !== 'granted') return null;
 
     if (Platform.OS === 'android') {
+      // Default channel — bumped to HIGH + PUBLIC so routine notifications
+      // surface on the lock screen with full content instead of "hidden".
       await Notifications.setNotificationChannelAsync('default', {
         name: 'default',
-        importance: Notifications.AndroidImportance.DEFAULT,
+        importance: Notifications.AndroidImportance.HIGH,
+        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+        vibrationPattern: [0, 250, 250, 250],
+      });
+      // SOS / emergency channel — MAX importance, full lockscreen visibility,
+      // distinct vibration + lights so on-call staff notice even in noisy
+      // notification environments. We deliberately do NOT set bypassDnd=true:
+      // that requires ACCESS_NOTIFICATION_POLICY plus an explicit user-side
+      // grant in DND settings, and silently no-ops otherwise. Backend push
+      // payload should target channel_id="sos" for emergency alerts to land
+      // here (TODO: wire in push.service.ts).
+      await Notifications.setNotificationChannelAsync('sos', {
+        name: 'Emergency Alerts',
+        importance: Notifications.AndroidImportance.MAX,
+        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+        sound: 'default',
+        vibrationPattern: [0, 500, 250, 500],
+        enableVibrate: true,
+        enableLights: true,
       });
     }
 

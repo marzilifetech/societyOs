@@ -1,12 +1,16 @@
 import { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Switch, Image } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ScrollView, Alert, Switch, Image } from 'react-native';
 import { router } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
 import { useTheme } from '../../src/hooks/useTheme';
+import { ScreenHeader, BottomActionBar } from '../../src/components/ui';
+
+// Public Figma reference (Complaint Management frame): node-id=87-6666
+// Behaviour-preserving redesign — same /complaints + /upload/presign calls;
+// new ScreenHeader + BottomActionBar primitives.
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
 
@@ -86,20 +90,10 @@ export default function NewComplaintScreen() {
     category.length > 0 && title.trim().length >= 5 && description.trim().length >= 20;
 
   return (
-    <SafeAreaView className="flex-1 bg-white">
+    <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+      <ScreenHeader title="File a Complaint" subtitle="We'll review and respond within 48 hours" />
       <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-        <View className="px-6 pt-4 pb-3">
-          <TouchableOpacity
-            onPress={() => router.back()}
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-            className="flex-row items-center mb-4 -ml-1"
-          >
-            <Ionicons name="chevron-back" size={24} color="#821A52" />
-            <Text className="text-primary-500" style={{ fontSize: t.fontBase }}>Back</Text>
-          </TouchableOpacity>
-          <Text className="text-2xl font-bold text-gray-900 mb-1">File a Complaint</Text>
-          <Text className="text-gray-500 mb-6" style={{ fontSize: t.fontBase }}>We'll review and respond within 48 hours</Text>
+        <View className="px-6 pt-2 pb-3">
 
           {/* Category */}
           <Text className="font-medium text-gray-700 mb-3" style={{ fontSize: t.fontSm }}>Category *</Text>
@@ -213,24 +207,18 @@ export default function NewComplaintScreen() {
             </View>
           )}
 
-          <TouchableOpacity
-            className={`rounded-2xl py-4 items-center mt-6 mb-4 ${isValid ? 'bg-primary-500' : 'bg-gray-200'}`}
-            onPress={() => mutation.mutate()}
-            disabled={!isValid || mutation.isPending}
-            style={{ minHeight: t.touchTarget }}
-            accessibilityRole="button"
-            accessibilityLabel="Submit complaint"
-          >
-            {mutation.isPending ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text className={`font-semibold ${isValid ? 'text-white' : 'text-gray-400'}`} style={{ fontSize: t.fontBase }}>
-                Submit Complaint
-              </Text>
-            )}
-          </TouchableOpacity>
         </View>
       </ScrollView>
-    </SafeAreaView>
+
+      <BottomActionBar
+        primary={{
+          label: mutation.isPending ? (uploading ? 'Uploading photo…' : 'Submitting…') : 'Submit Complaint',
+          onPress: () => mutation.mutate(),
+          loading: mutation.isPending,
+          disabled: !isValid || mutation.isPending || uploading,
+          accessibilityLabel: 'Submit complaint',
+        }}
+      />
+    </View>
   );
 }

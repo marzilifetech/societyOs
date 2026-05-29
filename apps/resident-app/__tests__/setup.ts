@@ -15,7 +15,18 @@ jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
 );
 
-jest.mock('expo-haptics', () => ({ notificationAsync: jest.fn(), impactAsync: jest.fn() }));
+jest.mock('expo-haptics', () => ({
+  notificationAsync: jest.fn(),
+  impactAsync: jest.fn(),
+  ImpactFeedbackStyle: { Light: 'Light', Medium: 'Medium', Heavy: 'Heavy' },
+  NotificationFeedbackType: { Success: 'Success', Warning: 'Warning', Error: 'Error' },
+}));
+
+jest.mock('expo-location', () => ({
+  requestForegroundPermissionsAsync: jest.fn().mockResolvedValue({ status: 'denied' }),
+  getCurrentPositionAsync: jest.fn().mockResolvedValue({ coords: { latitude: 0, longitude: 0 } }),
+  Accuracy: { High: 6 },
+}));
 jest.mock('expo-notifications', () => ({
   getPermissionsAsync: jest.fn().mockResolvedValue({ status: 'granted' }),
   requestPermissionsAsync: jest.fn().mockResolvedValue({ status: 'granted' }),
@@ -27,3 +38,20 @@ jest.mock('@tanstack/react-query', () => ({
   QueryClient: jest.fn(),
   QueryClientProvider: ({ children }: any) => children,
 }));
+
+// Vector icons rely on expo-font which needs native registration we don't have
+// in jest-expo's default setup. Render each icon as a plain host component so
+// snapshots & accessibility queries continue to work.
+jest.mock('@expo/vector-icons', () => {
+  const passthroughIcon = 'Icon';
+  return new Proxy(
+    { __esModule: true },
+    {
+      get: (target, prop) => {
+        if (prop === '__esModule') return true;
+        // any glyph-set component (Ionicons, MaterialIcons, …)
+        return passthroughIcon;
+      },
+    },
+  );
+});

@@ -4,6 +4,7 @@ import { RealtimeGateway } from '../../common/realtime/realtime.gateway';
 import { PushService } from '../../common/notification/push.service';
 import { WhatsAppService } from '../../common/notification/whatsapp.service';
 import { requireResidentByUserId } from '../../common/utils/resident-context';
+import { requireOwnedById } from '../../common/tenancy/require-owned.util';
 import { BroadcastDto, UpdateNoticeDto } from './dto/notice.dto';
 
 @Injectable()
@@ -15,10 +16,18 @@ export class NoticeService {
     private whatsapp: WhatsAppService,
   ) {}
 
-  async getNotices(societyId: string) {
+  async getNotices(
+    societyId: string,
+    opts?: { onlyPinned?: boolean; limit?: number },
+  ) {
     return this.prisma.notice.findMany({
-      where: { societyId, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
-      orderBy: [{ isPinned: 'desc' }, { publishedAt: 'desc' }],
+      where: {
+        societyId,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+        ...(opts?.onlyPinned ? { isPinned: true } : {}),
+      },
+      orderBy: [{ isPinned: 'desc' }, { publishedAt: 'desc' }, { createdAt: 'desc' }],
+      ...(opts?.limit ? { take: opts.limit } : {}),
     });
   }
 
@@ -190,6 +199,23 @@ export class NoticeService {
     });
   }
 
+  /**
+   * Explicit pin (always sets isPinned=true). Symmetric with unpinNotice
+   * (which sets false). The earlier `togglePin` flipped state on each call,
+   * which is racy when two admins click simultaneously: both see "unpinned"
+   * → both toggle to "pinned" → second click silently no-ops. Explicit
+   * set-true / set-false keeps the result deterministic regardless of order.
+   */
+  async pinNotice(id: string, societyId: string) {
+    const notice = await this.prisma.notice.findUnique({ where: { id } });
+    if (!notice) throw new NotFoundException('Notice not found');
+    if (notice.societyId !== societyId) throw new ForbiddenException('Notice belongs to another society');
+    return this.prisma.notice.update({
+      where: { id },
+      data: { isPinned: true },
+    });
+  }
+
   // ── Admin methods ────────────────────────────────────────────────────────────
 
   async createPoll(
@@ -221,7 +247,12 @@ export class NoticeService {
     }));
   }
 
-  async closePoll(pollId: string) {
+  async closePoll(pollId: string, societyId: string) {
+    await requireOwnedById(
+      () => this.prisma.poll.findUnique({ where: { id: pollId } }),
+      societyId,
+      'Poll',
+    );
     return this.prisma.poll.update({ where: { id: pollId }, data: { deadline: new Date() } });
   }
 
@@ -235,11 +266,21 @@ export class NoticeService {
     });
   }
 
-  async approvePropertyListing(id: string) {
+  async approvePropertyListing(id: string, societyId: string) {
+    await requireOwnedById(
+      () => this.prisma.propertyListing.findUnique({ where: { id } }),
+      societyId,
+      'Property listing',
+    );
     return this.prisma.propertyListing.update({ where: { id }, data: { status: 'ACTIVE' } });
   }
 
-  async rejectPropertyListing(id: string, reason?: string) {
+  async rejectPropertyListing(id: string, societyId: string, reason?: string) {
+    await requireOwnedById(
+      () => this.prisma.propertyListing.findUnique({ where: { id } }),
+      societyId,
+      'Property listing',
+    );
     return this.prisma.propertyListing.update({
       where: { id },
       data: { status: 'WITHDRAWN', ...(reason ? { description: reason } : {}) },

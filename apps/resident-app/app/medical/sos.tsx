@@ -1,5 +1,15 @@
-import { useState, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, Alert, Vibration, TextInput, KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator } from 'react-native';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  Alert,
+  Vibration,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+} from 'react-native';
 import { unwrapApiEnvelope } from '@societyos/api-client';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -12,19 +22,24 @@ import Animated, {
   withTiming,
   Easing,
 } from 'react-native-reanimated';
-// Socket type is `any` here because pnpm symlink + preserveSymlinks confuses
-// the lookup of socket.io-client's nested type imports. Runtime is fine.
 import { io } from 'socket.io-client';
 import { Ionicons } from '@expo/vector-icons';
-type Socket = any;
+type Socket = any; // socket.io-client deep type import is finicky under pnpm
+
 import { api } from '../../src/lib/api';
 import { useAuthStore } from '../../src/store/auth.store';
 import { useTheme } from '../../src/hooks/useTheme';
 import { useAccessibilityStore } from '../../src/store/accessibility.store';
-import { ThemedButton } from '../../src/components/ui/ThemedButton';
+import {
+  ThemedButton,
+  ScreenHeader,
+  BottomActionBar,
+  StatusChip,
+  type StatusTone,
+} from '../../src/components/ui';
+import { ErrorBoundary } from '../../src/components/ErrorBoundary';
 
 let socket: Socket | null = null;
-
 function getSocket(): Socket {
   if (!socket) {
     const API_BASE = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
@@ -36,7 +51,24 @@ function getSocket(): Socket {
   return socket;
 }
 
+// Public Figma reference (Medical SOS frame): node-id=22-1418
+// Behaviour-preserving redesign — same API calls, same hooks, new UI primitives
+// (ScreenHeader / StatusChip / BottomActionBar) + red→green visual progression
+// when acknowledged.
+//
+// Deferred (Figma frames not yet implemented as separate screens):
+//   • Dedicated cancel-confirmation modal (Figma "Cancel SOS Alert" flow)
+//   • SOS history screen at /medical/sos/history (Figma "View SOS Alert History")
+
 export default function SosScreen() {
+  return (
+    <ErrorBoundary>
+      <SosScreenInner />
+    </ErrorBoundary>
+  );
+}
+
+function SosScreenInner() {
   const [phase, setPhase] = useState<'confirm' | 'active'>('confirm');
   const [alertId, setAlertId] = useState<string | null>(null);
   const [acknowledged, setAcknowledged] = useState(false);
@@ -45,35 +77,39 @@ export default function SosScreen() {
   const [sosSubmitting, setSosSubmitting] = useState(false);
   const sendingSosRef = useRef(false);
 
-  // pulse ring for active phase
   const ring = useSharedValue(1);
-  // ambient glow pulse
   const glowOpacity = useSharedValue(0.18);
 
   const t = useTheme();
   const seniorMode = useAccessibilityStore((s) => s.seniorMode);
 
-  // SOS button dimensions scale with mode
   const sosCircle = seniorMode ? 240 : 200;
   const sosRadius = sosCircle / 2;
   const ringSize = sosCircle + 60;
+
+  // Derived status drives the visual treatment.
+  type Status = 'idle' | 'pending' | 'dispatched';
+  const status: Status =
+    phase === 'confirm' ? 'idle' : acknowledged ? 'dispatched' : 'pending';
+
+  const isDispatched = status === 'dispatched';
+  const accent = isDispatched ? t.accentSuccess : t.accentEmergency;
+  const accentGlow = isDispatched ? 'rgba(22,163,74,0.35)' : t.glowEmergency;
 
   const ringStyle = useAnimatedStyle(() => ({
     transform: [{ scale: ring.value }],
     opacity: 2 - ring.value,
   }));
-
-  const glowStyle = useAnimatedStyle(() => ({
-    opacity: glowOpacity.value,
-  }));
+  const glowStyle = useAnimatedStyle(() => ({ opacity: glowOpacity.value }));
 
   useEffect(() => {
-    // Subtle ambient red glow pulsing on the background
     glowOpacity.value = withRepeat(
       withTiming(0.32, { duration: 2000, easing: Easing.inOut(Easing.ease) }),
       -1,
       true,
     );
+    // safe to skip deps — sharedvalues are stable refs
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const cancelDuringConfirm = () => {
@@ -89,16 +125,14 @@ export default function SosScreen() {
     Vibration.vibrate([0, 200, 100, 200]);
 
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
+      const { status: permStatus } = await Location.requestForegroundPermissionsAsync();
       let lat: number | undefined;
       let lng: number | undefined;
-
-      if (status === 'granted') {
+      if (permStatus === 'granted') {
         const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
         lat = loc.coords.latitude;
         lng = loc.coords.longitude;
       }
-
       const raw = await api.post<object>('/sos/trigger', { lat, lng });
       const alert = unwrapApiEnvelope<{ id: string }>(raw);
       setAlertId(alert.id);
@@ -161,51 +195,80 @@ export default function SosScreen() {
   }, []);
 
   useEffect(() => {
-    if (phase === 'active' && alertId) {
-      const s = getSocket();
-      const token = useAuthStore.getState().token;
-      if (token) {
-        s.auth = { token };
-        s.connect();
-        s.on(`sos:${alertId}:acknowledged`, () => {
-          setAcknowledged(true);
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        });
-      }
-      return () => {
-        s.off(`sos:${alertId}:acknowledged`);
-      };
-    }
+    if (phase !== 'active' || !alertId) return;
+    const s = getSocket();
+    const token = useAuthStore.getState().token;
+    if (!token) return;
+    s.auth = { token };
+    s.connect();
+    const onAck = () => {
+      setAcknowledged(true);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    };
+    s.on(`sos:${alertId}:acknowledged`, onAck);
+    return () => s.off(`sos:${alertId}:acknowledged`, onAck);
   }, [phase, alertId]);
 
-  // --- Confirm phase ---
+  const statusChip = useMemo(() => {
+    const tone: StatusTone =
+      status === 'idle' ? 'danger' : status === 'pending' ? 'warning' : 'success';
+    const label =
+      status === 'idle' ? 'Emergency' : status === 'pending' ? 'Sending alert' : 'Help dispatched';
+    const icon =
+      status === 'idle'
+        ? 'warning'
+        : status === 'pending'
+        ? 'time'
+        : 'shield-checkmark';
+    return <StatusChip label={label} tone={tone} icon={icon} size="sm" />;
+  }, [status]);
+
+  // ---------- Confirm phase ----------
   if (phase === 'confirm') {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: t.bgPrimary }}>
+      <View style={{ flex: 1, backgroundColor: t.bgPrimary }}>
         <Animated.View
           pointerEvents="none"
           style={[
-            {
-              position: 'absolute',
-              top: 0, bottom: 0, left: 0, right: 0,
-              backgroundColor: t.accentEmergency,
-            },
+            { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, backgroundColor: t.accentEmergency },
             glowStyle,
           ]}
         />
+        <ScreenHeader
+          title="Medical SOS"
+          subtitle="Tap to alert security & medical staff"
+          variant="transparent"
+          trailing={statusChip}
+        />
 
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: t.screenPadding }}>
-          <View style={{ alignItems: 'center', justifyContent: 'center', marginBottom: 40, width: ringSize, height: ringSize }}>
-            <View style={{
-              position: 'absolute',
+        <View
+          style={{
+            flex: 1,
+            alignItems: 'center',
+            justifyContent: 'center',
+            paddingHorizontal: t.screenPadding,
+          }}
+        >
+          <View
+            style={{
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: 40,
               width: ringSize,
               height: ringSize,
-              borderRadius: ringSize / 2,
-              backgroundColor: `${t.accentEmergency}22`,
-              borderWidth: 1,
-              borderColor: `${t.accentEmergency}44`,
-            }} />
-
+            }}
+          >
+            <View
+              style={{
+                position: 'absolute',
+                width: ringSize,
+                height: ringSize,
+                borderRadius: ringSize / 2,
+                backgroundColor: `${t.accentEmergency}22`,
+                borderWidth: 1,
+                borderColor: `${t.accentEmergency}44`,
+              }}
+            />
             <TouchableOpacity
               onPress={triggerSos}
               disabled={sosSubmitting}
@@ -226,71 +289,97 @@ export default function SosScreen() {
               }}
             >
               {sosSubmitting ? (
-                <Text style={{ fontSize: t.font4xl, fontWeight: '800', color: '#FFFFFF', letterSpacing: 2 }}>…</Text>
+                <Text
+                  style={{
+                    fontSize: t.font4xl,
+                    fontWeight: '800',
+                    color: '#FFFFFF',
+                    letterSpacing: 2,
+                  }}
+                >
+                  …
+                </Text>
               ) : (
                 <View style={{ alignItems: 'center', justifyContent: 'center' }}>
                   <Ionicons name="warning" size={64} color="#FFFFFF" />
-                  <Text style={{ fontSize: t.fontXl, fontWeight: '800', color: '#FFFFFF', letterSpacing: 2, marginTop: 4 }}>SOS</Text>
+                  <Text
+                    style={{
+                      fontSize: t.fontXl,
+                      fontWeight: '800',
+                      color: '#FFFFFF',
+                      letterSpacing: 2,
+                      marginTop: 4,
+                    }}
+                  >
+                    SOS
+                  </Text>
                 </View>
               )}
             </TouchableOpacity>
           </View>
 
-          <Text style={{
-            color: '#FFFFFF',
-            fontSize: t.font2xl,
-            fontWeight: '700',
-            textAlign: 'center',
-            marginBottom: 10,
-          }}>
+          <Text
+            style={{
+              color: '#FFFFFF',
+              fontSize: t.font2xl,
+              fontWeight: '700',
+              textAlign: 'center',
+              marginBottom: 10,
+            }}
+          >
             Medical Emergency?
           </Text>
-          <Text style={{
-            color: 'rgba(255,200,200,0.9)',
-            fontSize: t.fontBase,
-            lineHeight: t.fontBase * t.lineHeightRelaxed,
-            textAlign: 'center',
-            marginBottom: 40,
-            paddingHorizontal: 8,
-          }}>
-            Tap SOS to alert security immediately. Your location is shared when you allow it. You can add a note on the next screen.
+          <Text
+            style={{
+              color: 'rgba(255,200,200,0.9)',
+              fontSize: t.fontBase,
+              lineHeight: t.fontBase * t.lineHeightRelaxed,
+              textAlign: 'center',
+              paddingHorizontal: 8,
+            }}
+          >
+            Tap SOS to alert security immediately. Your location is shared when you allow it.
+            You can add a note on the next screen.
           </Text>
-
-          <View style={{ width: '100%', gap: 12 }}>
-            <ThemedButton
-              label={sosSubmitting ? 'Sending…' : 'Yes, Send SOS Now'}
-              onPress={triggerSos}
-              variant="danger"
-              size="lg"
-              disabled={sosSubmitting}
-              accessibilityLabel="Emergency SOS. Sends alert and location now."
-            />
-            <ThemedButton
-              label="Cancel"
-              onPress={cancelDuringConfirm}
-              variant="ghost"
-              size="md"
-              accessibilityLabel="Cancel - go back without sending SOS"
-            />
-          </View>
         </View>
-      </SafeAreaView>
+
+        <BottomActionBar
+          primary={{
+            label: sosSubmitting ? 'Sending…' : 'Yes, Send SOS Now',
+            onPress: triggerSos,
+            variant: 'danger',
+            loading: sosSubmitting,
+            disabled: sosSubmitting,
+            accessibilityLabel: 'Emergency SOS. Sends alert and location now.',
+          }}
+          secondary={{
+            label: 'Cancel',
+            onPress: cancelDuringConfirm,
+            variant: 'ghost',
+            accessibilityLabel: 'Cancel - go back without sending SOS',
+          }}
+        />
+      </View>
     );
   }
 
-  // --- Active phase ---
+  // ---------- Active phase ----------
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: t.bgPrimary }}>
+    <View style={{ flex: 1, backgroundColor: t.bgPrimary }}>
       <Animated.View
         pointerEvents="none"
         style={[
-          {
-            position: 'absolute',
-            inset: 0,
-            backgroundColor: t.accentEmergency,
-          },
+          { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, backgroundColor: accent },
           glowStyle,
         ]}
+      />
+
+      <ScreenHeader
+        title={isDispatched ? 'Help on the way' : 'Alert sent'}
+        subtitle={isDispatched ? 'Stay calm — assistance has been dispatched' : 'Waiting for security to acknowledge'}
+        variant="transparent"
+        trailing={statusChip}
+        onBack={null}
       />
 
       <KeyboardAvoidingView
@@ -302,166 +391,182 @@ export default function SosScreen() {
           contentContainerStyle={{
             flexGrow: 1,
             alignItems: 'center',
-            justifyContent: 'center',
             paddingHorizontal: t.screenPadding,
             paddingVertical: 24,
           }}
           keyboardShouldPersistTaps="handled"
         >
-        {/* Pulsing ring + circle */}
-        <View style={{
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: ringSize,
-          height: ringSize,
-          marginBottom: 32,
-        }}>
-          <Animated.View
-            style={[
-              {
-                position: 'absolute',
-                width: ringSize,
-                height: ringSize,
-                borderRadius: ringSize / 2,
-                backgroundColor: `${t.accentEmergency}55`,
-              },
-              ringStyle,
-            ]}
+          {/* Pulsing ring + circle */}
+          <View
+            style={{
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: ringSize,
+              height: ringSize,
+              marginBottom: 24,
+              marginTop: 8,
+            }}
+          >
+            <Animated.View
+              style={[
+                {
+                  position: 'absolute',
+                  width: ringSize,
+                  height: ringSize,
+                  borderRadius: ringSize / 2,
+                  backgroundColor: isDispatched ? 'rgba(22,163,74,0.30)' : `${t.accentEmergency}55`,
+                },
+                ringStyle,
+              ]}
+            />
+            <View
+              style={{
+                width: sosCircle,
+                height: sosCircle,
+                borderRadius: sosRadius,
+                backgroundColor: accent,
+                alignItems: 'center',
+                justifyContent: 'center',
+                shadowColor: accentGlow,
+                shadowOffset: { width: 0, height: 8 },
+                shadowOpacity: 1,
+                shadowRadius: 32,
+                elevation: 20,
+              }}
+            >
+              <Ionicons
+                name={isDispatched ? 'shield-checkmark' : 'warning'}
+                size={64}
+                color="#FFFFFF"
+              />
+              <Text
+                style={{
+                  fontSize: t.fontXl,
+                  fontWeight: '800',
+                  color: '#FFFFFF',
+                  letterSpacing: 2,
+                  marginTop: 4,
+                }}
+              >
+                {isDispatched ? 'OK' : 'SOS'}
+              </Text>
+            </View>
+          </View>
+
+          {/* Acknowledgement banner — only shown when dispatched */}
+          {isDispatched ? (
+            <View
+              style={{
+                backgroundColor: 'rgba(74,222,128,0.2)',
+                borderRadius: t.radiusMd,
+                borderWidth: 1,
+                borderColor: 'rgba(74,222,128,0.5)',
+                paddingHorizontal: 20,
+                paddingVertical: 12,
+                marginBottom: 16,
+                width: '100%',
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+              }}
+            >
+              <Ionicons name="checkmark-circle" size={20} color={t.accentSuccess} />
+              <Text style={{ color: '#FFFFFF', fontSize: t.fontBase, fontWeight: '600' }}>
+                Help is on the way!
+              </Text>
+            </View>
+          ) : null}
+
+          {/* Info strip */}
+          <View
+            style={{
+              backgroundColor: isDispatched ? 'rgba(22,163,74,0.18)' : 'rgba(255,59,48,0.2)',
+              borderRadius: t.radiusMd,
+              borderWidth: 1,
+              borderColor: isDispatched ? 'rgba(22,163,74,0.35)' : 'rgba(255,59,48,0.35)',
+              paddingHorizontal: 16,
+              paddingVertical: 12,
+              marginBottom: 24,
+              width: '100%',
+            }}
+          >
+            <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: t.fontSm, textAlign: 'center' }}>
+              Your location has been shared
+            </Text>
+            <Text
+              style={{
+                color: '#FFFFFF',
+                fontSize: t.fontSm,
+                fontWeight: '600',
+                textAlign: 'center',
+                marginTop: 4,
+              }}
+            >
+              Emergency: Call 112 if no response in 3 minutes
+            </Text>
+          </View>
+
+          {/* Optional follow-up note */}
+          <Text
+            style={{
+              alignSelf: 'stretch',
+              color: 'rgba(255,255,255,0.95)',
+              fontSize: t.fontSm,
+              fontWeight: '600',
+              marginBottom: 8,
+            }}
+          >
+            Add details for security (optional)
+          </Text>
+          <TextInput
+            value={followUpNote}
+            onChangeText={setFollowUpNote}
+            placeholder="e.g. symptoms, flat, who needs help"
+            placeholderTextColor="rgba(255,255,255,0.55)"
+            maxLength={2000}
+            multiline
+            textAlignVertical="top"
+            editable={!noteSending}
+            accessibilityLabel="Optional follow-up note for security"
+            style={{
+              alignSelf: 'stretch',
+              minHeight: 80,
+              paddingHorizontal: 14,
+              paddingVertical: 12,
+              borderRadius: 14,
+              backgroundColor: 'rgba(0,0,0,0.22)',
+              borderWidth: 1,
+              borderColor: 'rgba(255,255,255,0.25)',
+              color: '#FFFFFF',
+              fontSize: t.fontBase,
+            }}
           />
-          <View style={{
-            width: sosCircle,
-            height: sosCircle,
-            borderRadius: sosRadius,
-            backgroundColor: t.accentEmergency,
-            alignItems: 'center',
-            justifyContent: 'center',
-            shadowColor: t.glowEmergency,
-            shadowOffset: { width: 0, height: 8 },
-            shadowOpacity: 1,
-            shadowRadius: 32,
-            elevation: 20,
-          }}>
-            <Ionicons name="warning" size={64} color="#FFFFFF" />
-            <Text style={{ fontSize: t.fontXl, fontWeight: '800', color: '#FFFFFF', letterSpacing: 2, marginTop: 4 }}>
-              SOS
-            </Text>
-          </View>
-        </View>
-
-        <Text style={{
-          color: '#FFFFFF',
-          fontSize: t.font2xl,
-          fontWeight: '700',
-          textAlign: 'center',
-          marginBottom: 8,
-        }}>
-          Alert Sent!
-        </Text>
-        <Text style={{
-          color: 'rgba(255,200,200,0.9)',
-          fontSize: t.fontBase,
-          lineHeight: t.fontBase * t.lineHeightRelaxed,
-          textAlign: 'center',
-          marginBottom: 20,
-          paddingHorizontal: 8,
-        }}>
-          Security and medical staff have been alerted. Stay calm and wait for assistance.
-        </Text>
-
-        {acknowledged && (
-          <View style={{
-            backgroundColor: 'rgba(74,222,128,0.2)',
-            borderRadius: t.radiusMd,
-            borderWidth: 1,
-            borderColor: 'rgba(74,222,128,0.5)',
-            paddingHorizontal: 20,
-            paddingVertical: 12,
-            marginBottom: 20,
-            width: '100%',
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 8,
-          }}>
-            <Ionicons name="checkmark-circle" size={20} color={t.accentSuccess} />
-            <Text style={{ color: '#FFFFFF', fontSize: t.fontBase, fontWeight: '600' }}>
-              Help is on the way!
-            </Text>
-          </View>
-        )}
-
-        {/* Info strip */}
-        <View style={{
-          backgroundColor: 'rgba(255,59,48,0.2)',
-          borderRadius: t.radiusMd,
-          borderWidth: 1,
-          borderColor: 'rgba(255,59,48,0.35)',
-          paddingHorizontal: 16,
-          paddingVertical: 12,
-          marginBottom: 32,
-          width: '100%',
-        }}>
-          <Text style={{ color: 'rgba(255,200,200,0.9)', fontSize: t.fontSm, textAlign: 'center' }}>
-            Your location has been shared
-          </Text>
-          <Text style={{ color: '#FFFFFF', fontSize: t.fontSm, fontWeight: '600', textAlign: 'center', marginTop: 4 }}>
-            Emergency: Call 112 if no response in 3 minutes
-          </Text>
-        </View>
-
-        <Text style={{
-          alignSelf: 'stretch',
-          color: 'rgba(255,220,220,0.95)',
-          fontSize: t.fontSm,
-          fontWeight: '600',
-          marginBottom: 8,
-        }}>
-          Add details for security (optional)
-        </Text>
-        <TextInput
-          value={followUpNote}
-          onChangeText={setFollowUpNote}
-          placeholder="e.g. symptoms, flat, who needs help"
-          placeholderTextColor="rgba(255,200,200,0.55)"
-          maxLength={2000}
-          multiline
-          textAlignVertical="top"
-          editable={!noteSending}
-          style={{
-            alignSelf: 'stretch',
-            minHeight: 80,
-            marginBottom: 12,
-            paddingHorizontal: 14,
-            paddingVertical: 12,
-            borderRadius: 14,
-            backgroundColor: 'rgba(0,0,0,0.22)',
-            borderWidth: 1,
-            borderColor: 'rgba(255,255,255,0.25)',
-            color: '#FFFFFF',
-            fontSize: t.fontBase,
-          }}
-        />
-        <View style={{ width: '100%', gap: 12, marginBottom: 8 }}>
-        <ThemedButton
-          label={noteSending ? 'Sending…' : 'Send note to security'}
-          onPress={sendFollowUpNote}
-          variant="danger"
-          size="md"
-          disabled={followUpNote.trim().length === 0}
-          loading={noteSending}
-          accessibilityLabel="Send optional note to security"
-        />
-
-        <ThemedButton
-          label="I'm OK — Cancel Alert"
-          onPress={resolveSos}
-          variant="ghost"
-          size="lg"
-          accessibilityLabel="I'm OK - Cancel alert, I am safe"
-        />
-        </View>
+          <View style={{ height: 12 }} />
+          <ThemedButton
+            label={noteSending ? 'Sending…' : 'Send note to security'}
+            onPress={sendFollowUpNote}
+            variant={isDispatched ? 'primary' : 'danger'}
+            size="md"
+            disabled={followUpNote.trim().length === 0}
+            loading={noteSending}
+            accessibilityLabel="Send optional note to security"
+          />
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+
+      <BottomActionBar
+        primary={{
+          label: "I'm OK — Cancel Alert",
+          onPress: resolveSos,
+          variant: 'ghost',
+          accessibilityLabel: "I'm OK - Cancel alert, I am safe",
+        }}
+        helperText="Only cancel if you are safe and don't need help."
+      />
+    </View>
   );
 }
+
+// SafeAreaView reference kept for future use — currently unused after layout refactor
+void SafeAreaView;

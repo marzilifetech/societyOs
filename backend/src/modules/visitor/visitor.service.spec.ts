@@ -407,4 +407,33 @@ describe('VisitorService gate flows', () => {
       response: expect.objectContaining({ code: 'DENY_NOT_ALLOWED' }),
     });
   });
+
+  it('approveVisitor sets approvalStatus APPROVED', async () => {
+    prisma.visitor.findUnique.mockResolvedValue(visitorRow({ approvalStatus: 'PENDING' }));
+    prisma.visitor.update.mockResolvedValue(visitorRow({ approvalStatus: 'APPROVED' }));
+
+    await service.approveVisitor('v1', 'socA', 'guard-user');
+
+    expect(prisma.visitor.update).toHaveBeenCalledWith({
+      where: { id: 'v1' },
+      data: expect.objectContaining({
+        approvalStatus: 'APPROVED',
+        approvedById: 'guard-user',
+      }),
+      include: { resident: { include: { user: true, flat: true } } },
+    });
+  });
+
+  it('rejectVisitor sets approvalStatus REJECTED', async () => {
+    prisma.visitor.findUnique.mockResolvedValue(visitorRow());
+    prisma.visitor.update.mockResolvedValue(visitorRow({ approvalStatus: 'REJECTED' }));
+
+    await service.rejectVisitor('v1', 'socA');
+
+    expect(prisma.visitor.update).toHaveBeenCalledWith({
+      where: { id: 'v1' },
+      data: { approvalStatus: 'REJECTED' },
+      include: { resident: { include: { user: true, flat: true } } },
+    });
+  });
 });

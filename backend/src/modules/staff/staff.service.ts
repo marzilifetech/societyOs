@@ -9,6 +9,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { S3Service } from '../../common/storage/s3.service';
 import { RealtimeGateway } from '../../common/realtime/realtime.gateway';
 import { requireLeavePendingInSociety } from '../../common/utils/leave-admin.util';
+import { VisitorService } from '../visitor/visitor.service';
+import type { StaffMember } from '@prisma/client';
 
 const LEAVE_ENTITLEMENTS: Record<string, number> = {
   CASUAL: 12,
@@ -25,6 +27,7 @@ export class StaffService {
     private prisma: PrismaService,
     private s3: S3Service,
     private realtime: RealtimeGateway,
+    private visitorService: VisitorService,
   ) {}
 
   private async resolveStaffId(userId: string): Promise<string> {
@@ -632,21 +635,17 @@ export class StaffService {
 
   async getMyDocuments(userId: string) {
     const staffId = await this.resolveStaffId(userId);
-    const staff = await this.prisma.staffMember.findUnique({
-      where: { id: staffId },
-      include: { user: true },
+    const docs = await this.prisma.staffDocument.findMany({
+      where: { staffMemberId: staffId },
+      orderBy: { uploadedAt: 'desc' },
     });
-    const docs: Array<{ id: string; type: string; url: string; uploadedAt: Date; status: string }> = [];
-    if (staff?.salaryStructure) {
-      const ss = staff.salaryStructure as Record<string, any>;
-      if (ss['idProofUrl']) {
-        docs.push({ id: `${staffId}_idproof`, type: 'ID_PROOF', url: ss['idProofUrl'], uploadedAt: staff.createdAt, status: 'UPLOADED' });
-      }
-      if (ss['addressProofUrl']) {
-        docs.push({ id: `${staffId}_addressproof`, type: 'ADDRESS_PROOF', url: ss['addressProofUrl'], uploadedAt: staff.createdAt, status: 'UPLOADED' });
-      }
-    }
-    return docs;
+    return docs.map((d) => ({
+      id: d.id,
+      type: d.documentType,
+      url: d.fileUrl,
+      uploadedAt: d.uploadedAt,
+      status: d.verifiedAt ? 'VERIFIED' : 'UPLOADED',
+    }));
   }
 
   async getDocumentUploadUrl(userId: string, dto: { type: string; contentType?: string }) {
@@ -713,9 +712,18 @@ export class StaffService {
     userId: string,
     body: { documentId?: string; key: string; type?: string },
   ) {
-    // TODO: persist document metadata once StaffDocument model lands.
-    await this.resolveStaffId(userId);
-    return { ok: true, key: body.key, documentId: body.documentId ?? null };
+    const staffId = await this.resolveStaffId(userId);
+    const documentType = (body.type ?? 'OTHER').toUpperCase().replace(/AADHAAR/g, 'AADHAR');
+    const fileUrl = this.s3.getPublicUrl(body.key);
+    const doc = await this.prisma.staffDocument.create({
+      data: {
+        staffMemberId: staffId,
+        documentType,
+        fileUrl,
+        uploadedBy: 'staff',
+      },
+    });
+    return { ok: true, key: body.key, documentId: doc.id };
   }
 
   async registerDevice(userId: string, token: string, _platform: 'ios' | 'android') {
@@ -737,5 +745,42 @@ export class StaffService {
       geofence: (staff.society as any).geofence,
       geofenceRadius: (staff.society as any).geofenceRadius,
     };
+  }
+
+  /** Gate/security staff: categories or department includes SECURITY. */
+  isSecurityStaff(staff: Pick<StaffMember, 'categories' | 'department'>): boolean {
+    const dept = staff.department?.toUpperCase() ?? '';
+    if (dept === 'SECURITY') return true;
+    return staff.categories.some((c) => c.toUpperCase() === 'SECURITY');
+  }
+
+  private async requireSecurityStaff(userId: string) {
+    const staff = await this.prisma.staffMember.findUnique({ where: { userId } });
+    if (!staff) throw new NotFoundException('Staff profile not found');
+    if (!this.isSecurityStaff(staff)) {
+      throw new ForbiddenException({
+        code: 'SECURITY_STAFF_ONLY',
+        message: 'Only security staff can manage visitor approvals',
+      });
+    }
+    return staff;
+  }
+
+  async getVisitorsForGate(userId: string, societyId: string, approvalStatus?: string) {
+    await this.requireSecurityStaff(userId);
+    return this.visitorService.listForSociety(societyId, {
+      approvalStatus,
+      date: 'today',
+    });
+  }
+
+  async approveVisitorAsSecurity(userId: string, societyId: string, visitorId: string) {
+    await this.requireSecurityStaff(userId);
+    return this.visitorService.approveVisitor(visitorId, societyId, userId);
+  }
+
+  async rejectVisitorAsSecurity(userId: string, societyId: string, visitorId: string) {
+    await this.requireSecurityStaff(userId);
+    return this.visitorService.rejectVisitor(visitorId, societyId);
   }
 }

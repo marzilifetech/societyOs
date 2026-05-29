@@ -5,6 +5,7 @@ import {
   Image,
   ScrollView,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -15,44 +16,132 @@ import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
 
+type UploadState = {
+  // local preview shown while picking / uploading / on retry. Preserved across
+  // failed attempts so the user doesn't have to re-pick the image to retry.
+  localUri: string;
+  // remembered between attempts so retry knows the contentType to upload.
+  mime: string;
+  // populated only after a successful S3 PUT
+  s3Url: string;
+  uploading: boolean;
+  // human-friendly error message; non-null when the last attempt failed and
+  // the user has not yet retried or re-picked.
+  error: string | null;
+};
+
+const EMPTY: UploadState = { localUri: '', mime: '', s3Url: '', uploading: false, error: null };
+
+class UploadFailedError extends Error {
+  status?: number;
+  constructor(message: string, status?: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
+async function presignAndUpload(uri: string, folder: string, contentType: string): Promise<string> {
+  // 1. Ask backend for a presigned PUT URL
+  const presigned = await api.post<{ url: string; key: string; publicUrl: string }>(
+    '/upload/presign',
+    { folder, contentType },
+  );
+
+  // 2. PUT the file to S3
+  const blob = await (await fetch(uri)).blob();
+  const putRes = await fetch(presigned.url, {
+    method: 'PUT',
+    headers: { 'Content-Type': contentType },
+    body: blob,
+  });
+  if (!putRes.ok) throw new UploadFailedError(`Upload failed (${putRes.status})`, putRes.status);
+
+  return presigned.publicUrl;
+}
+
+/** Map an upload error to a short user-facing string. */
+function describeUploadError(err: unknown): string {
+  if (typeof err !== 'object' || err === null) return 'Upload failed. Please try again.';
+  const e = err as { message?: string; name?: string; status?: number };
+  const msg = e.message ?? '';
+
+  // Network failure path — friendlyError on the api side already converts
+  // TypeError/"Network request failed" into the "Could not reach" message.
+  if (
+    e.name === 'TypeError' ||
+    msg.includes('Network request failed') ||
+    msg.includes('Could not reach the server') ||
+    msg.includes('connection')
+  ) {
+    return "Couldn't reach the server. Check your internet and try again.";
+  }
+  // S3 PUT failures bubble up as `Upload failed (NNN)` from presignAndUpload.
+  const status = e.status ?? (msg.match(/Upload failed \((\d+)\)/)?.[1]);
+  if (status) {
+    const n = Number(status);
+    if (n === 413) return 'That file is too large. Try a smaller image.';
+    if (n >= 400 && n < 500) return 'The file was rejected. Try a different image.';
+    if (n >= 500) return 'Storage is temporarily unavailable. Try again in a moment.';
+  }
+  // Backend "service hiccup" message comes through verbatim.
+  if (msg.includes('hiccup')) return msg;
+  return msg || 'Upload failed. Please try again.';
+}
+
 function UploadField({
   label,
   subtitle,
-  uri,
-  onSelect,
+  state,
+  onChange,
+  folder,
 }: {
   label: string;
   subtitle: string;
-  uri: string;
-  onSelect: (uri: string) => void;
+  state: UploadState;
+  onChange: (next: UploadState) => void;
+  folder: string;
 }) {
-  const requestAndLaunch = async (launcher: () => Promise<ImagePicker.ImagePickerResult>) => {
-    const result = await launcher();
-    if (!result.canceled && result.assets[0]) {
-      onSelect(result.assets[0].uri);
+  const upload = async (localUri: string, mime: string) => {
+    onChange({ localUri, mime, s3Url: '', uploading: true, error: null });
+    try {
+      const s3Url = await presignAndUpload(localUri, folder, mime);
+      onChange({ localUri, mime, s3Url, uploading: false, error: null });
+    } catch (err) {
+      // Preserve localUri + mime so the user can retry without re-picking the
+      // image. Previously we wiped both, forcing a re-pick after every error.
+      onChange({
+        localUri,
+        mime,
+        s3Url: '',
+        uploading: false,
+        error: describeUploadError(err),
+      });
     }
   };
 
-  const handlePhoto = async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Camera permission is required to take photos.');
+  const handlePick = async (mode: 'camera' | 'library') => {
+    const perm =
+      mode === 'camera'
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (perm.status !== 'granted') {
+      Alert.alert('Permission needed', `${mode === 'camera' ? 'Camera' : 'Gallery'} permission is required.`);
       return;
     }
-    await requestAndLaunch(() =>
-      ImagePicker.launchCameraAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8 }),
-    );
+    const result =
+      mode === 'camera'
+        ? await ImagePicker.launchCameraAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8 })
+        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8 });
+    if (result.canceled || !result.assets[0]) return;
+
+    const localUri = result.assets[0].uri;
+    const mime = result.assets[0].mimeType ?? 'image/jpeg';
+    await upload(localUri, mime);
   };
 
-  const handleGallery = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Gallery permission is required.');
-      return;
-    }
-    await requestAndLaunch(() =>
-      ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8 }),
-    );
+  const handleRetry = () => {
+    if (!state.localUri) return;
+    void upload(state.localUri, state.mime || 'image/jpeg');
   };
 
   return (
@@ -60,25 +149,66 @@ function UploadField({
       <Text className="text-gray-900 text-base font-semibold mb-1">{label}</Text>
       <Text className="text-gray-400 text-sm mb-4">{subtitle}</Text>
 
-      {uri ? (
+      {state.error && state.localUri ? (
+        // Inline error banner — distinct visually from success state. Stays
+        // visible until the user retries (handleRetry) or re-picks.
+        <View
+          accessibilityRole="alert"
+          className="bg-red-50 border border-red-200 rounded-xl px-3.5 py-3 mb-3 flex-row items-start"
+        >
+          <Ionicons name="warning-outline" size={16} color="#B91C1C" style={{ marginTop: 2 }} />
+          <Text className="text-red-700 text-sm flex-1 ml-2">{state.error}</Text>
+        </View>
+      ) : null}
+
+      {state.localUri ? (
         <View className="flex-row items-center" style={{ gap: 16 }}>
-          <Image
-            source={{ uri }}
-            style={{ width: 100, height: 100, borderRadius: 12 }}
-            resizeMode="cover"
-          />
+          <View>
+            <Image
+              source={{ uri: state.localUri }}
+              style={{ width: 100, height: 100, borderRadius: 12 }}
+              resizeMode="cover"
+            />
+            {state.uploading && (
+              <View
+                className="absolute inset-0 items-center justify-center bg-black/40 rounded-xl"
+              >
+                <ActivityIndicator color="#FFFFFF" />
+              </View>
+            )}
+            {state.s3Url ? (
+              <View className="absolute bottom-1 right-1 bg-green-600 rounded-full w-5 h-5 items-center justify-center">
+                <Ionicons name="checkmark" size={12} color="#FFFFFF" />
+              </View>
+            ) : null}
+          </View>
           <View className="flex-1" style={{ gap: 10 }}>
+            {state.error ? (
+              // Inline retry button — visible whenever the last attempt failed.
+              // Pre-existing behaviour Alert'd + wiped localUri, forcing a
+              // full re-pick. Now we keep the URI + offer a single-tap retry.
+              <TouchableOpacity
+                onPress={handleRetry}
+                disabled={state.uploading}
+                accessibilityRole="button"
+                accessibilityLabel={`Retry uploading ${label}`}
+                className="bg-primary-500 rounded-xl px-3.5 py-3 min-h-[52px] justify-center flex-row items-center"
+              >
+                <Ionicons name="refresh-outline" size={16} color="#FFFFFF" />
+                <Text className="text-white text-sm font-semibold text-center ml-1.5">Retry upload</Text>
+              </TouchableOpacity>
+            ) : null}
             <TouchableOpacity
-              onPress={handlePhoto}
+              onPress={() => handlePick('camera')}
+              disabled={state.uploading}
               className="bg-primary-50 rounded-xl px-3.5 py-3 border border-primary-500 min-h-[52px] justify-center flex-row items-center"
             >
               <Ionicons name="camera-outline" size={16} color="#821A52" />
-              <Text className="text-primary-500 text-sm font-semibold text-center ml-1.5">
-                Retake Photo
-              </Text>
+              <Text className="text-primary-500 text-sm font-semibold text-center ml-1.5">Retake Photo</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              onPress={handleGallery}
+              onPress={() => handlePick('library')}
+              disabled={state.uploading}
               className="bg-gray-100 rounded-xl px-3.5 py-3 border border-gray-200 min-h-[52px] justify-center"
             >
               <Text className="text-gray-700 text-sm font-semibold text-center">From Gallery</Text>
@@ -88,14 +218,14 @@ function UploadField({
       ) : (
         <View className="flex-row" style={{ gap: 10 }}>
           <TouchableOpacity
-            onPress={handlePhoto}
+            onPress={() => handlePick('camera')}
             className="flex-1 bg-primary-500 rounded-2xl h-[52px] items-center justify-center flex-row"
           >
             <Ionicons name="camera-outline" size={18} color="#FFFFFF" />
             <Text className="text-white text-base font-semibold ml-2">Take Photo</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            onPress={handleGallery}
+            onPress={() => handlePick('library')}
             className="flex-1 bg-gray-100 rounded-2xl h-[52px] items-center justify-center border border-gray-200 flex-row"
           >
             <Ionicons name="cloud-upload-outline" size={18} color="#374151" />
@@ -107,17 +237,47 @@ function UploadField({
   );
 }
 
+function maskAadhaar(digits: string): string {
+  // Keep last 4 visible, mask first 8 as X — formatted as XXXX-XXXX-1234
+  if (digits.length <= 4) return digits;
+  const hidden = digits.slice(0, -4).replace(/\d/g, 'X');
+  const visible = digits.slice(-4);
+  const all = (hidden + visible).match(/.{1,4}/g) ?? [];
+  return all.join('-');
+}
+
 export default function DocumentsScreen() {
-  const [idProof, setIdProof] = useState('');
-  const [addressProof, setAddressProof] = useState('');
+  const [aadhaar, setAadhaar] = useState<UploadState>(EMPTY);
+  const [pan, setPan] = useState<UploadState>(EMPTY);
+  const [addressProof, setAddressProof] = useState<UploadState>(EMPTY);
+  const [aadhaarNumber, setAadhaarNumber] = useState('');
+  const [aadhaarFocused, setAadhaarFocused] = useState(false);
+  const [panNumber, setPanNumber] = useState('');
+
+  const aadhaarValid = /^\d{12}$/.test(aadhaarNumber);
+  const panValid = /^[A-Z]{5}\d{4}[A-Z]$/.test(panNumber);
 
   const mutation = useMutation({
-    mutationFn: () => api.post('/residents/documents', { idProof, addressProof }),
+    mutationFn: () =>
+      api.post('/residents/documents', {
+        aadhaarUrl: aadhaar.s3Url || undefined,
+        aadhaarNumber: aadhaarNumber || undefined,
+        panUrl: pan.s3Url || undefined,
+        panNumber: panNumber || undefined,
+        addressProofUrl: addressProof.s3Url || undefined,
+      }),
     onSuccess: () => router.replace('/(auth)/pending-approval'),
-    onError: (err: any) => Alert.alert('Upload Failed', err.message ?? 'Please try again.'),
+    onError: (err: any) => Alert.alert('Submit failed', err.message ?? 'Please try again.'),
   });
 
-  const canSubmit = idProof.length > 0 && addressProof.length > 0;
+  const anyUploading = aadhaar.uploading || pan.uploading || addressProof.uploading;
+  const canSubmit =
+    !anyUploading &&
+    aadhaarValid &&
+    panValid &&
+    aadhaar.s3Url.length > 0 &&
+    pan.s3Url.length > 0 &&
+    addressProof.s3Url.length > 0;
 
   return (
     <SafeAreaView className="flex-1 bg-white">
@@ -134,21 +294,70 @@ export default function DocumentsScreen() {
 
         <Text className="text-3xl font-bold text-gray-900 mb-2">Upload Documents</Text>
         <Text className="text-base text-gray-500 mb-8 leading-6">
-          Upload your ID and address proof for faster verification by the society office.
+          Provide your Aadhaar and PAN details for faster KYC verification by the society office.
         </Text>
 
+        {/* Aadhaar number */}
+        <View className="bg-gray-50 rounded-2xl p-5 mb-4 border border-gray-200">
+          <Text className="text-gray-900 text-base font-semibold mb-1">Aadhaar number</Text>
+          <Text className="text-gray-400 text-sm mb-4">12 digits, no spaces</Text>
+          <TextInput
+            className="bg-white border border-gray-200 rounded-xl px-4 py-3 text-base text-gray-900"
+            value={aadhaarFocused ? aadhaarNumber : aadhaarNumber.length === 12 ? maskAadhaar(aadhaarNumber) : aadhaarNumber}
+            onChangeText={(t) => setAadhaarNumber(t.replace(/\D/g, '').slice(0, 12))}
+            onFocus={() => setAadhaarFocused(true)}
+            onBlur={() => setAadhaarFocused(false)}
+            keyboardType="number-pad"
+            maxLength={aadhaarFocused ? 12 : 14}
+            placeholder="123412341234"
+            placeholderTextColor="#9CA3AF"
+          />
+          {aadhaarNumber.length > 0 && !aadhaarValid && (
+            <Text className="text-red-500 text-xs mt-2">Aadhaar must be exactly 12 digits.</Text>
+          )}
+        </View>
+
+        {/* PAN number */}
+        <View className="bg-gray-50 rounded-2xl p-5 mb-4 border border-gray-200">
+          <Text className="text-gray-900 text-base font-semibold mb-1">PAN number</Text>
+          <Text className="text-gray-400 text-sm mb-4">10 characters, e.g. ABCDE1234F</Text>
+          <TextInput
+            className="bg-white border border-gray-200 rounded-xl px-4 py-3 text-base text-gray-900"
+            value={panNumber}
+            onChangeText={(t) => setPanNumber(t.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10))}
+            autoCapitalize="characters"
+            autoCorrect={false}
+            maxLength={10}
+            placeholder="ABCDE1234F"
+            placeholderTextColor="#9CA3AF"
+          />
+          {panNumber.length > 0 && !panValid && (
+            <Text className="text-red-500 text-xs mt-2">PAN must be in format ABCDE1234F.</Text>
+          )}
+        </View>
+
         <UploadField
-          label="ID Proof"
-          subtitle="Aadhaar card, passport, or driving licence"
-          uri={idProof}
-          onSelect={setIdProof}
+          label="Aadhaar photo"
+          subtitle="Front side, clearly visible"
+          state={aadhaar}
+          onChange={setAadhaar}
+          folder="resident-docs/aadhaar"
         />
 
         <UploadField
-          label="Address Proof"
+          label="PAN photo"
+          subtitle="Clear photo of your PAN card"
+          state={pan}
+          onChange={setPan}
+          folder="resident-docs/pan"
+        />
+
+        <UploadField
+          label="Address proof"
           subtitle="Utility bill, bank statement, or property document"
-          uri={addressProof}
-          onSelect={setAddressProof}
+          state={addressProof}
+          onChange={setAddressProof}
+          folder="resident-docs/address"
         />
 
         <TouchableOpacity

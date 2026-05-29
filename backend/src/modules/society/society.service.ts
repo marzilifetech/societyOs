@@ -7,10 +7,14 @@ export class SocietyService {
   constructor(private prisma: PrismaService) {}
 
   async findAll() {
+    const all = await this.prisma.society.findMany({
+      where: { showInDirectory: true, archivedAt: null },
+      select: { id: true, name: true, city: true },
+      orderBy: { name: 'asc' },
+    });
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    const all = await this.prisma.society.findMany({ select: { id: true, name: true, city: true } });
     const seen = new Set<string>();
-    return all.filter(s => {
+    return all.filter((s) => {
       if (!uuidRegex.test(s.id) || seen.has(s.name)) return false;
       seen.add(s.name);
       return true;

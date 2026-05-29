@@ -8,6 +8,13 @@ import {
   AdminUpdateServiceRequestDto,
   UpdateServiceRequestTagsDto,
 } from '../service-request/dto/service-request.dto';
+import {
+  AddSosRecipientDto,
+  CreateSocietyDto,
+  CreateStaffDto,
+  SendPushNotificationDto,
+  UpdateSocietyDto,
+} from './dto/admin.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -47,19 +54,7 @@ export class AdminController {
   }
 
   @Patch('society')
-  updateSociety(
-    @SocietyId() societyId: string,
-    @Body()
-    dto: {
-      name?: string;
-      address?: string;
-      city?: string;
-      pincode?: string;
-      contactEmail?: string;
-      contactPhone?: string;
-      config?: Record<string, unknown>;
-    },
-  ) {
+  updateSociety(@SocietyId() societyId: string, @Body() dto: UpdateSocietyDto) {
     return this.adminService.updateSociety(societyId, dto);
   }
 
@@ -79,9 +74,20 @@ export class AdminController {
     );
   }
 
+  // F6: birthdays widget for the dashboard. `?on=today` is the only mode
+  // wired today; the param exists so we can extend to ?on=YYYY-MM-DD later
+  // without breaking the contract.
+  @Get('dashboard/birthdays')
+  getBirthdays(
+    @SocietyId() societyId: string,
+    @Query('on') on?: string,
+  ) {
+    return this.adminService.getBirthdays(societyId, on ?? 'today');
+  }
+
   @Get('residents/pending')
-  getPendingResidents(@CurrentUser() user: JwtPayload) {
-    return this.adminService.getPendingResidents(user.societyId, user.managedBlocks);
+  getPendingResidents(@SocietyId() societyId: string, @CurrentUser() user: JwtPayload) {
+    return this.adminService.getPendingResidents(societyId, user.managedBlocks);
   }
 
   @Get('residents')
@@ -90,13 +96,17 @@ export class AdminController {
   }
 
   @Patch('residents/:id/approve')
-  approveResident(@Param('id') id: string) {
-    return this.adminService.approveResident(id);
+  approveResident(@SocietyId() societyId: string, @Param('id') id: string) {
+    return this.adminService.approveResident(societyId, id);
   }
 
   @Patch('residents/:id/reject')
-  rejectResident(@Param('id') id: string, @Body('reason') reason: string) {
-    return this.adminService.rejectResident(id, reason || 'No reason provided');
+  rejectResident(
+    @SocietyId() societyId: string,
+    @Param('id') id: string,
+    @Body('reason') reason: string,
+  ) {
+    return this.adminService.rejectResident(societyId, id, reason || 'No reason provided');
   }
 
   @Post('residents/:id/data-export')
@@ -134,41 +144,63 @@ export class AdminController {
 
   @Post('staff')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  createStaff(
-    @SocietyId() societyId: string,
-    @Body() dto: {
-      phone: string;
-      name: string;
-      designation: string;
-      department?: string;
-      categories: string[];
-      salary?: number;
-      gender?: string;
-      dateOfBirth?: string;
-    },
-  ) {
+  createStaff(@SocietyId() societyId: string, @Body() dto: CreateStaffDto) {
     return this.adminService.createStaff(societyId, dto);
   }
 
+  @Get('staff/import/template')
+  @Header('Content-Type', 'text/csv')
+  @Header('Content-Disposition', 'attachment; filename="staff-import-template.csv"')
+  staffImportTemplate(): StreamableFile {
+    const csv = this.adminService.staffImportTemplate();
+    return new StreamableFile(Buffer.from(csv, 'utf8'));
+  }
+
+  @Post('staff/import/preview')
+  previewStaffImport(
+    @SocietyId() societyId: string,
+    @Body('csv') csv: string,
+  ) {
+    return this.adminService.previewStaffCsv(societyId, csv);
+  }
+
+  @Post('staff/import')
+  importStaff(
+    @SocietyId() societyId: string,
+    @Body('csv') csv: string,
+  ) {
+    return this.adminService.importStaffCsv(societyId, csv, false);
+  }
+
+  // C3: cross-tenant transfer is a SUPER_ADMIN action. Regular ADMINs can
+  // never reach into another society's staff roster.
   @Patch('staff/:id/transfer')
-  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  @Roles(UserRole.SUPER_ADMIN)
   transferStaff(
     @Param('id') id: string,
+    @SocietyId() societyId: string,
+    @CurrentUser() user: JwtPayload,
     @Body() dto: { toSocietyId: string; reason?: string },
   ) {
-    return this.adminService.transferStaff(id, dto.toSocietyId, dto.reason);
+    return this.adminService.transferStaff(
+      id,
+      societyId,
+      dto.toSocietyId,
+      { id: user.sub, role: user.role },
+      dto.reason,
+    );
   }
 
   @Patch('staff/:id/deactivate')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  deactivateStaff(@Param('id') id: string) {
-    return this.adminService.deactivateStaff(id);
+  deactivateStaff(@Param('id') id: string, @SocietyId() societyId: string) {
+    return this.adminService.deactivateStaff(id, societyId);
   }
 
   @Get('staff/:id')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  getStaffDetail(@Param('id') id: string) {
-    return this.adminService.getStaffDetail(id);
+  getStaffDetail(@Param('id') id: string, @SocietyId() societyId: string) {
+    return this.adminService.getStaffDetail(id, societyId);
   }
 
   @Get('staff/:id/attendance')
@@ -207,6 +239,7 @@ export class AdminController {
   @Patch('staff/:id')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   updateStaff(
+    @SocietyId() societyId: string,
     @Param('id') id: string,
     @Body() body: {
       salaryStructure?: Record<string, any>;
@@ -216,15 +249,72 @@ export class AdminController {
       familyDetails?: any;
       gender?: string;
       dateOfBirth?: string | null;
+      emergencyContact?: { name: string; phone: string; relation?: string } | null;
     },
   ) {
-    return this.adminService.updateStaff(id, body);
+    return this.adminService.updateStaff(societyId, id, body);
   }
 
   @Get('staff/:id/documents')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  getStaffDocuments(@Param('id') id: string) {
-    return this.adminService.getStaffDocuments(id);
+  getStaffDocuments(@SocietyId() societyId: string, @Param('id') id: string) {
+    return this.adminService.getStaffDocuments(societyId, id);
+  }
+
+  @Post('staff/:id/documents')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  addStaffDocument(
+    @SocietyId() societyId: string,
+    @Param('id') id: string,
+    @Body() body: { documentType: string; fileUrl: string },
+  ) {
+    return this.adminService.addStaffDocument(societyId, id, body.documentType, body.fileUrl, 'admin');
+  }
+
+  @Delete('staff/:id/documents/:docId')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  deleteStaffDocument(
+    @SocietyId() societyId: string,
+    @Param('id') id: string,
+    @Param('docId') docId: string,
+  ) {
+    return this.adminService.deleteStaffDocument(societyId, id, docId);
+  }
+
+  @Patch('staff/:id/documents/:docId/verify')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  verifyStaffDocument(
+    @SocietyId() societyId: string,
+    @Param('id') id: string,
+    @Param('docId') docId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.adminService.verifyStaffDocument(societyId, id, docId, user.sub);
+  }
+
+  // Alias for `verify` — added 2026-05 because Brave and many ad-blockers
+  // ship EasyList/EasyPrivacy filter rules that match URLs containing
+  // "verify" (collateral damage from analytics endpoints with names like
+  // /verify.gif, /verify?event=). Browsers block the request before it
+  // leaves the page, surfacing as a misleading "CORS error" in DevTools.
+  // The /review path is identical in behaviour and unaffected by those
+  // filter lists. Admin-web should call /review; /verify is retained until
+  // the next breaking-change window.
+  @Patch('staff/:id/documents/:docId/review')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  reviewStaffDocument(
+    @SocietyId() societyId: string,
+    @Param('id') id: string,
+    @Param('docId') docId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.adminService.verifyStaffDocument(societyId, id, docId, user.sub);
+  }
+
+  @Patch('staff/:id/dismiss')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  dismissStaff(@SocietyId() societyId: string, @Param('id') id: string) {
+    return this.adminService.dismissStaff(societyId, id);
   }
 
   @Post('staff/:id/documents')
@@ -244,8 +334,24 @@ export class AdminController {
 
   @Get('staff/:id/salary-slips')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  getStaffSalarySlips(@Param('id') id: string) {
-    return this.adminService.getStaffSalarySlips(id);
+  getStaffSalarySlips(@SocietyId() societyId: string, @Param('id') id: string) {
+    return this.adminService.getStaffSalarySlips(societyId, id);
+  }
+
+  @Get('staff/:id/loans')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  getStaffLoans(@SocietyId() societyId: string, @Param('id') id: string) {
+    return this.adminService.getStaffLoans(societyId, id);
+  }
+
+  @Post('staff/:id/loans')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  createStaffLoan(
+    @SocietyId() societyId: string,
+    @Param('id') id: string,
+    @Body() body: { amount: number; reason?: string; status?: string },
+  ) {
+    return this.adminService.createStaffLoan(societyId, id, body.amount, body.reason, body.status);
   }
 
   @Get('staff/:id/loans')
@@ -265,17 +371,31 @@ export class AdminController {
 
   @Get('residents/:id/documents')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  getResidentDocuments(@Param('id') id: string) {
-    return this.adminService.getResidentDocuments(id);
+  getResidentDocuments(@SocietyId() societyId: string, @Param('id') id: string) {
+    return this.adminService.getResidentDocuments(societyId, id);
+  }
+
+  // Alias for the legacy `verify` path — see reviewStaffDocument comment for
+  // the ad-blocker rationale. Both routes are wired to the same service
+  // method; admin-web targets /review going forward.
+  @Patch('residents/:id/documents/review')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  reviewResidentDocuments(
+    @SocietyId() societyId: string,
+    @Param('id') id: string,
+    @Body() body: { status: 'VERIFIED' | 'REJECTED'; note?: string },
+  ) {
+    return this.adminService.verifyResidentDocuments(societyId, id, body.status, body.note);
   }
 
   @Patch('residents/:id/documents/verify')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   verifyResidentDocuments(
+    @SocietyId() societyId: string,
     @Param('id') id: string,
     @Body() body: { status: 'VERIFIED' | 'REJECTED'; note?: string },
   ) {
-    return this.adminService.verifyResidentDocuments(id, body.status, body.note);
+    return this.adminService.verifyResidentDocuments(societyId, id, body.status, body.note);
   }
 
   @Patch('leaves/:id/reject')
@@ -456,14 +576,7 @@ export class AdminController {
   @Post('notifications/push')
   sendPushNotification(
     @SocietyId() societyId: string,
-    @Body()
-    dto: {
-      title: string;
-      body: string;
-      targetType: 'ALL' | 'FLAT' | 'BLOCK' | 'INDIVIDUAL';
-      targetIds?: string[];
-      scheduledAt?: string;
-    },
+    @Body() dto: SendPushNotificationDto,
   ) {
     return this.adminService.sendPushNotification(societyId, dto);
   }
@@ -476,10 +589,7 @@ export class AdminController {
   }
 
   @Post('sos/recipients')
-  addSosRecipient(
-    @SocietyId() societyId: string,
-    @Body() dto: { name: string; phone: string; email?: string; role?: string },
-  ) {
+  addSosRecipient(@SocietyId() societyId: string, @Body() dto: AddSosRecipientDto) {
     return this.adminService.addSosRecipient(societyId, dto);
   }
 
@@ -522,6 +632,24 @@ export class AdminController {
     return this.adminService.importResidentsCsv(societyId, csv);
   }
 
+
+  @Post('residents/import/preview')
+  previewResidentsImport(
+    @SocietyId() societyId: string,
+    @Body('csv') csv: string,
+  ) {
+    return this.adminService.previewResidentsCsv(societyId, csv);
+  }
+
+  @Get('residents/import/template')
+  @Header('Content-Type', 'text/csv')
+  @Header('Content-Disposition', 'attachment; filename="residents-import-template.csv"')
+  residentsImportTemplate(): StreamableFile {
+    const csv = this.adminService.residentsImportTemplate();
+    return new StreamableFile(Buffer.from(csv, 'utf8'));
+  }
+
+
   @Get('residents/:id')
   getResidentDetail(@SocietyId() societyId: string, @Param('id') id: string) {
     return this.adminService.getResidentDetail(societyId, id);
@@ -558,13 +686,180 @@ export class AdminController {
   updateBillStatus(
     @SocietyId() societyId: string,
     @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
     @Body('status') status: string,
     @Body('paymentMethod') paymentMethod?: string,
   ) {
-    return this.adminService.updateBillStatus(id, societyId, status, paymentMethod);
+    return this.adminService.updateBillStatus(
+      id,
+      societyId,
+      status,
+      { id: user.sub, role: user.role },
+      paymentMethod,
+    );
   }
 
   // ── Building Admins ──────────────────────────────────────────────────────────
+
+  // ── Society CRUD (SUPER_ADMIN) ───────────────────────────────────────────────
+
+  @Get('societies')
+  @Roles(UserRole.SUPER_ADMIN)
+  listSocieties(
+    @Query('search') search?: string,
+    @Query('includeArchived') includeArchived?: string,
+    @Query('status') status?: string,
+  ) {
+    const allowed = ['ACTIVE', 'SUSPENDED', 'ARCHIVED'] as const;
+    const statusFilter = allowed.includes(status as any)
+      ? (status as 'ACTIVE' | 'SUSPENDED' | 'ARCHIVED')
+      : undefined;
+    return this.adminService.listAllSocieties({
+      search,
+      includeArchived: includeArchived === 'true',
+      status: statusFilter,
+    });
+  }
+
+  @Get('platform/stats')
+  @Roles(UserRole.SUPER_ADMIN)
+  getPlatformStats() {
+    return this.adminService.getPlatformStats();
+  }
+
+  @Post('societies')
+  @Roles(UserRole.SUPER_ADMIN)
+  createSociety(@Body() dto: CreateSocietyDto) {
+    return this.adminService.createSociety(dto);
+  }
+
+  @Get('societies/:id')
+  @Roles(UserRole.SUPER_ADMIN)
+  getSocietyDetail(@Param('id') id: string) {
+    return this.adminService.getSocietyDetail(id);
+  }
+
+  @Patch('societies/:id')
+  @Roles(UserRole.SUPER_ADMIN)
+  updateSocietyAdmin(
+    @Param('id') id: string,
+    @Body()
+    dto: {
+      name?: string;
+      address?: string;
+      city?: string;
+      pincode?: string;
+      showInDirectory?: boolean;
+      contactEmail?: string | null;
+      contactPhone?: string | null;
+      config?: Record<string, unknown>;
+    },
+  ) {
+    return this.adminService.updateSocietyAdmin(id, dto);
+  }
+
+  @Delete('societies/:id')
+  @Roles(UserRole.SUPER_ADMIN)
+  archiveSociety(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.adminService.archiveSociety(id, user.sub);
+  }
+
+  @Patch('societies/:id/restore')
+  @Roles(UserRole.SUPER_ADMIN)
+  restoreSociety(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.adminService.restoreSociety(id, user.sub);
+  }
+
+  @Patch('societies/:id/suspend')
+  @Roles(UserRole.SUPER_ADMIN)
+  suspendSociety(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @Body() body: { reason?: string },
+  ) {
+    return this.adminService.suspendSociety(id, user.sub, body?.reason);
+  }
+
+  @Patch('societies/:id/resume')
+  @Roles(UserRole.SUPER_ADMIN)
+  resumeSociety(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.adminService.resumeSociety(id, user.sub);
+  }
+
+  // ── Flats / structure ────────────────────────────────────────────────────────
+
+  @Get('flats')
+  listFlats(
+    @SocietyId() societyId: string,
+    @Query('block') block?: string,
+    @Query('search') search?: string,
+  ) {
+    return this.adminService.listFlats(societyId, { block, search });
+  }
+
+  @Get('blocks')
+  listBlocks(@SocietyId() societyId: string) {
+    return this.adminService.listBlocks(societyId);
+  }
+
+  @Get('flats/export')
+  @Header('Content-Type', 'text/csv')
+  @Header('Content-Disposition', 'attachment; filename="flats.csv"')
+  async exportFlats(@SocietyId() societyId: string): Promise<StreamableFile> {
+    const csv = await this.adminService.exportFlatsCsv(societyId);
+    return new StreamableFile(Buffer.from(csv, 'utf8'));
+  }
+
+  @Get('flats/import/template')
+  @Header('Content-Type', 'text/csv')
+  @Header('Content-Disposition', 'attachment; filename="flats-import-template.csv"')
+  flatsImportTemplate(): StreamableFile {
+    const csv = this.adminService.flatsImportTemplate();
+    return new StreamableFile(Buffer.from(csv, 'utf8'));
+  }
+
+  @Post('flats/import/preview')
+  previewFlatsImport(
+    @SocietyId() societyId: string,
+    @Body('csv') csv: string,
+  ) {
+    return this.adminService.previewFlatsCsv(societyId, csv);
+  }
+
+  @Post('flats/import')
+  importFlats(
+    @SocietyId() societyId: string,
+    @Body('csv') csv: string,
+  ) {
+    return this.adminService.importFlatsCsv(societyId, csv, false);
+  }
+
+  @Get('flats/:id')
+  getFlat(@SocietyId() societyId: string, @Param('id') id: string) {
+    return this.adminService.getFlat(societyId, id);
+  }
+
+  @Post('flats')
+  createFlat(
+    @SocietyId() societyId: string,
+    @Body() dto: { block: string; floor: number; number: string; areaSqft?: number },
+  ) {
+    return this.adminService.createFlat(societyId, dto);
+  }
+
+  @Patch('flats/:id')
+  updateFlat(
+    @SocietyId() societyId: string,
+    @Param('id') id: string,
+    @Body() dto: { block?: string; floor?: number; number?: string; areaSqft?: number | null },
+  ) {
+    return this.adminService.updateFlat(societyId, id, dto);
+  }
+
+  @Delete('flats/:id')
+  deleteFlat(@SocietyId() societyId: string, @Param('id') id: string) {
+    return this.adminService.deleteFlat(societyId, id);
+  }
 
   @Get('building-admins')
   @Roles(UserRole.SUPER_ADMIN)

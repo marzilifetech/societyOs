@@ -2,6 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { BarChart, Bar, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import {
   Users,
@@ -16,11 +17,16 @@ import {
   Megaphone,
   PartyPopper,
   X,
+  Cake,
+  CalendarDays,
+  Pin,
+  ArrowRight,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { useAuthStore } from '@/store/auth.store';
 import { ErrorState } from '@/components/ui/ErrorState';
+import { Stat, Card } from '@/components/primitives';
 
 interface DashboardStats {
   totalResidents: number;
@@ -64,6 +70,20 @@ interface ComplaintCategoryDatum {
 interface SrTrendDatum {
   day: string;
   count: number;
+}
+
+interface BirthdayItem {
+  id: string;
+  name: string;
+  flat: string | null;
+  age: number;
+}
+
+interface NoticeItem {
+  id: string;
+  title: string;
+  publishedAt?: string;
+  isPinned?: boolean;
 }
 
 const ACTIVITY_DOT: Record<string, string> = {
@@ -139,6 +159,20 @@ export default function DashboardPage() {
   const { data: srTrendData } = useQuery({
     queryKey: ['dashboard-sr-trend', societyId],
     queryFn: () => api.get<SrTrendDatum[]>('/admin/dashboard/sr-trend'),
+  });
+
+  // F6: today's birthdays — drives both the inbox + Today @ Society widgets.
+  const { data: birthdays = [] } = useQuery({
+    queryKey: ['dashboard-birthdays', societyId],
+    queryFn: () => api.get<BirthdayItem[]>('/admin/dashboard/birthdays?on=today'),
+    staleTime: 10 * 60_000,
+  });
+
+  // Notices — used to surface pinned count and recency on Today @ Society.
+  const { data: notices = [] } = useQuery({
+    queryKey: ['dashboard-notices', societyId],
+    queryFn: () => api.get<NoticeItem[]>('/notices'),
+    staleTime: 60_000,
   });
 
   // SOS banner dismissal
@@ -245,38 +279,38 @@ export default function DashboardPage() {
 
       {isError && <ErrorState onRetry={refetch} message="Dashboard stats couldn't be loaded. Your data is safe — please try again." />}
 
-      {/* Stats grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        {STAT_CARDS.map((card) => {
-          const [bgClass, textClass] = card.color.split(' ');
-          return (
-            <a
-              key={card.label}
-              href={card.href}
+      {/* F3: Today's Inbox + Today @ Society widgets */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+        <TodaysInbox
+          pendingResidents={pendingResidents ?? []}
+          openComplaints={stats?.pendingComplaints ?? 0}
+          overdueBills={stats?.overdueMaintenanceBills ?? 0}
+          activeSos={stats?.activeAlerts ?? 0}
+          birthdaysToday={birthdays.length}
+        />
+        <TodayAtSociety
+          birthdays={birthdays}
+          upcomingEvent={upcomingEvents[0]}
+          pinnedNoticesCount={notices.filter((n) => n.isPinned).length}
+        />
+      </div>
+
+      {/* Stats grid — restyled with the Stat primitive */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
+        {STAT_CARDS.map((card) => (
+          <Link key={card.label} href={card.href} className="block">
+            <Stat
+              label={card.label}
+              value={isLoading ? '…' : (card.value ?? 0)}
+              hint={card.subtitle}
               className={cn(
-                'bg-white rounded-2xl p-5 shadow-sm border block hover:shadow-md transition-shadow',
-                card.label === 'Pending Approvals' && card.alert
-                  ? 'border-amber-300'
-                  : card.alert
-                    ? 'border-red-300'
-                    : 'border-gray-100',
+                'hover:border-gray-300 transition-colors',
+                card.alert && 'border-red-300',
+                card.label === 'Pending Approvals' && card.alert && 'border-amber-300',
               )}
-            >
-              <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center mb-3', bgClass)}>
-                <card.Icon className={cn('w-5 h-5', textClass)} />
-              </div>
-              {isLoading ? (
-                <div className="h-8 w-16 bg-gray-200 rounded animate-pulse mb-1" />
-              ) : (
-                <p className="text-2xl font-bold text-gray-900">{card.value ?? 0}</p>
-              )}
-              <p className="text-sm text-gray-500 mt-0.5">{card.label}</p>
-              {card.subtitle && (
-                <p className="text-xs text-amber-600 mt-0.5">{card.subtitle}</p>
-              )}
-            </a>
-          );
-        })}
+            />
+          </Link>
+        ))}
       </div>
 
       {/* Financial Snapshot */}
@@ -447,5 +481,189 @@ function ServiceRequestRow({ sr }: { sr: any }) {
         </span>
       </div>
     </div>
+  );
+}
+
+// F3: "Today's Inbox" surfaces the 5 most-urgent items needing admin
+// attention. We grade by impact (active SOS > overdue bills > pending
+// residents > open complaints > today's birthdays) and cap at 5 — anything
+// past that belongs on the relevant detail page.
+function TodaysInbox({
+  pendingResidents,
+  openComplaints,
+  overdueBills,
+  activeSos,
+  birthdaysToday,
+}: {
+  pendingResidents: any[];
+  openComplaints: number;
+  overdueBills: number;
+  activeSos: number;
+  birthdaysToday: number;
+}) {
+  type Row = { id: string; icon: typeof Siren; label: string; href: string; tone: string };
+  const rows: Row[] = [];
+  if (activeSos > 0) {
+    rows.push({
+      id: 'sos',
+      icon: Siren,
+      label: `${activeSos} active SOS alert${activeSos === 1 ? '' : 's'}`,
+      href: '/sos',
+      tone: 'text-red-600',
+    });
+  }
+  if (overdueBills > 0) {
+    rows.push({
+      id: 'bills',
+      icon: Banknote,
+      label: `${overdueBills} overdue maintenance bill${overdueBills === 1 ? '' : 's'}`,
+      href: '/maintenance',
+      tone: 'text-amber-600',
+    });
+  }
+  pendingResidents.slice(0, 3).forEach((r) => {
+    rows.push({
+      id: `resident-${r.id}`,
+      icon: Clock,
+      label: `Approve resident: ${r.name ?? r.phone ?? 'pending'}`,
+      href: `/residents/${r.id}`,
+      tone: 'text-amber-600',
+    });
+  });
+  if (openComplaints > 0) {
+    rows.push({
+      id: 'complaints',
+      icon: ClipboardList,
+      label: `${openComplaints} pending complaint${openComplaints === 1 ? '' : 's'}`,
+      href: '/complaints',
+      tone: 'text-orange-600',
+    });
+  }
+  if (birthdaysToday > 0) {
+    rows.push({
+      id: 'birthdays',
+      icon: Cake,
+      label: `${birthdaysToday} resident birthday${birthdaysToday === 1 ? '' : 's'} today`,
+      href: '#today-at-society',
+      tone: 'text-pink-600',
+    });
+  }
+
+  const limited = rows.slice(0, 5);
+  return (
+    <Card>
+      <div className="flex items-start justify-between mb-3">
+        <div>
+          <h2 className="text-[15px] font-semibold text-gray-950">Today&apos;s Inbox</h2>
+          <p className="text-[12px] text-gray-500 mt-0.5">Items that need your attention now.</p>
+        </div>
+      </div>
+      {limited.length === 0 ? (
+        <div className="py-8 text-center">
+          <ClipboardList className="w-7 h-7 text-gray-300 mx-auto mb-2" />
+          <p className="text-[13px] text-gray-500">Inbox zero — nothing urgent today.</p>
+        </div>
+      ) : (
+        <ul className="divide-y divide-gray-100 -mx-1">
+          {limited.map((row) => (
+            <li key={row.id}>
+              <Link
+                href={row.href}
+                className="flex items-center gap-3 px-1 py-2.5 hover:bg-gray-50 rounded-lg transition-colors"
+              >
+                <row.icon className={cn('w-4 h-4 shrink-0', row.tone)} />
+                <span className="text-[13px] text-gray-800 flex-1 truncate">{row.label}</span>
+                <ArrowRight className="w-3.5 h-3.5 text-gray-300 group-hover:text-gray-500" />
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+// F3: "Today @ Society" — celebratory + community-flavoured glance card.
+// Birthdays first (event-of-the-day), then the next upcoming event in the
+// week, then pinned notices count as a quick civic-attention signal.
+function TodayAtSociety({
+  birthdays,
+  upcomingEvent,
+  pinnedNoticesCount,
+}: {
+  birthdays: BirthdayItem[];
+  upcomingEvent: EventItem | undefined;
+  pinnedNoticesCount: number;
+}) {
+  const eventInSevenDays =
+    upcomingEvent &&
+    new Date(upcomingEvent.startAt).getTime() - Date.now() < 7 * 86_400_000
+      ? upcomingEvent
+      : undefined;
+  return (
+    <Card>
+      <div className="flex items-start justify-between mb-3">
+        <div>
+          <h2 className="text-[15px] font-semibold text-gray-950" id="today-at-society">
+            Today @ Society
+          </h2>
+          <p className="text-[12px] text-gray-500 mt-0.5">
+            A quick civic glance — birthdays, events, pinned notices.
+          </p>
+        </div>
+      </div>
+      <div className="space-y-3">
+        <div className="flex items-start gap-3 px-1 py-2">
+          <Cake className="w-4 h-4 text-pink-600 shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-[13px] font-medium text-gray-900">
+              {birthdays.length === 0
+                ? 'No birthdays today'
+                : `${birthdays.length} birthday${birthdays.length === 1 ? '' : 's'} today`}
+            </p>
+            {birthdays.length > 0 && (
+              <p className="text-[12px] text-gray-500 truncate mt-0.5">
+                {birthdays.slice(0, 3).map((b) => b.name).join(', ')}
+                {birthdays.length > 3 && `, +${birthdays.length - 3} more`}
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="flex items-start gap-3 px-1 py-2">
+          <CalendarDays className="w-4 h-4 text-purple-600 shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            {eventInSevenDays ? (
+              <Link href="/events" className="block">
+                <p className="text-[13px] font-medium text-gray-900 truncate">{eventInSevenDays.title}</p>
+                <p className="text-[12px] text-gray-500 mt-0.5">
+                  {new Date(eventInSevenDays.startAt).toLocaleDateString('en-IN', {
+                    weekday: 'short',
+                    day: 'numeric',
+                    month: 'short',
+                  })}
+                  {' · '}
+                  {eventInSevenDays.venue}
+                </p>
+              </Link>
+            ) : (
+              <p className="text-[13px] font-medium text-gray-900">No events in the next 7 days</p>
+            )}
+          </div>
+        </div>
+        <Link href="/notices" className="flex items-start gap-3 px-1 py-2 hover:bg-gray-50 rounded-lg transition-colors">
+          <Pin className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-[13px] font-medium text-gray-900">
+              {pinnedNoticesCount === 0
+                ? 'No pinned notices'
+                : `${pinnedNoticesCount} pinned notice${pinnedNoticesCount === 1 ? '' : 's'}`}
+            </p>
+            <p className="text-[12px] text-gray-500 mt-0.5">
+              Open the noticeboard
+            </p>
+          </div>
+        </Link>
+      </div>
+    </Card>
   );
 }

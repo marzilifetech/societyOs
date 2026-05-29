@@ -443,6 +443,7 @@ describe('ServiceRequestService', () => {
       mockPrisma.serviceRequest.findMany.mockResolvedValue([
         {
           id: 'sr-1',
+          societyId: 'soc-1',
           category: 'PLUMBING',
           scheduledTime,
           reminderMinutes: 10,
@@ -450,7 +451,7 @@ describe('ServiceRequestService', () => {
           resident: { userId: 'u-res' },
         },
       ]);
-      mockPrisma.staffMember.findUnique.mockResolvedValue({ id: 's1', userId: 'u-staff' });
+      mockPrisma.staffMember.findMany.mockResolvedValue([{ id: 's1', userId: 'u-staff' }]);
       mockPrisma.serviceRequest.update.mockResolvedValue({});
 
       await service.sendDueReminders();
@@ -462,10 +463,50 @@ describe('ServiceRequestService', () => {
       });
     });
 
+    it('batch-loads staff via findMany (no N+1 findUnique) — 3 assignees + 1 missing', async () => {
+      const scheduledTime = new Date(Date.now() + 5 * 60_000);
+      mockPrisma.serviceRequest.findMany.mockResolvedValue([
+        {
+          id: 'sr-1',
+          societyId: 'soc-1',
+          category: 'PLUMBING',
+          scheduledTime,
+          reminderMinutes: 10,
+          assignedToIds: ['s1', 's2', 's3', 's-missing'],
+          resident: { userId: 'u-res' },
+        },
+      ]);
+      // Note: s-missing intentionally not returned to assert graceful skip.
+      mockPrisma.staffMember.findMany.mockResolvedValue([
+        { id: 's1', userId: 'u-staff-1' },
+        { id: 's2', userId: 'u-staff-2' },
+        { id: 's3', userId: 'u-staff-3' },
+      ]);
+      mockPrisma.serviceRequest.update.mockResolvedValue({});
+
+      await service.sendDueReminders();
+
+      // Critical: findUnique must NOT be called for the per-staff lookup.
+      expect(mockPrisma.staffMember.findUnique).not.toHaveBeenCalled();
+      // findMany should be called exactly once with all assignee ids.
+      expect(mockPrisma.staffMember.findMany).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.staffMember.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: { in: ['s1', 's2', 's3', 's-missing'] },
+            societyId: 'soc-1',
+          }),
+        }),
+      );
+      // 1 resident + 3 found staff = 4 notifications. s-missing skipped silently.
+      expect(mockNotification.notifyUser).toHaveBeenCalledTimes(4);
+    });
+
     it('skips requests whose reminder time is still in the future', async () => {
       mockPrisma.serviceRequest.findMany.mockResolvedValue([
         {
           id: 'sr-2',
+          societyId: 'soc-1',
           category: 'X',
           scheduledTime: new Date(Date.now() + 60 * 60_000),
           reminderMinutes: 30,

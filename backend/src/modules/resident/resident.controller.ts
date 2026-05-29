@@ -1,4 +1,4 @@
-import { Controller, Get, Patch, Post, Body, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Patch, Post, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { ResidentService } from './resident.service';
 import { OnboardResidentDto, UpdateProfileDto } from './dto/resident.dto';
@@ -48,15 +48,80 @@ export class ResidentController {
   @Roles(UserRole.RESIDENT)
   uploadDocuments(
     @CurrentUser() user: JwtPayload,
-    @Body() body: { idProof: string; addressProof: string },
+    @Body()
+    body: {
+      // Legacy field names — still accepted by clients that haven't upgraded
+      idProof?: string;
+      addressProof?: string;
+      // New presign-upload fields
+      aadhaarUrl?: string;
+      aadhaarNumber?: string;
+      panUrl?: string;
+      panNumber?: string;
+      idProofUrl?: string;
+      addressProofUrl?: string;
+    },
   ) {
-    return this.residentService.uploadDocuments(user.sub, body.idProof, body.addressProof);
+    const aadhaarNumber = body.aadhaarNumber?.trim();
+    const panNumber = body.panNumber?.trim().toUpperCase();
+    if (aadhaarNumber && !/^\d{12}$/.test(aadhaarNumber)) {
+      throw new BadRequestException({
+        code: 'INVALID_AADHAAR',
+        message: 'Aadhaar must be exactly 12 digits',
+      });
+    }
+    if (panNumber && !/^[A-Z]{5}\d{4}[A-Z]$/.test(panNumber)) {
+      throw new BadRequestException({
+        code: 'INVALID_PAN',
+        message: 'PAN must be in the format ABCDE1234F',
+      });
+    }
+
+    // Reject URLs that aren't from our configured S3 bucket (defence in depth
+    // — the presign endpoint is the only legitimate source of upload URLs).
+    const bucket = process.env.AWS_S3_BUCKET || process.env.S3_BUCKET;
+    const isAllowedUrl = (url?: string) => {
+      if (!url) return true;
+      if (url.startsWith('s3://')) return true;
+      if (bucket && url.includes(bucket)) return true;
+      return false;
+    };
+    const urls = [body.aadhaarUrl, body.panUrl, body.idProofUrl, body.addressProofUrl, body.idProof, body.addressProof];
+    for (const u of urls) {
+      if (u && !isAllowedUrl(u)) {
+        throw new BadRequestException({
+          code: 'INVALID_UPLOAD_URL',
+          message: 'Document URL must come from the presign-upload endpoint',
+        });
+      }
+    }
+
+    return this.residentService.uploadDocuments(user.sub, {
+      aadhaarUrl: body.aadhaarUrl,
+      aadhaarNumber,
+      panUrl: body.panUrl,
+      panNumber,
+      idProofUrl: body.idProofUrl ?? body.idProof,
+      addressProofUrl: body.addressProofUrl ?? body.addressProof,
+    });
   }
 
   @Get('documents/status')
   @Roles(UserRole.RESIDENT)
   getDocumentsStatus(@CurrentUser() user: JwtPayload) {
     return this.residentService.getDocumentsStatus(user.sub);
+  }
+
+  @Get('documents/me')
+  @Roles(UserRole.RESIDENT)
+  getMyDocuments(@CurrentUser() user: JwtPayload) {
+    return this.residentService.getMyDocuments(user.sub);
+  }
+
+  @Get('society/emergency-contacts')
+  @Roles(UserRole.RESIDENT)
+  getEmergencyContacts(@SocietyId() societyId: string) {
+    return this.residentService.getEmergencyContacts(societyId);
   }
 
   @Patch('me/directory-visibility')

@@ -10,9 +10,10 @@ import {
   HandPlatter, ParkingSquare, Plane, Package, Bug,
   Wallet, PiggyBank, Store,
   BarChart3, Home, Vote, Building2, MessagesSquare, Settings,
-  ScrollText, UserCog, type LucideIcon,
+  ScrollText, UserCog, Layers, type LucideIcon,
   ChevronRight, LogOut,
 } from 'lucide-react';
+import { SocietySwitcher } from '@/components/layout/SocietySwitcher';
 import { useAuthStore } from '@/store/auth.store';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/cn';
@@ -22,6 +23,7 @@ type Item = { href: string; icon: LucideIcon; label: string };
 const NAV_ITEMS: Item[] = [
   { href: '/dashboard',         icon: LayoutDashboard,      label: 'Dashboard' },
   { href: '/residents',         icon: Users,                label: 'Residents' },
+  { href: '/flats',             icon: Building2,            label: 'Flats & Blocks' },
   { href: '/staff',             icon: UserCircle,           label: 'Staff' },
   { href: '/staff/leaderboard', icon: Trophy,               label: 'Leaderboard' },
   { href: '/staff/leaves',      icon: CalendarOff,          label: 'Staff Leaves' },
@@ -74,12 +76,17 @@ const NAV_SECTIONS: { label: string; items: Item[] }[] = [
   {
     label: 'System',
     items: [
-      { href: '/building-admins', icon: UserCog,        label: 'Building Admins' },
-      { href: '/audit',          icon: ScrollText,      label: 'Audit Log' },
-      { href: '/settings',       icon: Settings,        label: 'Settings' },
+      { href: '/platform',        icon: Layers,           label: 'Platform' },
+      { href: '/societies',       icon: Building2,        label: 'Societies' },
+      { href: '/building-admins', icon: UserCog,          label: 'Building Admins' },
+      { href: '/audit',           icon: ScrollText,       label: 'Audit Log' },
+      { href: '/settings',        icon: Settings,         label: 'Settings' },
     ],
   },
 ];
+
+// Items only super-admins should see.
+const SUPER_ADMIN_ONLY = new Set(['/platform', '/societies', '/building-admins']);
 
 function NavItem({ href, icon: Icon, label, badge }: Item & { badge?: number }) {
   const pathname = usePathname();
@@ -113,10 +120,13 @@ export function Sidebar() {
   const { user, clearAuth } = useAuthStore();
   const initials = user?.name?.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase() ?? 'A';
 
+  // SUPER_ADMIN sits in the Platform society which has no residents; polling
+  // every 60s would return zero and waste a request per minute per tab.
   const { data: pendingResidents } = useQuery({
     queryKey: ['residents-pending'],
     queryFn: () => api.get<any[]>('/admin/residents/pending'),
     refetchInterval: 60_000,
+    enabled: !!user && user.role !== 'SUPER_ADMIN',
   });
   const pendingCount = pendingResidents?.length ?? 0;
 
@@ -135,6 +145,8 @@ export function Sidebar() {
         </div>
       </div>
 
+      <SocietySwitcher />
+
       {/* Nav */}
       <nav className="flex-1 px-3 py-3 overflow-y-auto space-y-0.5">
         {NAV_ITEMS.map((item) => (
@@ -145,16 +157,22 @@ export function Sidebar() {
           />
         ))}
 
-        {NAV_SECTIONS.map((section) => (
-          <div key={section.label} className="pt-4">
-            <p className="px-3 mb-1.5 text-[10px] font-semibold tracking-widest uppercase text-gray-400">
-              {section.label}
-            </p>
-            {section.items.map((item) => (
-              <NavItem key={item.href} {...item} />
-            ))}
-          </div>
-        ))}
+        {NAV_SECTIONS.map((section) => {
+          const items = section.items.filter(
+            (item) => !SUPER_ADMIN_ONLY.has(item.href) || user?.role === 'SUPER_ADMIN',
+          );
+          if (items.length === 0) return null;
+          return (
+            <div key={section.label} className="pt-4">
+              <p className="px-3 mb-1.5 text-[10px] font-semibold tracking-widest uppercase text-gray-400">
+                {section.label}
+              </p>
+              {items.map((item) => (
+                <NavItem key={item.href} {...item} />
+              ))}
+            </div>
+          );
+        })}
       </nav>
 
       {/* User */}

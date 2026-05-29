@@ -5,7 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { JwtPayload } from '../../../common/decorators/current-user.decorator';
 import { AuthRedis } from '../redis.client';
-import { UserStatus } from '@prisma/client';
+import { UserStatus, SocietyStatus, UserRole } from '@prisma/client';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -34,7 +34,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (!payload.societyId && payload.tid) {
       payload.societyId = payload.tid;
     }
-    const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
+    const user = await this.prisma.user.findUnique({
+      where: { id: payload.sub },
+      include: { society: { select: { id: true, status: true } } },
+    });
     if (!user) {
       // TODO (Phase 2): when payload has external claims (tid/tenant_name),
       // sync from external `/v1/users/me` and create local mirror. For now
@@ -43,6 +46,20 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     }
     if (user.status === UserStatus.SUSPENDED) {
       throw new UnauthorizedException({ code: 'USER_REVOKED' });
+    }
+    // FK-orphan defence: a stale token may reference a deleted/missing society.
+    // Mirrors the null-society guard in AuthService.refreshToken — surface
+    // USER_REVOKED so the client can re-auth cleanly instead of throwing
+    // "Cannot read properties of undefined".
+    if (!user.society) {
+      throw new UnauthorizedException({ code: 'USER_REVOKED' });
+    }
+    // Society lifecycle gate: SUSPENDED/ARCHIVED home society = no further access.
+    // SUPER_ADMIN is exempted only because their home society is the Platform
+    // society which is enforced to be ACTIVE — they never get here otherwise.
+    if (user.role !== UserRole.SUPER_ADMIN && user.society.status !== SocietyStatus.ACTIVE) {
+      const code = user.society.status === SocietyStatus.SUSPENDED ? 'SOCIETY_SUSPENDED' : 'SOCIETY_ARCHIVED';
+      throw new UnauthorizedException({ code });
     }
     return payload;
   }

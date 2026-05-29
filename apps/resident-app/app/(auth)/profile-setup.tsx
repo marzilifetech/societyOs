@@ -105,6 +105,11 @@ export default function ProfileSetupScreen() {
             onChangeText={setName}
             placeholder="Enter your full name"
             placeholderTextColor="#9CA3AF"
+            // iOS smart-fill bleeds the previous field's content type into the
+            // next field unless each is explicitly typed.
+            textContentType="name"
+            autoComplete="name"
+            autoCapitalize="words"
           />
         </View>
 
@@ -119,6 +124,12 @@ export default function ProfileSetupScreen() {
             placeholderTextColor="#9CA3AF"
             keyboardType="email-address"
             autoCapitalize="none"
+            autoCorrect={false}
+            // Without textContentType="emailAddress", iOS will autofill the
+            // previous (phone) field's value here on focus. Same for Android
+            // autoComplete. This is the root cause of "phone goes into email".
+            textContentType="emailAddress"
+            autoComplete="email"
           />
         </View>
 
@@ -201,6 +212,9 @@ export default function ProfileSetupScreen() {
             onChangeText={setEmergencyContactName}
             placeholder="Contact person name"
             placeholderTextColor="#9CA3AF"
+            textContentType="name"
+            autoComplete="name"
+            autoCapitalize="words"
           />
           <TextInput
             className="bg-gray-100 rounded-xl p-4 text-gray-900 text-base border border-gray-200 mt-2.5"
@@ -209,6 +223,10 @@ export default function ProfileSetupScreen() {
             placeholder="Contact phone number"
             placeholderTextColor="#9CA3AF"
             keyboardType="phone-pad"
+            // Explicit phone content type so iOS smart-fill / Android autofill
+            // suggest a contact phone, not the user's own phone or email.
+            textContentType="telephoneNumber"
+            autoComplete="tel"
           />
         </View>
 

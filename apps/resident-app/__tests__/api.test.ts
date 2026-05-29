@@ -238,7 +238,7 @@ describe('setApiToken / loadApiToken', () => {
 });
 
 describe('handleUnauthorized (onUnauthorized callback)', () => {
-  it('redirects to /login when ApiClient fires onUnauthorized', () => {
+  it('redirects to /(auth)/society-select when ApiClient fires onUnauthorized', () => {
     jest.resetModules();
     let capturedOnUnauthorized: (() => void) | undefined;
     jest.mock('@societyos/api-client', () => ({
@@ -252,7 +252,7 @@ describe('handleUnauthorized (onUnauthorized callback)', () => {
     require('../src/lib/api');
     const { router } = require('expo-router');
     capturedOnUnauthorized!();
-    expect(router.replace).toHaveBeenCalledWith('/login');
+    expect(router.replace).toHaveBeenCalledWith('/(auth)/society-select');
   });
 });
 

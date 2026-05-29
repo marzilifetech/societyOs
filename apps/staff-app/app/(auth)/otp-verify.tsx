@@ -15,7 +15,7 @@ const OTP_LENGTH = 4;
 
 export default function OtpVerifyScreen() {
   const { phone, societyId: paramSocietyId } = useLocalSearchParams<{ phone: string; societyId?: string }>();
-  const societyId = paramSocietyId ?? process.env.EXPO_PUBLIC_SOCIETY_ID!;
+  const societyId = paramSocietyId ?? '';
   const setAuth = useAuthStore((s) => s.setAuth);
   const [otp, setOtp] = useState<string[]>(Array(OTP_LENGTH).fill(''));
   const [loading, setLoading] = useState(false);
@@ -43,6 +43,11 @@ export default function OtpVerifyScreen() {
   };
 
   const handleVerify = async (code: string) => {
+    if (!societyId) {
+      Alert.alert('Pick a society', 'Please choose your society first.');
+      router.replace('/(auth)/society-select' as any);
+      return;
+    }
     setLoading(true);
     try {
       const raw = await api.post<object>('/auth/verify-otp', {

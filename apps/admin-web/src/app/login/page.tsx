@@ -1,8 +1,15 @@
 'use client';
 
-import { Suspense, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ArrowLeft } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  Building2,
+  ShieldCheck,
+  Headphones,
+  Layers,
+} from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/store/auth.store';
 import {
@@ -10,10 +17,10 @@ import {
   isVerifyOtpTotpChallenge,
   type AdminVerifyOtpPayload,
 } from '@societyos/api-client';
+import { Button, Field, Input } from '@/components/primitives';
 
 type Step = 'phone' | 'otp' | '2fa';
 
-/** Same society as configured for this admin deployment (matches SendOtpDto). */
 const SOCIETY_ID = process.env.NEXT_PUBLIC_SOCIETY_ID ?? '';
 
 type PendingAdminTotp = {
@@ -22,11 +29,32 @@ type PendingAdminTotp = {
   societyId: string;
 };
 
+const STEP_ORDER: Step[] = ['phone', 'otp', '2fa'];
+
+const VALUE_PROPS: Array<{ icon: React.ComponentType<{ className?: string }>; title: string; body: string }> = [
+  {
+    icon: Building2,
+    title: 'Multi-society admin',
+    body: 'Switch between communities, suspend, archive — all from one console.',
+  },
+  {
+    icon: ShieldCheck,
+    title: 'Compliance built-in',
+    body: 'DPDP-ready audit trail, OTP via Marzi, role-scoped access.',
+  },
+  {
+    icon: Headphones,
+    title: 'Resident care, faster',
+    body: 'Real-time SOS, complaints, and service requests in one queue.',
+  },
+];
+
 function LoginPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const sessionExpired = searchParams.get('reason') === 'session-expired';
   const setAuth = useAuthStore((s) => s.setAuth);
+
   const [step, setStep] = useState<Step>('phone');
   const [phone, setPhone] = useState('');
   const [otp, setOtp] = useState('');
@@ -34,20 +62,59 @@ function LoginPageInner() {
   const [totpPending, setTotpPending] = useState<PendingAdminTotp | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [resendCountdown, setResendCountdown] = useState(0);
+
+  // Resend cooldown — 30s after OTP request, decrements once per second.
+  useEffect(() => {
+    if (step !== 'otp' || resendCountdown <= 0) return;
+    const t = setTimeout(() => setResendCountdown((s) => s - 1), 1000);
+    return () => clearTimeout(t);
+  }, [step, resendCountdown]);
+
+  // Wipe any stale auth artefacts when the user lands on /login. Belt-and-
+  // braces with the api-client's auth-route filter: even if some legacy
+  // code path leaks credentials, this ensures a fresh-start state.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      localStorage.removeItem('admin_token');
+      localStorage.removeItem('admin_refresh_token');
+      localStorage.removeItem('admin_selected_society_id');
+      localStorage.removeItem('auth-storage');
+      sessionStorage.removeItem('admin_reauth_token');
+    } catch {
+      /* private mode or quota — non-fatal */
+    }
+  }, []);
 
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     if (!SOCIETY_ID) {
-      setError('Set NEXT_PUBLIC_SOCIETY_ID in .env.local (society UUID).');
+      setError('NEXT_PUBLIC_SOCIETY_ID is not set. Check the admin-web .env.local.');
       return;
     }
     setLoading(true);
     try {
       await api.post<object>('/auth/send-otp', { phone: `+91${phone}`, societyId: SOCIETY_ID });
       setStep('otp');
+      setResendCountdown(30);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send OTP.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResend = async () => {
+    if (resendCountdown > 0 || loading) return;
+    setError('');
+    setLoading(true);
+    try {
+      await api.post<object>('/auth/send-otp', { phone: `+91${phone}`, societyId: SOCIETY_ID });
+      setResendCountdown(30);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not resend OTP.');
     } finally {
       setLoading(false);
     }
@@ -57,7 +124,7 @@ function LoginPageInner() {
     e.preventDefault();
     setError('');
     if (!SOCIETY_ID) {
-      setError('Set NEXT_PUBLIC_SOCIETY_ID in .env.local.');
+      setError('NEXT_PUBLIC_SOCIETY_ID is not set.');
       return;
     }
     setLoading(true);
@@ -70,26 +137,26 @@ function LoginPageInner() {
       const res = unwrapApiEnvelope<AdminVerifyOtpPayload>(raw);
 
       if (isVerifyOtpTotpChallenge(res)) {
-        setTotpPending({
-          phoneE164: `+91${phone}`,
-          otp,
-          societyId: SOCIETY_ID,
-        });
+        setTotpPending({ phoneE164: `+91${phone}`, otp, societyId: SOCIETY_ID });
         setStep('2fa');
         return;
       }
 
       if (res.user.role !== 'ADMIN' && res.user.role !== 'SUPER_ADMIN') {
-        throw new Error('Access denied. Admin account required.');
+        throw new Error('Access denied — this console is for society admins only.');
       }
 
-      setAuth(res.accessToken, {
-        id: res.user.id,
-        name: res.user.name ?? '',
-        phone: res.user.phone,
-        role: res.user.role,
-        societyId: res.user.societyId ?? SOCIETY_ID,
-      });
+      setAuth(
+        res.accessToken,
+        res.refreshToken,
+        {
+          id: res.user.id,
+          name: res.user.name ?? '',
+          phone: res.user.phone,
+          role: res.user.role,
+          societyId: res.user.societyId ?? SOCIETY_ID,
+        },
+      );
       router.push('/dashboard');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sign-in failed.');
@@ -103,9 +170,7 @@ function LoginPageInner() {
     setError('');
     setLoading(true);
     try {
-      if (!totpPending) {
-        throw new Error('Session expired. Sign in again.');
-      }
+      if (!totpPending) throw new Error('Session expired. Sign in again.');
       const raw = await api.post<object>('/auth/verify-otp', {
         phone: totpPending.phoneE164,
         otp: totpPending.otp,
@@ -115,158 +180,383 @@ function LoginPageInner() {
       const res = unwrapApiEnvelope<AdminVerifyOtpPayload>(raw);
 
       if (isVerifyOtpTotpChallenge(res)) {
-        setError('Invalid authenticator code.');
+        setError('Invalid authenticator code. Try again.');
         return;
       }
-
       if (res.user.role !== 'ADMIN' && res.user.role !== 'SUPER_ADMIN') {
-        throw new Error('Access denied. Admin account required.');
+        throw new Error('Access denied — this console is for society admins only.');
       }
-
-      setAuth(res.accessToken, {
-        id: res.user.id,
-        name: res.user.name ?? '',
-        phone: res.user.phone,
-        role: res.user.role,
-        societyId: res.user.societyId ?? totpPending.societyId,
-      });
+      setAuth(
+        res.accessToken,
+        res.refreshToken,
+        {
+          id: res.user.id,
+          name: res.user.name ?? '',
+          phone: res.user.phone,
+          role: res.user.role,
+          societyId: res.user.societyId ?? totpPending.societyId,
+        },
+      );
       router.push('/dashboard');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Invalid code');
+      setError(err instanceof Error ? err.message : 'Invalid code.');
     } finally {
       setLoading(false);
     }
   };
 
-  return (
-    <div className="min-h-screen bg-primary-500 flex items-center justify-center px-4">
-      <div className="bg-white rounded-3xl shadow-xl w-full max-w-md p-8">
-        {sessionExpired && (
-          <div className="mb-4 p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm text-center">
-            Your session ended automatically for security. Please sign in again to continue.
-          </div>
-        )}
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold text-gray-900">SocietyOS Admin</h1>
-          <p className="text-gray-500 text-sm mt-1">
-            {step === 'phone' ? 'Sign in to your admin account' : `OTP sent to +91 ${phone}`}
-          </p>
-        </div>
+  const stepIndex = STEP_ORDER.indexOf(step);
 
-        {step === '2fa' ? (
-          <form onSubmit={handle2fa} className="space-y-4">
-            <div>
-              <label className="text-sm font-medium text-gray-700 block mb-1.5">
-                Two-Factor Code
-              </label>
-              <input
-                type="text"
-                inputMode="numeric"
-                aria-label="Two-factor authentication code"
-                className="w-full border border-gray-200 rounded-xl px-4 py-3 text-center text-2xl font-bold tracking-widest outline-none focus:border-primary-500"
-                placeholder="——————"
-                value={twoFactorCode}
-                onChange={(e) => setTwoFactorCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                maxLength={6}
-                required
-                autoFocus
-              />
-              <p className="text-xs text-gray-500 mt-2">
-                Enter the 6-digit code from your authenticator app.
+  return (
+    <div className="min-h-screen flex bg-gray-50">
+      {/* Brand panel — hidden on small screens. Solid magenta with a subtle
+          diagonal pattern overlay; intentionally low-key so the form is the
+          centre of attention. */}
+      <aside className="hidden lg:flex relative w-[42%] xl:w-[44%] bg-primary-700 text-white overflow-hidden">
+        <div
+          aria-hidden
+          className="absolute inset-0 opacity-[0.08]"
+          style={{
+            backgroundImage:
+              'radial-gradient(circle at 1px 1px, white 1px, transparent 0)',
+            backgroundSize: '24px 24px',
+          }}
+        />
+        <div className="relative flex flex-col justify-between p-12 xl:p-16 w-full">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-white/10 backdrop-blur-sm flex items-center justify-center">
+              <Layers className="w-5 h-5" />
+            </div>
+            <span className="text-[15px] font-semibold tracking-tight">SocietyOS</span>
+          </div>
+
+          <div className="max-w-md">
+            <h1 className="text-[42px] xl:text-[48px] leading-[1.05] font-semibold tracking-tight">
+              The control room for your community.
+            </h1>
+            <p className="mt-5 text-[15px] text-white/75 leading-relaxed">
+              Operate every society you manage from one calm dashboard —
+              residents, staff, billing, and emergencies, all in one place.
+            </p>
+          </div>
+
+          <ul className="space-y-5 max-w-md">
+            {VALUE_PROPS.map(({ icon: Icon, title, body }) => (
+              <li key={title} className="flex gap-3.5">
+                <div className="shrink-0 w-9 h-9 rounded-lg bg-white/10 backdrop-blur-sm flex items-center justify-center">
+                  <Icon className="w-4 h-4" />
+                </div>
+                <div>
+                  <p className="text-[14px] font-medium">{title}</p>
+                  <p className="text-[13px] text-white/70 mt-0.5 leading-relaxed">{body}</p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </aside>
+
+      {/* Form panel */}
+      <main className="flex-1 flex items-center justify-center p-6 sm:p-10">
+        <div className="w-full max-w-[400px]">
+          {/* Compact mobile-only brand mark */}
+          <div className="lg:hidden flex items-center gap-2 mb-8">
+            <div className="w-8 h-8 rounded-lg bg-primary-700 text-white flex items-center justify-center">
+              <Layers className="w-4 h-4" />
+            </div>
+            <span className="text-[14px] font-semibold tracking-tight text-gray-950">SocietyOS</span>
+          </div>
+
+          {sessionExpired && (
+            <div className="mb-6 p-3 rounded-lg bg-amber-50 border border-amber-200">
+              <p className="text-[13px] text-amber-900 leading-snug">
+                Your session ended automatically. Sign in again to continue.
               </p>
             </div>
+          )}
 
-            {error && <p className="text-red-500 text-sm">{error}</p>}
-
-            <button
-              type="submit"
-              disabled={twoFactorCode.length !== 6 || loading}
-              className="w-full bg-primary-500 text-white rounded-xl py-3 font-semibold disabled:opacity-40 hover:bg-primary-600 transition-colors"
-            >
-              {loading ? 'Verifying…' : 'Verify & Sign In'}
-            </button>
-            <button
-              type="button"
-              className="w-full text-gray-500 text-sm py-2 inline-flex items-center justify-center gap-1.5 hover:text-gray-700"
-              onClick={() => { setStep('otp'); setTwoFactorCode(''); setTotpPending(null); setError(''); }}
-            >
-              <ArrowLeft className="w-4 h-4" /> Back
-            </button>
-          </form>
-        ) : step === 'phone' ? (
-          <form onSubmit={handleSendOtp} className="space-y-4">
-            <div>
-              <label className="text-sm font-medium text-gray-700 block mb-1.5">
-                Mobile Number
-              </label>
-              <div className="flex rounded-xl border border-gray-200 overflow-hidden">
-                <span className="bg-gray-50 px-4 py-3 text-gray-500 font-medium border-r border-gray-200">
-                  +91
-                </span>
-                <input
-                  type="tel"
-                  className="flex-1 px-4 py-3 text-base outline-none"
-                  placeholder="10-digit number"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                  required
-                />
-              </div>
-            </div>
-
-            {error && <p className="text-red-500 text-sm">{error}</p>}
-
-            <button
-              type="submit"
-              disabled={phone.length !== 10 || loading}
-              className="w-full bg-primary-500 text-white rounded-xl py-3 font-semibold disabled:opacity-40 hover:bg-primary-600 transition-colors"
-            >
-              {loading ? 'Sending…' : 'Get OTP'}
-            </button>
-          </form>
-        ) : (
-          <form onSubmit={handleVerify} className="space-y-4">
-            <div>
-              <label className="text-sm font-medium text-gray-700 block mb-1.5">
-                Enter 4-digit OTP
-              </label>
-              <input
-                type="text"
-                className="w-full border border-gray-200 rounded-xl px-4 py-3 text-center text-2xl font-bold tracking-widest outline-none focus:border-primary-500"
-                placeholder="————"
-                value={otp}
-                onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                maxLength={4}
-                required
+          {/* Step indicator — three dots, current is filled */}
+          <div className="flex items-center gap-2 mb-6" aria-label={`Step ${stepIndex + 1} of 3`}>
+            {STEP_ORDER.map((s, i) => (
+              <span
+                key={s}
+                className={
+                  'h-1 rounded-full transition-all ' +
+                  (i === stepIndex
+                    ? 'w-8 bg-primary-700'
+                    : i < stepIndex
+                      ? 'w-8 bg-primary-200'
+                      : 'w-4 bg-gray-200')
+                }
               />
-            </div>
+            ))}
+            <span className="ml-auto text-[12px] text-gray-500 font-medium">
+              {stepIndex + 1} of 3
+            </span>
+          </div>
 
-            {error && <p className="text-red-500 text-sm">{error}</p>}
+          {step === 'phone' && (
+            <PhoneStep
+              phone={phone}
+              setPhone={setPhone}
+              loading={loading}
+              error={error}
+              onSubmit={handleSendOtp}
+            />
+          )}
 
-            <button
-              type="submit"
-              disabled={otp.length !== 4 || loading}
-              className="w-full bg-primary-500 text-white rounded-xl py-3 font-semibold disabled:opacity-40 hover:bg-primary-600 transition-colors"
-            >
-              {loading ? 'Verifying…' : 'Sign In'}
-            </button>
+          {step === 'otp' && (
+            <OtpStep
+              phone={phone}
+              otp={otp}
+              setOtp={setOtp}
+              loading={loading}
+              error={error}
+              resendCountdown={resendCountdown}
+              onSubmit={handleVerify}
+              onResend={handleResend}
+              onBack={() => {
+                setStep('phone');
+                setOtp('');
+                setError('');
+              }}
+            />
+          )}
 
-            <button
-              type="button"
-              className="w-full text-gray-500 text-sm py-2 inline-flex items-center justify-center gap-1.5 hover:text-gray-700"
-              onClick={() => { setStep('phone'); setOtp(''); setError(''); }}
-            >
-              <ArrowLeft className="w-4 h-4" /> Change number
-            </button>
-          </form>
-        )}
-      </div>
+          {step === '2fa' && (
+            <TotpStep
+              code={twoFactorCode}
+              setCode={setTwoFactorCode}
+              loading={loading}
+              error={error}
+              onSubmit={handle2fa}
+              onBack={() => {
+                setStep('otp');
+                setTwoFactorCode('');
+                setTotpPending(null);
+                setError('');
+              }}
+            />
+          )}
+
+          <p className="text-[12px] text-gray-500 mt-8 text-center">
+            Trouble signing in? Reach the platform team at{' '}
+            <a className="text-gray-700 underline" href="mailto:platform@marzitech.in">
+              platform@marzitech.in
+            </a>
+          </p>
+        </div>
+      </main>
     </div>
   );
 }
 
-// Next.js 15 requires useSearchParams() to sit inside a Suspense boundary
-// so the rest of the page can still be prerendered at build time.
+// ──────────────────────────────────────────────────────────────────────────────
+// Step components — kept inline rather than separate files because the login
+// page is the only consumer and the steps share visual identity.
+// ──────────────────────────────────────────────────────────────────────────────
+
+function StepHeader({ title, subtitle }: { title: string; subtitle: string }) {
+  return (
+    <div className="mb-6">
+      <h2 className="text-[24px] font-semibold tracking-tight text-gray-950 leading-tight">{title}</h2>
+      <p className="text-[14px] text-gray-500 mt-1.5 leading-relaxed">{subtitle}</p>
+    </div>
+  );
+}
+
+function PhoneStep({
+  phone,
+  setPhone,
+  loading,
+  error,
+  onSubmit,
+}: {
+  phone: string;
+  setPhone: (v: string) => void;
+  loading: boolean;
+  error: string;
+  onSubmit: (e: React.FormEvent) => void;
+}) {
+  return (
+    <form onSubmit={onSubmit} className="space-y-5">
+      <StepHeader
+        title="Sign in"
+        subtitle="Enter your registered mobile number. We'll send you a one-time code."
+      />
+
+      <Field label="Mobile number" required error={error || undefined}>
+        <div className="flex h-9 rounded-lg border border-gray-300 bg-white focus-within:border-gray-900 focus-within:ring-4 focus-within:ring-gray-200 transition-colors overflow-hidden">
+          <span className="px-3 flex items-center text-[13px] font-medium text-gray-500 bg-gray-50 border-r border-gray-300">
+            +91
+          </span>
+          <input
+            type="tel"
+            inputMode="numeric"
+            autoComplete="tel-national"
+            placeholder="10-digit number"
+            className="flex-1 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+            autoFocus
+          />
+        </div>
+      </Field>
+
+      <Button
+        type="submit"
+        fullWidth
+        size="md"
+        loading={loading}
+        disabled={phone.length !== 10}
+        trailingIcon={!loading ? <ArrowRight className="w-4 h-4" /> : undefined}
+      >
+        {loading ? 'Sending OTP…' : 'Continue'}
+      </Button>
+    </form>
+  );
+}
+
+function OtpStep({
+  phone,
+  otp,
+  setOtp,
+  loading,
+  error,
+  resendCountdown,
+  onSubmit,
+  onResend,
+  onBack,
+}: {
+  phone: string;
+  otp: string;
+  setOtp: (v: string) => void;
+  loading: boolean;
+  error: string;
+  resendCountdown: number;
+  onSubmit: (e: React.FormEvent) => void;
+  onResend: () => void;
+  onBack: () => void;
+}) {
+  return (
+    <form onSubmit={onSubmit} className="space-y-5">
+      <button
+        type="button"
+        onClick={onBack}
+        className="inline-flex items-center gap-1.5 text-[13px] text-gray-500 hover:text-gray-900 transition-colors mb-1"
+      >
+        <ArrowLeft className="w-3.5 h-3.5" /> Change number
+      </button>
+
+      <StepHeader
+        title="Enter the code"
+        subtitle={`A 4-digit OTP was sent to +91 ${phone.slice(0, 5)} ${phone.slice(5)}.`}
+      />
+
+      <Field label="One-time code" required error={error || undefined}>
+        <div className="relative">
+          <input
+            type="text"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            placeholder="••••"
+            maxLength={4}
+            className="w-full h-14 text-center text-[28px] font-semibold tracking-[0.4em] rounded-lg border border-gray-300 bg-white text-gray-900 placeholder:text-gray-300 outline-none focus:border-gray-900 focus:ring-4 focus:ring-gray-200 transition-colors"
+            value={otp}
+            onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 4))}
+            autoFocus
+          />
+        </div>
+      </Field>
+
+      <div className="flex items-center justify-between text-[12px]">
+        <span className="text-gray-500">Didn't receive it?</span>
+        {resendCountdown > 0 ? (
+          <span className="text-gray-400">Resend in {resendCountdown}s</span>
+        ) : (
+          <button
+            type="button"
+            onClick={onResend}
+            disabled={loading}
+            className="text-gray-900 font-medium hover:underline disabled:opacity-40"
+          >
+            Resend OTP
+          </button>
+        )}
+      </div>
+
+      <Button
+        type="submit"
+        fullWidth
+        size="md"
+        loading={loading}
+        disabled={otp.length !== 4}
+        trailingIcon={!loading ? <ArrowRight className="w-4 h-4" /> : undefined}
+      >
+        {loading ? 'Verifying…' : 'Verify & sign in'}
+      </Button>
+    </form>
+  );
+}
+
+function TotpStep({
+  code,
+  setCode,
+  loading,
+  error,
+  onSubmit,
+  onBack,
+}: {
+  code: string;
+  setCode: (v: string) => void;
+  loading: boolean;
+  error: string;
+  onSubmit: (e: React.FormEvent) => void;
+  onBack: () => void;
+}) {
+  return (
+    <form onSubmit={onSubmit} className="space-y-5">
+      <button
+        type="button"
+        onClick={onBack}
+        className="inline-flex items-center gap-1.5 text-[13px] text-gray-500 hover:text-gray-900 transition-colors mb-1"
+      >
+        <ArrowLeft className="w-3.5 h-3.5" /> Back
+      </button>
+
+      <StepHeader
+        title="Two-factor code"
+        subtitle="Enter the 6-digit code from your authenticator app."
+      />
+
+      <Field label="Authenticator code" required error={error || undefined}>
+        <input
+          type="text"
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          placeholder="••••••"
+          maxLength={6}
+          className="w-full h-14 text-center text-[28px] font-semibold tracking-[0.4em] rounded-lg border border-gray-300 bg-white text-gray-900 placeholder:text-gray-300 outline-none focus:border-gray-900 focus:ring-4 focus:ring-gray-200 transition-colors"
+          value={code}
+          onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+          autoFocus
+        />
+      </Field>
+
+      <Button
+        type="submit"
+        fullWidth
+        size="md"
+        loading={loading}
+        disabled={code.length !== 6}
+        trailingIcon={!loading ? <ShieldCheck className="w-4 h-4" /> : undefined}
+      >
+        {loading ? 'Verifying…' : 'Verify & sign in'}
+      </Button>
+    </form>
+  );
+}
+
 export default function LoginPage() {
   return (
     <Suspense fallback={null}>

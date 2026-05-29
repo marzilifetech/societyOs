@@ -139,15 +139,36 @@ export class ResidentService {
     });
   }
 
-  async uploadDocuments(userId: string, idProof: string, addressProof: string) {
+  async uploadDocuments(
+    userId: string,
+    data: {
+      aadhaarUrl?: string;
+      aadhaarNumber?: string;
+      panUrl?: string;
+      panNumber?: string;
+      idProofUrl?: string;
+      addressProofUrl?: string;
+    },
+  ) {
     const resident = await findResidentByUserId(this.prisma, userId);
     if (!resident) throw new NotFoundException('Resident profile not found');
-    
+
+    // TODO(security): encrypt Aadhaar number at rest. For now we store it
+    // as raw bytes — the Aadhaar column is typed as Bytes? so callers must
+    // serialize. When the encryption helper lands, wrap the buffer here.
+    const aadhaarBytes = data.aadhaarNumber
+      ? Buffer.from(data.aadhaarNumber, 'utf8')
+      : undefined;
+
     return this.prisma.resident.update({
       where: { id: resident.id },
       data: {
-        idProof,
-        addressProof,
+        ...(aadhaarBytes ? { aadhaar: aadhaarBytes } : {}),
+        ...(data.aadhaarUrl !== undefined ? { aadhaarUrl: data.aadhaarUrl } : {}),
+        ...(data.panNumber ? { panNumber: data.panNumber } : {}),
+        ...(data.panUrl !== undefined ? { panUrl: data.panUrl } : {}),
+        ...(data.idProofUrl !== undefined ? { idProof: data.idProofUrl } : {}),
+        ...(data.addressProofUrl !== undefined ? { addressProof: data.addressProofUrl } : {}),
         documentsStatus: 'UPLOADED' as any,
       },
     });
@@ -161,6 +182,26 @@ export class ResidentService {
       idProof: resident.idProof,
       addressProof: resident.addressProof,
       status: resident.documentsStatus,
+    };
+  }
+
+  async getMyDocuments(userId: string) {
+    const resident = await findResidentByUserId(this.prisma, userId);
+    if (!resident) throw new NotFoundException('Resident profile not found');
+
+    const aadhaarLast4 =
+      resident.aadhaar && resident.aadhaar.length >= 4
+        ? Buffer.from(resident.aadhaar as unknown as Uint8Array).toString('utf8').slice(-4)
+        : null;
+
+    return {
+      status: resident.documentsStatus,
+      aadhaarLast4,
+      aadhaarUrl: (resident as any).aadhaarUrl ?? null,
+      panNumber: resident.panNumber,
+      panUrl: (resident as any).panUrl ?? null,
+      idProofUrl: resident.idProof,
+      addressProofUrl: resident.addressProof,
     };
   }
 
@@ -182,6 +223,15 @@ export class ResidentService {
       flat: { block: r.flat?.block ?? '', number: r.flat?.number ?? '' },
       phone: r.user?.phone,
     }));
+  }
+
+  async getEmergencyContacts(societyId: string) {
+    const society = await this.prisma.society.findUnique({ where: { id: societyId } });
+    if (!society) throw new NotFoundException('Society not found');
+    const config = (society.config as Record<string, unknown> | null) ?? {};
+    const contacts = (config.emergencyContacts as unknown[] | undefined) ?? [];
+    // Surface a shape consistent with admin-web's existing settings UI.
+    return { id: society.id, config: { emergencyContacts: contacts } };
   }
 
   async setDirectoryVisibility(userId: string, visible: boolean) {
