@@ -1839,7 +1839,7 @@ async createStaff(
   }
 
   residentsImportTemplate(): string {
-    return 'name,phone,email,block,flatNumber,type\nJane Doe,+919876543210,jane@example.com,A,101,OWNER\n';
+    return 'name,phone,email,block,flatNumber,type,dateOfBirth\nJane Doe,+919876543210,jane@example.com,A,101,OWNER,1985-06-15\n';
   }
 
   flatsImportTemplate(): string {
@@ -2002,7 +2002,7 @@ async createStaff(
 
   async createResident(
     societyId: string,
-    dto: { name: string; email?: string; phone: string; flatId: string; type: 'OWNER' | 'TENANT' },
+    dto: { name: string; email?: string; phone: string; flatId: string; type: 'OWNER' | 'TENANT'; dateOfBirth?: string | null },
   ) {
     const flat = await this.prisma.flat.findFirst({ where: { id: dto.flatId, societyId } });
     if (!flat) throw new BadRequestException('Flat not found in this society');
@@ -2018,6 +2018,7 @@ async createStaff(
           phone: dto.phone,
           name: dto.name,
           email: dto.email,
+          dateOfBirth: dto.dateOfBirth ? new Date(dto.dateOfBirth) : undefined,
           role: UserRole.RESIDENT,
           status: UserStatus.PENDING,
           societyId,
@@ -2805,6 +2806,7 @@ async createStaff(
     const blockKey = headers.find((h) => ['block', 'tower', 'wing'].includes(h)) ?? 'block';
     const flatKey = headers.find((h) => ['flatnumber', 'flat', 'unit', 'number'].includes(h)) ?? 'flatnumber';
     const typeKey = headers.find((h) => ['type', 'residenttype'].includes(h)) ?? 'type';
+    const dobKey = headers.find((h) => ['dateofbirth', 'dob', 'date_of_birth', 'birthdate', 'birthday'].includes(h));
 
     let created = 0;
     let skipped = 0;
@@ -2820,6 +2822,7 @@ async createStaff(
       const flatNumber = record[flatKey] || record['flatnumber'] || record['flat'];
       const typeRaw = (record[typeKey] || record['type'] || 'TENANT').toUpperCase();
       const type = typeRaw === 'OWNER' ? 'OWNER' : 'TENANT';
+      const dobRaw = dobKey ? record[dobKey] : undefined;
 
       if (!name || !phone) {
         errors.push({ row: i + 2, reason: 'Missing name or phone' });
@@ -2853,6 +2856,7 @@ async createStaff(
             phone,
             name,
             email: email || undefined,
+            dateOfBirth: dobRaw ? new Date(dobRaw) : undefined,
             role: UserRole.RESIDENT,
             status: UserStatus.PENDING,
             societyId,
