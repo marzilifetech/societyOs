@@ -1,9 +1,10 @@
 'use client';
 
+import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ArrowLeft, Star } from 'lucide-react';
+import { ArrowLeft, Star, UserCheck } from 'lucide-react';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { ErrorState } from '@/components/ui/ErrorState';
@@ -23,16 +24,33 @@ function StarRating({ value }: { value: number }) {
   );
 }
 
+interface StaffMember {
+  id: string;
+  name: string;
+  designation: string;
+  department?: string | null;
+  categories: string[];
+}
+
 export default function ServiceRequestDetailPage() {
   const params = useParams();
   const router = useRouter();
   const qc = useQueryClient();
   const id = params.id as string;
 
+  const [assignOpen, setAssignOpen] = useState(false);
+
   const { data: sr, isLoading, isError, refetch } = useQuery({
     queryKey: ['service-request', id],
     queryFn: () => api.get<any>(`/service-requests/${id}`),
     enabled: !!id,
+  });
+
+  const { data: allStaff = [] } = useQuery<StaffMember[]>({
+    queryKey: ['admin-staff'],
+    queryFn: () => api.get<StaffMember[]>('/admin/staff'),
+    enabled: assignOpen,
+    staleTime: 60_000,
   });
 
   const updateMutation = useMutation({
@@ -43,6 +61,18 @@ export default function ServiceRequestDetailPage() {
       qc.invalidateQueries({ queryKey: ['admin-service-requests'] });
     },
     onError: (err: Error) => toast.error(err.message ?? 'Update failed'),
+  });
+
+  const assignMutation = useMutation({
+    mutationFn: (staffId: string) =>
+      api.patch(`/service-requests/${id}/assign`, { staffIds: [staffId] }),
+    onSuccess: () => {
+      toast.success('Staff assigned');
+      qc.invalidateQueries({ queryKey: ['service-request', id] });
+      qc.invalidateQueries({ queryKey: ['admin-service-requests'] });
+      setAssignOpen(false);
+    },
+    onError: (err: Error) => toast.error(err.message ?? 'Assignment failed'),
   });
 
   if (isLoading) return <div className="p-8 text-gray-400">Loading…</div>;
@@ -56,10 +86,30 @@ export default function ServiceRequestDetailPage() {
 
   const residentName = sr.resident?.user?.name ?? '—';
   const flatNumber = sr.resident?.flat?.number ?? '—';
-  const assignedNames = (sr.assignedStaff ?? [])
-    .map((s: any) => s.user?.name ?? s.designation)
+  const assignedStaff: { id: string; user?: { name?: string }; designation?: string }[] = sr.assignedStaff ?? [];
+  const assignedNames = assignedStaff
+    .map((s) => s.user?.name ?? s.designation)
     .filter(Boolean)
     .join(', ');
+  const assignedIds = new Set(assignedStaff.map((s) => s.id));
+
+  const srCategory = (sr.category ?? '').toUpperCase();
+  const relevant = allStaff.filter((s) =>
+    s.categories.some((c) => c.toUpperCase() === srCategory),
+  );
+  const others = allStaff.filter(
+    (s) => !s.categories.some((c) => c.toUpperCase() === srCategory),
+  );
+
+  function renderStaffOption(s: StaffMember) {
+    const assigned = assignedIds.has(s.id);
+    return (
+      <option key={s.id} value={s.id} disabled={assigned}>
+        {s.name} — {s.designation}
+        {assigned ? ' ✓' : ''}
+      </option>
+    );
+  }
 
   return (
     <div className="p-6 lg:p-8 max-w-3xl">
@@ -114,10 +164,70 @@ export default function ServiceRequestDetailPage() {
             <p className="text-sm text-gray-900">{residentName}</p>
             <p className="text-xs text-gray-500">Unit {flatNumber}</p>
           </div>
-          <div>
-            <label className="text-xs font-medium text-gray-400 uppercase tracking-wide block mb-1">Assigned Staff</label>
-            <p className="text-sm text-gray-900">{assignedNames || '—'}</p>
+
+          {/* Assign Staff */}
+          <div className="col-span-2">
+            <label className="text-xs font-medium text-gray-400 uppercase tracking-wide block mb-1.5">
+              Assigned Staff
+            </label>
+
+            {assignedNames && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {assignedStaff.map((s) => (
+                  <span
+                    key={s.id}
+                    className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full bg-primary-50 text-primary-700 border border-primary-100"
+                  >
+                    <UserCheck className="w-3 h-3" />
+                    {s.user?.name ?? s.designation}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {!assignOpen ? (
+              <button
+                onClick={() => setAssignOpen(true)}
+                className="text-xs text-primary-600 hover:text-primary-700 font-medium"
+              >
+                {assignedNames ? 'Reassign / add staff…' : 'Assign staff…'}
+              </button>
+            ) : (
+              <div className="flex items-center gap-2">
+                <select
+                  className="flex-1 border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-700 outline-none focus:border-primary-400 bg-white"
+                  defaultValue=""
+                  onChange={(e) => {
+                    if (e.target.value) assignMutation.mutate(e.target.value);
+                  }}
+                  disabled={assignMutation.isPending || allStaff.length === 0}
+                >
+                  <option value="" disabled>
+                    {allStaff.length === 0 ? 'Loading staff…' : relevant.length > 0 ? `${relevant.length} suggested for ${sr.category}` : 'Select staff member…'}
+                  </option>
+
+                  {relevant.length > 0 && (
+                    <optgroup label={`Suggested — ${sr.category}`}>
+                      {relevant.map(renderStaffOption)}
+                    </optgroup>
+                  )}
+
+                  {others.length > 0 && (
+                    <optgroup label={relevant.length > 0 ? 'Other staff' : 'All staff'}>
+                      {others.map(renderStaffOption)}
+                    </optgroup>
+                  )}
+                </select>
+                <button
+                  onClick={() => setAssignOpen(false)}
+                  className="text-xs text-gray-400 hover:text-gray-600 px-2"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
           </div>
+
           <div>
             <label className="text-xs font-medium text-gray-400 uppercase tracking-wide block mb-1">Scheduled</label>
             <input

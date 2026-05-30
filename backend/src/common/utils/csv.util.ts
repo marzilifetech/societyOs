@@ -1,10 +1,18 @@
+// Defensive caps for untrusted CSV uploads — bound work so a hostile payload
+// can't drive an unbounded loop (DoS). Generous vs. any real society dataset.
+const MAX_LINE_LENGTH = 64 * 1024; // 64 KB per line
+const MAX_ROWS = 50_000;
+
 /** Parse a single CSV line respecting quoted fields. */
 function parseCsvLine(line: string): string[] {
   const result: string[] = [];
   let current = '';
   let inQuotes = false;
 
-  for (let i = 0; i < line.length; i++) {
+  // Clamp the loop bound to a constant so it can't be driven unbounded by a
+  // user-controlled line length.
+  const len = Math.min(line.length, MAX_LINE_LENGTH);
+  for (let i = 0; i < len; i++) {
     const ch = line[i];
     if (inQuotes) {
       if (ch === '"' && line[i + 1] === '"') {
@@ -33,7 +41,8 @@ export function parseCsv(text: string): { headers: string[]; rows: string[][] } 
   if (lines.length === 0) return { headers: [], rows: [] };
 
   const headers = parseCsvLine(lines[0]).map((h) => h.toLowerCase().replace(/\s+/g, ''));
-  const rows = lines.slice(1).map(parseCsvLine);
+  // Cap the number of data rows processed — bounds total parsing work.
+  const rows = lines.slice(1, MAX_ROWS + 1).map(parseCsvLine);
   return { headers, rows };
 }
 

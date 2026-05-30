@@ -841,7 +841,7 @@ export class AdminController {
   @Roles(UserRole.SUPER_ADMIN)
   createBuildingAdmin(
     @SocietyId() societyId: string,
-    @Body() dto: { name: string; phone: string; managedBlocks: string[] },
+    @Body() dto: { name: string; phone: string },
   ) {
     return this.adminService.createBuildingAdmin(societyId, dto);
   }
@@ -889,5 +889,61 @@ export class AdminController {
     @SocietyId() societyId: string,
   ) {
     return this.srService.softDelete(id, societyId);
+  }
+
+  // ─── Domestic Help (society-wide) ────────────────────────────────────────
+
+  @Get('domestic-help')
+  getDomesticHelpers(@SocietyId() societyId: string) {
+    return this.adminService.getDomesticHelpers(societyId);
+  }
+
+  // ─── Pest Control (society-wide) ─────────────────────────────────────────
+
+  @Get('pest-control')
+  getPestControlJobs(@SocietyId() societyId: string) {
+    return this.adminService.getPestControlJobs(societyId);
+  }
+
+  // ─── Infrastructure (CRUD + bulk import) ─────────────────────────────────
+
+  @Post('infrastructure')
+  createInfrastructureItem(
+    @SocietyId() societyId: string,
+    @Body() dto: { name: string; type: string; status?: string },
+  ) {
+    return this.adminService.createInfrastructureItem(societyId, dto);
+  }
+
+  @Get('infrastructure/export')
+  @Header('Content-Type', 'text/csv')
+  @Header('Content-Disposition', 'attachment; filename="infrastructure.csv"')
+  async exportInfrastructure(@SocietyId() societyId: string): Promise<StreamableFile> {
+    const csv = await this.adminService.exportInfrastructureCsv(societyId);
+    return new StreamableFile(Buffer.from(csv, 'utf8'));
+  }
+
+  @Get('infrastructure/import/template')
+  @Header('Content-Type', 'text/csv')
+  @Header('Content-Disposition', 'attachment; filename="infrastructure-import-template.csv"')
+  infrastructureImportTemplate(): StreamableFile {
+    const csv = this.adminService.infrastructureImportTemplate();
+    return new StreamableFile(Buffer.from(csv, 'utf8'));
+  }
+
+  @Post('infrastructure/import/preview')
+  previewInfrastructureImport(
+    @SocietyId() societyId: string,
+    @Body('csv') csv: string,
+  ) {
+    return this.adminService.previewInfrastructureCsv(societyId, csv);
+  }
+
+  @Post('infrastructure/import')
+  importInfrastructure(
+    @SocietyId() societyId: string,
+    @Body('csv') csv: string,
+  ) {
+    return this.adminService.importInfrastructureCsv(societyId, csv, false);
   }
 }

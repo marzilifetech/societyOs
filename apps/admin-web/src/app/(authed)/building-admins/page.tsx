@@ -3,36 +3,33 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Building2, Plus, Pencil, X, Check } from 'lucide-react';
+import { Building2, Plus } from 'lucide-react';
 import { api } from '@/lib/api';
 import { ErrorState } from '@/components/ui/ErrorState';
 
-type BuildingAdmin = {
+type Admin = {
   id: string;
   name: string;
   phone: string;
   email?: string;
   status: string;
-  managedBlocks: string[];
+  role: 'ADMIN' | 'BUILDING_ADMIN';
   createdAt: string;
 };
 
 type CreateForm = {
   name: string;
   phone: string;
-  managedBlocks: string;
 };
 
-export default function BuildingAdminsPage() {
+export default function AdminsPage() {
   const qc = useQueryClient();
   const [showForm, setShowForm] = useState(false);
-  const [editId, setEditId] = useState<string | null>(null);
-  const [editBlocks, setEditBlocks] = useState('');
-  const [form, setForm] = useState<CreateForm>({ name: '', phone: '', managedBlocks: '' });
+  const [form, setForm] = useState<CreateForm>({ name: '', phone: '' });
 
-  const { data: admins = [], isLoading, isError, refetch } = useQuery<BuildingAdmin[]>({
+  const { data: admins = [], isLoading, isError, refetch } = useQuery<Admin[]>({
     queryKey: ['building-admins'],
-    queryFn: () => api.get<BuildingAdmin[]>('/admin/building-admins'),
+    queryFn: () => api.get<Admin[]>('/admin/building-admins'),
   });
 
   const createMutation = useMutation({
@@ -40,33 +37,21 @@ export default function BuildingAdminsPage() {
       api.post('/admin/building-admins', {
         name: form.name.trim(),
         phone: form.phone.trim(),
-        managedBlocks: form.managedBlocks.split(',').map((s) => s.trim()).filter(Boolean),
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['building-admins'] });
-      toast.success('Building admin created');
+      toast.success('Admin created');
       setShowForm(false);
-      setForm({ name: '', phone: '', managedBlocks: '' });
+      setForm({ name: '', phone: '' });
     },
     onError: (err: Error) => toast.error(err.message ?? 'Failed to create'),
-  });
-
-  const updateBlocksMutation = useMutation({
-    mutationFn: ({ id, blocks }: { id: string; blocks: string[] }) =>
-      api.patch(`/admin/building-admins/${id}/blocks`, { managedBlocks: blocks }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['building-admins'] });
-      toast.success('Blocks updated');
-      setEditId(null);
-    },
-    onError: (err: Error) => toast.error(err.message ?? 'Failed to update'),
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.delete(`/admin/building-admins/${id}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['building-admins'] });
-      toast.success('Building admin removed');
+      toast.success('Admin removed');
     },
     onError: (err: Error) => toast.error(err.message ?? 'Failed to remove'),
   });
@@ -77,22 +62,22 @@ export default function BuildingAdminsPage() {
     <div className="p-6 lg:p-8 max-w-4xl">
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Building Admins</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Admins</h1>
           <p className="text-gray-500 text-sm mt-1">
-            Admins scoped to specific blocks/buildings within the society
+            Society administrators with full access across this society
           </p>
         </div>
         <button
           onClick={() => setShowForm((v) => !v)}
           className="inline-flex items-center gap-2 bg-primary-500 hover:bg-primary-600 text-white text-sm font-semibold px-4 py-2 rounded-xl transition"
         >
-          {showForm ? 'Cancel' : <><Plus className="w-5 h-5" /> Add Building Admin</>}
+          {showForm ? 'Cancel' : <><Plus className="w-5 h-5" /> Add Admin</>}
         </button>
       </div>
 
       {showForm && (
         <div className="bg-white rounded-2xl border border-gray-200 p-5 mb-6 shadow-sm">
-          <h2 className="font-semibold text-gray-900 mb-4">New Building Admin</h2>
+          <h2 className="font-semibold text-gray-900 mb-4">New Admin</h2>
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className="block text-xs text-gray-500 mb-1">Name *</label>
@@ -112,17 +97,6 @@ export default function BuildingAdminsPage() {
                 onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
               />
             </div>
-            <div className="sm:col-span-2">
-              <label className="block text-xs text-gray-500 mb-1">
-                Managed Blocks (comma-separated, leave empty for all)
-              </label>
-              <input
-                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-200"
-                placeholder="e.g. A, B, C"
-                value={form.managedBlocks}
-                onChange={(e) => setForm((f) => ({ ...f, managedBlocks: e.target.value }))}
-              />
-            </div>
           </div>
           <button
             onClick={() => createMutation.mutate()}
@@ -139,18 +113,18 @@ export default function BuildingAdminsPage() {
           <div className="w-8 h-8 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
         </div>
       ) : isError ? (
-        <ErrorState onRetry={refetch} message="Building admins couldn't be loaded. Please try again." />
+        <ErrorState onRetry={refetch} message="Admins couldn't be loaded. Please try again." />
       ) : admins.length === 0 ? (
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm py-16 flex flex-col items-center text-center">
           <Building2 className="w-10 h-10 text-gray-300 mb-3" />
-          <p className="text-sm font-medium text-gray-700">No building admins yet</p>
-          <p className="text-xs text-gray-400 mt-1 mb-4">Add one to grant scoped access to a building or block</p>
+          <p className="text-sm font-medium text-gray-700">No admins yet</p>
+          <p className="text-xs text-gray-400 mt-1 mb-4">Add a society administrator to grant full access</p>
           <button
             onClick={() => setShowForm(true)}
             className="inline-flex items-center gap-2 bg-primary-500 hover:bg-primary-600 text-white text-sm font-semibold px-4 py-2 rounded-xl"
           >
             <Plus className="w-4 h-4" />
-            Add Building Admin
+            Add Admin
           </button>
         </div>
       ) : (
@@ -166,9 +140,6 @@ export default function BuildingAdminsPage() {
                   Phone
                 </th>
                 <th className="text-left px-5 py-3 text-xs text-gray-500 uppercase tracking-wide font-medium">
-                  Managed Blocks
-                </th>
-                <th className="text-left px-5 py-3 text-xs text-gray-500 uppercase tracking-wide font-medium">
                   Added
                 </th>
                 <th className="px-5 py-3" />
@@ -181,65 +152,6 @@ export default function BuildingAdminsPage() {
                     <p className="font-medium text-gray-900">{admin.name}</p>
                   </td>
                   <td className="px-5 py-3 text-gray-600 font-mono text-xs">{admin.phone}</td>
-                  <td className="px-5 py-3">
-                    {editId === admin.id ? (
-                      <div className="flex items-center gap-2">
-                        <input
-                          className="border border-gray-200 rounded-lg px-2 py-1 text-xs w-40 focus:outline-none focus:ring-1 focus:ring-primary-200"
-                          value={editBlocks}
-                          onChange={(e) => setEditBlocks(e.target.value)}
-                          placeholder="A, B, C"
-                        />
-                        <button
-                          onClick={() =>
-                            updateBlocksMutation.mutate({
-                              id: admin.id,
-                              blocks: editBlocks.split(',').map((s) => s.trim()).filter(Boolean),
-                            })
-                          }
-                          disabled={updateBlocksMutation.isPending}
-                          className="inline-flex items-center gap-1 text-xs text-primary-600 hover:text-primary-700 font-medium disabled:opacity-50"
-                          aria-label="Save blocks"
-                        >
-                          <Check className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => setEditId(null)}
-                          className="text-gray-400 hover:text-gray-600"
-                          aria-label="Cancel edit"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <div className="flex flex-wrap gap-1">
-                          {admin.managedBlocks.length === 0 ? (
-                            <span className="text-xs text-gray-400 italic">All blocks</span>
-                          ) : (
-                            admin.managedBlocks.map((b) => (
-                              <span
-                                key={b}
-                                className="text-xs bg-primary-50 text-primary-700 px-2 py-0.5 rounded-full font-medium"
-                              >
-                                {b}
-                              </span>
-                            ))
-                          )}
-                        </div>
-                        <button
-                          onClick={() => {
-                            setEditId(admin.id);
-                            setEditBlocks(admin.managedBlocks.join(', '));
-                          }}
-                          className="text-gray-400 hover:text-primary-600 ml-1 p-1 rounded"
-                          aria-label="Edit blocks"
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    )}
-                  </td>
                   <td className="px-5 py-3 text-gray-500 text-xs">
                     {new Date(admin.createdAt).toLocaleDateString('en-IN', {
                       day: 'numeric',
@@ -250,7 +162,7 @@ export default function BuildingAdminsPage() {
                   <td className="px-5 py-3 text-right">
                     <button
                       onClick={() => {
-                        if (window.confirm(`Remove ${admin.name} as building admin?`)) {
+                        if (window.confirm(`Remove ${admin.name} as admin?`)) {
                           deleteMutation.mutate(admin.id);
                         }
                       }}

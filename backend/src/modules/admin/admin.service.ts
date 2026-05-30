@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
 import { PushService } from '../../common/notification/push.service';
-import { UserStatus, UserRole, ComplaintStatus, TravelPauseStatus } from '@prisma/client';
+import { UserStatus, UserRole, ComplaintStatus, TravelPauseStatus, InfrastructureType, InfrastructureStatus } from '@prisma/client';
 import { requireLeavePendingInSociety } from '../../common/utils/leave-admin.util';
 import { ComplianceService } from '../compliance/compliance.service';
 import { AuditService } from '../../common/audit/audit.service';
@@ -1887,11 +1887,13 @@ async createStaff(
   // ── Building Admins ──────────────────────────────────────────────────────────
 
   async listBuildingAdmins(societyId: string) {
+    // Includes any legacy BUILDING_ADMIN rows so they still appear as admins;
+    // block scoping is no longer offered when onboarding.
     return this.prisma.user.findMany({
-      where: { societyId, role: UserRole.BUILDING_ADMIN },
+      where: { societyId, role: { in: [UserRole.ADMIN, UserRole.BUILDING_ADMIN] } },
       select: {
-        id: true, name: true, phone: true, email: true, status: true,
-        managedBlocks: true, createdAt: true,
+        id: true, name: true, phone: true, email: true, status: true, role: true,
+        createdAt: true,
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -1899,7 +1901,7 @@ async createStaff(
 
   async createBuildingAdmin(
     societyId: string,
-    dto: { name: string; phone: string; managedBlocks: string[] },
+    dto: { name: string; phone: string },
   ) {
     const existing = await this.prisma.user.findUnique({
       where: { phone_societyId: { phone: dto.phone, societyId } },
@@ -1907,18 +1909,20 @@ async createStaff(
     if (existing) {
       throw new ConflictException('A user with this phone already exists in the society');
     }
+
+    // Admins are society-wide: full access across the society, no block scoping.
     return this.prisma.user.create({
       data: {
         phone: dto.phone,
         name: dto.name,
-        role: UserRole.BUILDING_ADMIN,
+        role: UserRole.ADMIN,
         status: UserStatus.ACTIVE,
         societyId,
-        managedBlocks: dto.managedBlocks,
+        managedBlocks: [],
       } as any,
       select: {
-        id: true, name: true, phone: true, email: true, status: true,
-        managedBlocks: true, createdAt: true,
+        id: true, name: true, phone: true, email: true, status: true, role: true,
+        createdAt: true,
       },
     });
   }
@@ -1939,8 +1943,8 @@ async createStaff(
 
   async removeBuildingAdmin(userId: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user || user.role !== UserRole.BUILDING_ADMIN) {
-      throw new NotFoundException('Building admin not found');
+    if (!user || (user.role !== UserRole.ADMIN && user.role !== UserRole.BUILDING_ADMIN)) {
+      throw new NotFoundException('Admin not found');
     }
     await this.prisma.user.delete({ where: { id: userId } });
     return { success: true };
@@ -2935,6 +2939,151 @@ async createStaff(
           department,
           categories,
           salary,
+        });
+        created++;
+      } catch (err) {
+        errors.push({ row: i + 2, reason: (err as Error).message });
+      }
+    }
+
+    return { created, skipped, errors, valid, preview: previewOnly };
+  }
+
+  // ── Domestic Help (admin) ───────────────────────────────────────────────────
+
+  async getDomesticHelpers(societyId: string) {
+    const helpers = await this.prisma.domesticHelp.findMany({
+      where: { resident: { flat: { societyId } } },
+      include: {
+        resident: {
+          include: {
+            user: { select: { name: true } },
+            flat: { select: { number: true, block: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    return helpers.map((h) => ({
+      ...h,
+      resident: h.resident
+        ? {
+            id: h.resident.id,
+            name: h.resident.user.name,
+            unit: { flatNumber: `${h.resident.flat.block}-${h.resident.flat.number}` },
+          }
+        : undefined,
+    }));
+  }
+
+  // ── Pest Control (admin) ────────────────────────────────────────────────────
+
+  async getPestControlJobs(societyId: string) {
+    return this.prisma.pestControlSchedule.findMany({
+      where: { societyId },
+      orderBy: { scheduledAt: 'desc' },
+    });
+  }
+
+  // ── Infrastructure CRUD + bulk import ───────────────────────────────────────
+
+  async createInfrastructureItem(
+    societyId: string,
+    dto: { name: string; type: string; status?: string },
+  ) {
+    const type = dto.type?.toUpperCase();
+    if (!Object.values(InfrastructureType).includes(type as InfrastructureType)) {
+      throw new BadRequestException(
+        `Invalid type "${dto.type}". Allowed: ${Object.values(InfrastructureType).join(', ')}`,
+      );
+    }
+    const status = (dto.status?.toUpperCase() as InfrastructureStatus) || InfrastructureStatus.OPERATIONAL;
+    if (!Object.values(InfrastructureStatus).includes(status)) {
+      throw new BadRequestException(
+        `Invalid status "${dto.status}". Allowed: ${Object.values(InfrastructureStatus).join(', ')}`,
+      );
+    }
+    return this.prisma.infrastructureItem.create({
+      data: { societyId, name: dto.name.trim(), type: type as InfrastructureType, status },
+    });
+  }
+
+  infrastructureImportTemplate(): string {
+    return (
+      'name,type,status\n' +
+      'Main Lift,LIFT,OPERATIONAL\n' +
+      'Backup Generator,GENERATOR,OPERATIONAL\n' +
+      'Borewell Pump,WATER,MAINTENANCE\n'
+    );
+  }
+
+  async exportInfrastructureCsv(societyId: string): Promise<string> {
+    const items = await this.prisma.infrastructureItem.findMany({
+      where: { societyId },
+      orderBy: { name: 'asc' },
+    });
+    const header = 'name,type,status\n';
+    const body = items.map((i) => toCsvRow([i.name, i.type, i.status])).join('\n');
+    return header + body;
+  }
+
+  async previewInfrastructureCsv(societyId: string, csvText: string) {
+    return this.importInfrastructureCsv(societyId, csvText, true);
+  }
+
+  async importInfrastructureCsv(societyId: string, csvText: string, previewOnly = false) {
+    const { headers, rows } = parseCsv(csvText);
+    if (headers.length === 0 || rows.length === 0) {
+      throw new BadRequestException('CSV is empty or has only a header');
+    }
+
+    const validTypes = Object.values(InfrastructureType) as string[];
+    const validStatuses = Object.values(InfrastructureStatus) as string[];
+
+    let created = 0;
+    let skipped = 0;
+    const errors: { row: number; reason: string }[] = [];
+    const valid: { row: number; name: string; type: string; status: string }[] = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const record = rowToRecord(headers, rows[i]);
+      const name = record['name']?.trim();
+      const type = record['type']?.trim().toUpperCase();
+      const statusRaw = record['status']?.trim().toUpperCase();
+      const status = statusRaw || InfrastructureStatus.OPERATIONAL;
+
+      if (!name || !type) {
+        errors.push({ row: i + 2, reason: 'Missing name or type' });
+        continue;
+      }
+      if (!validTypes.includes(type)) {
+        errors.push({ row: i + 2, reason: `Invalid type "${type}" (allowed: ${validTypes.join(', ')})` });
+        continue;
+      }
+      if (!validStatuses.includes(status)) {
+        errors.push({ row: i + 2, reason: `Invalid status "${status}" (allowed: ${validStatuses.join(', ')})` });
+        continue;
+      }
+
+      try {
+        const existing = await this.prisma.infrastructureItem.findFirst({
+          where: { societyId, name },
+        });
+        if (existing) {
+          skipped++;
+          continue;
+        }
+
+        valid.push({ row: i + 2, name, type, status });
+        if (previewOnly) continue;
+
+        await this.prisma.infrastructureItem.create({
+          data: {
+            societyId,
+            name,
+            type: type as InfrastructureType,
+            status: status as InfrastructureStatus,
+          },
         });
         created++;
       } catch (err) {
