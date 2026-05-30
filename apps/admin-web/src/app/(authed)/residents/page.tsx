@@ -53,7 +53,7 @@ export default function ResidentsPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [exportLoading, setExportLoading] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [addForm, setAddForm] = useState({ name: '', email: '', phone: '', flatId: '', type: 'TENANT' as 'OWNER' | 'TENANT' });
+  const [addForm, setAddForm] = useState({ name: '', email: '', phone: '', flatId: '', type: 'TENANT' as 'OWNER' | 'TENANT', dateOfBirth: '' });
   const [showImportModal, setShowImportModal] = useState(false);
   const [importResult, setImportResult] = useState<{ created: number; skipped: number; errors: { row: number; reason: string }[] } | null>(null);
   const [importPreview, setImportPreview] = useState<{ valid: unknown[]; errors: { row: number; reason: string }[]; created: number; skipped: number } | null>(null);
@@ -85,7 +85,7 @@ export default function ResidentsPage() {
       toast.success('Resident created');
       qc.invalidateQueries({ queryKey: ['residents'] });
       setShowAddModal(false);
-      setAddForm({ name: '', email: '', phone: '', flatId: '', type: 'TENANT' });
+      setAddForm({ name: '', email: '', phone: '', flatId: '', type: 'TENANT', dateOfBirth: '' });
     },
     onError: (err: any) => toast.error(err?.message ?? 'Failed to create resident'),
   });
@@ -535,6 +535,16 @@ export default function ResidentsPage() {
                   <option value="OWNER">Owner</option>
                 </select>
               </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Date of Birth</label>
+                <input
+                  type="date"
+                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-700 outline-none focus:border-primary-400"
+                  value={addForm.dateOfBirth}
+                  max={new Date().toISOString().split('T')[0]}
+                  onChange={(e) => setAddForm(f => ({ ...f, dateOfBirth: e.target.value }))}
+                />
+              </div>
               <div className="flex gap-2 justify-end pt-1">
                 <button
                   className="px-4 py-2.5 rounded-xl text-sm border border-gray-200 text-gray-600 hover:border-gray-300 transition-colors"
@@ -566,7 +576,7 @@ export default function ResidentsPage() {
               </button>
             </div>
             <p className="text-xs text-gray-500 mb-4">
-              CSV format: <code className="bg-gray-100 px-1 rounded">name, phone, email, block, flatNumber, type</code>
+              CSV format: <code className="bg-gray-100 px-1 rounded">name, phone, email, block, flatNumber, type, dateOfBirth</code>
             </p>
             <button
               type="button"

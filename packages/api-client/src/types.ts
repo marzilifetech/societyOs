@@ -98,6 +98,7 @@ export interface Resident {
   name: string;
   phone: string;
   email?: string;
+  dateOfBirth?: string | null;
   status: 'ACTIVE' | 'PENDING' | 'INACTIVE';
   unit?: Unit;
   createdAt: string;
