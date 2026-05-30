@@ -20,20 +20,23 @@ const STATUS_META: Record<string, { label: string; color: string }> = {
 const FILTERS = ['ALL', 'SCHEDULED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'] as const;
 type Filter = typeof FILTERS[number];
 
+// Field names match the backend PestControlSchedule model
 type PestControl = {
   id: string;
-  pestType: string;
-  scheduledDate: string;
-  targetAreas: string[];
+  type: string;        // backend: type (enum)
+  scheduledAt: string; // backend: scheduledAt (ISO)
+  areas: string[];     // backend: areas
   notes?: string;
   status: PestControlStatus;
   createdAt: string;
 };
 
+const PEST_TYPES = ['MOSQUITO', 'COCKROACH', 'RODENT', 'TERMITE', 'GENERAL'] as const;
+
 type CreateForm = {
-  pestType: string;
-  scheduledDate: string;
-  targetAreas: string;
+  type: string;
+  scheduledAt: string;
+  areas: string;
   notes: string;
 };
 
@@ -42,30 +45,30 @@ export default function PestControlPage() {
   const [filter, setFilter] = useState<Filter>('ALL');
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<CreateForm>({
-    pestType: '',
-    scheduledDate: '',
-    targetAreas: '',
+    type: 'GENERAL',
+    scheduledAt: '',
+    areas: '',
     notes: '',
   });
 
   const { data: items = [], isLoading, isError, refetch } = useQuery<PestControl[]>({
     queryKey: ['admin-pest-control'],
-    queryFn: () => api.get<PestControl[]>('/pest-control'),
+    queryFn: () => api.get<PestControl[]>('/admin/pest-control'),
   });
 
   const createMutation = useMutation({
     mutationFn: () =>
       api.post('/pest-control', {
-        pestType: form.pestType.trim(),
-        scheduledDate: new Date(form.scheduledDate).toISOString(),
-        targetAreas: form.targetAreas.split(',').map((s) => s.trim()).filter(Boolean),
+        type: form.type,
+        scheduledAt: new Date(form.scheduledAt).toISOString(),
+        areas: form.areas.split(',').map((s) => s.trim()).filter(Boolean),
         notes: form.notes.trim() || undefined,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin-pest-control'] });
       toast.success('Pest control job scheduled');
       setShowForm(false);
-      setForm({ pestType: '', scheduledDate: '', targetAreas: '', notes: '' });
+      setForm({ type: 'GENERAL', scheduledAt: '', areas: '', notes: '' });
     },
     onError: (err: Error) => toast.error(err.message ?? 'Failed to create'),
   });
@@ -89,7 +92,7 @@ export default function PestControlPage() {
   });
 
   const filtered = filter === 'ALL' ? items : items.filter((i) => i.status === filter);
-  const isFormValid = form.pestType.trim() && form.scheduledDate && form.targetAreas.trim();
+  const isFormValid = form.type && form.scheduledAt && form.areas.trim();
 
   return (
     <div className="p-6 lg:p-8">
@@ -113,20 +116,23 @@ export default function PestControlPage() {
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className="block text-xs text-gray-500 mb-1">Pest Type *</label>
-              <input
-                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
-                placeholder="e.g. Cockroach, Termite, Rodent"
-                value={form.pestType}
-                onChange={(e) => setForm((f) => ({ ...f, pestType: e.target.value }))}
-              />
+              <select
+                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300 bg-white"
+                value={form.type}
+                onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))}
+              >
+                {PEST_TYPES.map((t) => (
+                  <option key={t} value={t}>{t.charAt(0) + t.slice(1).toLowerCase()}</option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="block text-xs text-gray-500 mb-1">Scheduled Date *</label>
               <input
                 type="datetime-local"
                 className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
-                value={form.scheduledDate}
-                onChange={(e) => setForm((f) => ({ ...f, scheduledDate: e.target.value }))}
+                value={form.scheduledAt}
+                onChange={(e) => setForm((f) => ({ ...f, scheduledAt: e.target.value }))}
               />
             </div>
             <div className="sm:col-span-2">
@@ -134,8 +140,8 @@ export default function PestControlPage() {
               <input
                 className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
                 placeholder="e.g. Kitchen, Basement, Garden"
-                value={form.targetAreas}
-                onChange={(e) => setForm((f) => ({ ...f, targetAreas: e.target.value }))}
+                value={form.areas}
+                onChange={(e) => setForm((f) => ({ ...f, areas: e.target.value }))}
               />
             </div>
             <div className="sm:col-span-2">
@@ -203,9 +209,9 @@ export default function PestControlPage() {
               <div key={item.id} className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm">
                 <div className="flex items-start justify-between gap-4 mb-3">
                   <div>
-                    <p className="font-semibold text-gray-900">{item.pestType}</p>
+                    <p className="font-semibold text-gray-900">{item.type.charAt(0) + item.type.slice(1).toLowerCase()}</p>
                     <p className="text-xs text-gray-400 mt-0.5">
-                      {new Date(item.scheduledDate).toLocaleString('en-IN', {
+                      {new Date(item.scheduledAt).toLocaleString('en-IN', {
                         weekday: 'short', day: 'numeric', month: 'short',
                         hour: '2-digit', minute: '2-digit',
                       })}
@@ -215,9 +221,9 @@ export default function PestControlPage() {
                     {meta.label}
                   </span>
                 </div>
-                {item.targetAreas?.length > 0 && (
+                {item.areas?.length > 0 && (
                   <div className="flex flex-wrap gap-1.5 mb-3">
-                    {item.targetAreas.map((area) => (
+                    {item.areas.map((area) => (
                       <span key={area} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
                         {area}
                       </span>

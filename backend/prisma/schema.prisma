@@ -1482,6 +1482,7 @@ model CommunityPost {
   isAnonymous Boolean             @default(false)
   status      CommunityPostStatus @default(ACTIVE)
   reactions   Int                 @default(0)
+  isPinned    Boolean             @default(false)
   createdAt   DateTime            @default(now())
 
   resident Resident      @relation(fields: [residentId], references: [id])

@@ -60,18 +60,26 @@ export class CommunityService {
   }
 
   async deletePost(id: string, userId: string, userRole: string) {
-    const resident = await requireResidentByUserId(this.prisma, userId);
+    const isAdmin = userRole === UserRole.ADMIN || userRole === UserRole.SUPER_ADMIN;
     const post = await this.prisma.communityPost.findUnique({ where: { id } });
     if (!post) throw new NotFoundException('Post not found');
 
-    const isOwner = post.residentId === resident.id;
-    const isAdmin = userRole === UserRole.ADMIN || userRole === UserRole.SUPER_ADMIN;
-    if (!isOwner && !isAdmin) throw new ForbiddenException('Not authorized to delete this post');
+    if (!isAdmin) {
+      const resident = await requireResidentByUserId(this.prisma, userId);
+      if (post.residentId !== resident.id) throw new ForbiddenException('Not authorized to delete this post');
+    }
 
     return this.prisma.communityPost.update({
       where: { id },
       data: { status: CommunityPostStatus.REMOVED },
     });
+  }
+
+  async pinPost(id: string, societyId: string, isPinned: boolean) {
+    const post = await this.prisma.communityPost.findUnique({ where: { id } });
+    if (!post) throw new NotFoundException('Post not found');
+    if (post.societyId !== societyId) throw new ForbiddenException('Post not in this society');
+    return this.prisma.communityPost.update({ where: { id }, data: { isPinned } });
   }
 
   async toggleLike(id: string, userId: string) {

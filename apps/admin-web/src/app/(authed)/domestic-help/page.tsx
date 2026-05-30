@@ -187,7 +187,7 @@ export default function DomesticHelpPage() {
 
   const { data: helpers, isLoading, isError, refetch } = useQuery({
     queryKey: ['domestic-help'],
-    queryFn: () => api.get<DomesticHelper[]>('/domestic-help'),
+    queryFn: () => api.get<DomesticHelper[]>('/admin/domestic-help'),
   });
 
   const filtered = (helpers ?? []).filter((h) =>

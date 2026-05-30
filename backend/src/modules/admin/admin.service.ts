@@ -2944,4 +2944,40 @@ async createStaff(
 
     return { created, skipped, errors, valid, preview: previewOnly };
   }
+
+  // ── Domestic Help (admin) ───────────────────────────────────────────────────
+
+  async getDomesticHelpers(societyId: string) {
+    const helpers = await this.prisma.domesticHelp.findMany({
+      where: { resident: { flat: { societyId } } },
+      include: {
+        resident: {
+          include: {
+            user: { select: { name: true } },
+            flat: { select: { number: true, block: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    return helpers.map((h) => ({
+      ...h,
+      resident: h.resident
+        ? {
+            id: h.resident.id,
+            name: h.resident.user.name,
+            unit: { flatNumber: `${h.resident.flat.block}-${h.resident.flat.number}` },
+          }
+        : undefined,
+    }));
+  }
+
+  // ── Pest Control (admin) ────────────────────────────────────────────────────
+
+  async getPestControlJobs(societyId: string) {
+    return this.prisma.pestControlSchedule.findMany({
+      where: { societyId },
+      orderBy: { scheduledAt: 'desc' },
+    });
+  }
 }

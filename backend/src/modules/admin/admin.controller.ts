@@ -888,4 +888,18 @@ export class AdminController {
   ) {
     return this.srService.softDelete(id, societyId);
   }
+
+  // ─── Domestic Help (society-wide) ────────────────────────────────────────
+
+  @Get('domestic-help')
+  getDomesticHelpers(@SocietyId() societyId: string) {
+    return this.adminService.getDomesticHelpers(societyId);
+  }
+
+  // ─── Pest Control (society-wide) ─────────────────────────────────────────
+
+  @Get('pest-control')
+  getPestControlJobs(@SocietyId() societyId: string) {
+    return this.adminService.getPestControlJobs(societyId);
+  }
 }

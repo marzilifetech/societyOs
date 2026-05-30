@@ -28,7 +28,21 @@ export default function CommunityPage() {
 
   const { data: posts, isLoading, isError, refetch } = useQuery<Post[]>({
     queryKey: ['admin-community-posts'],
-    queryFn: () => api.get<Post[]>('/community/posts'),
+    queryFn: async () => {
+      const res = await api.get<any>('/community/posts');
+      // API returns { posts: [...], total, page, limit }
+      const raw: any[] = Array.isArray(res) ? res : (res?.posts ?? []);
+      return raw.map((p) => ({
+        id: p.id,
+        content: p.content,
+        isPinned: p.isPinned ?? false,
+        isAnonymous: p.isAnonymous ?? false,
+        authorName: p.isAnonymous ? 'Anonymous' : (p.resident?.user?.name ?? null),
+        createdAt: p.createdAt,
+        title: p.title ?? null,
+        category: p.category ?? null,
+      })) as Post[];
+    },
   });
 
   const deleteMutation = useMutation({

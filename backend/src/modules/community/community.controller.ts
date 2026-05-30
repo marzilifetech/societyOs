@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { CommunityService } from './community.service';
 import { CreatePostDto, CreateCommentDto } from './dto/community.dto';
@@ -50,6 +50,15 @@ export class CommunityController {
   @Post('posts/:id/comments')
   addComment(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: CreateCommentDto) {
     return this.communityService.addComment(id, user.sub, dto);
+  }
+
+  @Patch('posts/:id/pin')
+  pinPost(
+    @Param('id') id: string,
+    @SocietyId() societyId: string,
+    @Body() body: { isPinned: boolean },
+  ) {
+    return this.communityService.pinPost(id, societyId, body.isPinned);
   }
 
   @Delete('posts/:id')
