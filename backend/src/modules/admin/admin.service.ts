@@ -1888,9 +1888,9 @@ async createStaff(
 
   async listBuildingAdmins(societyId: string) {
     return this.prisma.user.findMany({
-      where: { societyId, role: UserRole.BUILDING_ADMIN },
+      where: { societyId, role: { in: [UserRole.ADMIN, UserRole.BUILDING_ADMIN] } },
       select: {
-        id: true, name: true, phone: true, email: true, status: true,
+        id: true, name: true, phone: true, email: true, status: true, role: true,
         managedBlocks: true, createdAt: true,
       },
       orderBy: { createdAt: 'desc' },
@@ -1899,7 +1899,7 @@ async createStaff(
 
   async createBuildingAdmin(
     societyId: string,
-    dto: { name: string; phone: string; managedBlocks: string[] },
+    dto: { name: string; phone: string; managedBlocks: string[]; scope?: 'SOCIETY' | 'BUILDINGS' },
   ) {
     const existing = await this.prisma.user.findUnique({
       where: { phone_societyId: { phone: dto.phone, societyId } },
@@ -1907,17 +1907,28 @@ async createStaff(
     if (existing) {
       throw new ConflictException('A user with this phone already exists in the society');
     }
+
+    // Scope is authoritative: a society admin (ADMIN) spans the whole society
+    // with no block restriction; a building admin (BUILDING_ADMIN) is limited
+    // to the selected blocks.
+    const isSociety = (dto.scope ?? 'SOCIETY') === 'SOCIETY';
+    if (!isSociety && (!dto.managedBlocks || dto.managedBlocks.length === 0)) {
+      throw new BadRequestException('Select at least one building for a building-scoped admin');
+    }
+    const role = isSociety ? UserRole.ADMIN : UserRole.BUILDING_ADMIN;
+    const managedBlocks = isSociety ? [] : dto.managedBlocks;
+
     return this.prisma.user.create({
       data: {
         phone: dto.phone,
         name: dto.name,
-        role: UserRole.BUILDING_ADMIN,
+        role,
         status: UserStatus.ACTIVE,
         societyId,
-        managedBlocks: dto.managedBlocks,
+        managedBlocks,
       } as any,
       select: {
-        id: true, name: true, phone: true, email: true, status: true,
+        id: true, name: true, phone: true, email: true, status: true, role: true,
         managedBlocks: true, createdAt: true,
       },
     });
@@ -1939,8 +1950,8 @@ async createStaff(
 
   async removeBuildingAdmin(userId: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user || user.role !== UserRole.BUILDING_ADMIN) {
-      throw new NotFoundException('Building admin not found');
+    if (!user || (user.role !== UserRole.ADMIN && user.role !== UserRole.BUILDING_ADMIN)) {
+      throw new NotFoundException('Admin not found');
     }
     await this.prisma.user.delete({ where: { id: userId } });
     return { success: true };

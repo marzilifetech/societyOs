@@ -839,7 +839,7 @@ export class AdminController {
   @Roles(UserRole.SUPER_ADMIN)
   createBuildingAdmin(
     @SocietyId() societyId: string,
-    @Body() dto: { name: string; phone: string; managedBlocks: string[] },
+    @Body() dto: { name: string; phone: string; managedBlocks: string[]; scope?: 'SOCIETY' | 'BUILDINGS' },
   ) {
     return this.adminService.createBuildingAdmin(societyId, dto);
   }

@@ -13,15 +13,19 @@ type BuildingAdmin = {
   phone: string;
   email?: string;
   status: string;
+  role: 'ADMIN' | 'BUILDING_ADMIN';
   managedBlocks: string[];
   createdAt: string;
 };
 
 type Block = { block: string; flatCount: number; occupiedCount: number };
 
+type Scope = 'SOCIETY' | 'BUILDINGS';
+
 type CreateForm = {
   name: string;
   phone: string;
+  scope: Scope;
   managedBlocks: string[];
 };
 
@@ -30,7 +34,7 @@ export default function BuildingAdminsPage() {
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [editBlocks, setEditBlocks] = useState('');
-  const [form, setForm] = useState<CreateForm>({ name: '', phone: '', managedBlocks: [] });
+  const [form, setForm] = useState<CreateForm>({ name: '', phone: '', scope: 'SOCIETY', managedBlocks: [] });
 
   const { data: admins = [], isLoading, isError, refetch } = useQuery<BuildingAdmin[]>({
     queryKey: ['building-admins'],
@@ -56,13 +60,14 @@ export default function BuildingAdminsPage() {
       api.post('/admin/building-admins', {
         name: form.name.trim(),
         phone: form.phone.trim(),
-        managedBlocks: form.managedBlocks,
+        scope: form.scope,
+        managedBlocks: form.scope === 'BUILDINGS' ? form.managedBlocks : [],
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['building-admins'] });
-      toast.success('Building admin created');
+      toast.success(form.scope === 'SOCIETY' ? 'Society admin created' : 'Building admin created');
       setShowForm(false);
-      setForm({ name: '', phone: '', managedBlocks: [] });
+      setForm({ name: '', phone: '', scope: 'SOCIETY', managedBlocks: [] });
     },
     onError: (err: Error) => toast.error(err.message ?? 'Failed to create'),
   });
@@ -87,28 +92,31 @@ export default function BuildingAdminsPage() {
     onError: (err: Error) => toast.error(err.message ?? 'Failed to remove'),
   });
 
-  const isFormValid = form.name.trim() && form.phone.trim();
+  const isFormValid =
+    form.name.trim() &&
+    form.phone.trim() &&
+    (form.scope === 'SOCIETY' || form.managedBlocks.length > 0);
 
   return (
     <div className="p-6 lg:p-8 max-w-4xl">
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Building Admins</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Admins</h1>
           <p className="text-gray-500 text-sm mt-1">
-            Admins scoped to specific blocks/buildings within the society
+            Society-wide admins, or admins scoped to specific buildings
           </p>
         </div>
         <button
           onClick={() => setShowForm((v) => !v)}
           className="inline-flex items-center gap-2 bg-primary-500 hover:bg-primary-600 text-white text-sm font-semibold px-4 py-2 rounded-xl transition"
         >
-          {showForm ? 'Cancel' : <><Plus className="w-5 h-5" /> Add Building Admin</>}
+          {showForm ? 'Cancel' : <><Plus className="w-5 h-5" /> Add Admin</>}
         </button>
       </div>
 
       {showForm && (
         <div className="bg-white rounded-2xl border border-gray-200 p-5 mb-6 shadow-sm">
-          <h2 className="font-semibold text-gray-900 mb-4">New Building Admin</h2>
+          <h2 className="font-semibold text-gray-900 mb-4">New Admin</h2>
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className="block text-xs text-gray-500 mb-1">Name *</label>
@@ -128,41 +136,73 @@ export default function BuildingAdminsPage() {
                 onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
               />
             </div>
+
+            {/* Access scope */}
             <div className="sm:col-span-2">
-              <label className="block text-xs text-gray-500 mb-1">
-                Buildings / Blocks {form.managedBlocks.length === 0 && <span className="text-gray-400">(none selected = all buildings)</span>}
-              </label>
-              {blocks.length > 0 ? (
-                <div className="flex flex-wrap gap-2">
-                  {blocks.map((b) => {
-                    const selected = form.managedBlocks.includes(b.block);
-                    return (
-                      <button
-                        key={b.block}
-                        type="button"
-                        onClick={() => toggleBlock(b.block)}
-                        className={
-                          'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium border transition ' +
-                          (selected
-                            ? 'bg-primary-500 border-primary-500 text-white'
-                            : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300')
-                        }
-                      >
-                        {selected && <Check className="w-3.5 h-3.5" />}
-                        Building {b.block}
-                        <span className={selected ? 'text-white/70' : 'text-gray-400'}>
-                          ({b.flatCount})
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : (
-                <p className="text-xs text-gray-400">
-                  No buildings found yet — add flats first, or leave empty to grant access to all.
-                </p>
-              )}
+              <label className="block text-xs text-gray-500 mb-1.5">Access scope *</label>
+              <div className="inline-flex bg-gray-100 rounded-xl p-0.5">
+                {([
+                  { value: 'SOCIETY', label: 'Entire society' },
+                  { value: 'BUILDINGS', label: 'Specific buildings' },
+                ] as { value: Scope; label: string }[]).map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setForm((f) => ({ ...f, scope: opt.value }))}
+                    className={
+                      'px-4 h-8 text-sm font-medium rounded-lg transition ' +
+                      (form.scope === opt.value
+                        ? 'bg-white text-gray-900 shadow-sm'
+                        : 'text-gray-600 hover:text-gray-900')
+                    }
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-gray-400 mt-1">
+                {form.scope === 'SOCIETY'
+                  ? 'Full access across every building in the society.'
+                  : 'Access limited to the selected buildings only.'}
+              </p>
             </div>
+
+            {/* Building selector — only for building-scoped admins */}
+            {form.scope === 'BUILDINGS' && (
+              <div className="sm:col-span-2">
+                <label className="block text-xs text-gray-500 mb-1">Buildings / Blocks *</label>
+                {blocks.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {blocks.map((b) => {
+                      const selected = form.managedBlocks.includes(b.block);
+                      return (
+                        <button
+                          key={b.block}
+                          type="button"
+                          onClick={() => toggleBlock(b.block)}
+                          className={
+                            'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium border transition ' +
+                            (selected
+                              ? 'bg-primary-500 border-primary-500 text-white'
+                              : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300')
+                          }
+                        >
+                          {selected && <Check className="w-3.5 h-3.5" />}
+                          Building {b.block}
+                          <span className={selected ? 'text-white/70' : 'text-gray-400'}>
+                            ({b.flatCount})
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-400">
+                    No buildings found yet — add flats first, or use “Entire society”.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
           <button
             onClick={() => createMutation.mutate()}
@@ -183,14 +223,14 @@ export default function BuildingAdminsPage() {
       ) : admins.length === 0 ? (
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm py-16 flex flex-col items-center text-center">
           <Building2 className="w-10 h-10 text-gray-300 mb-3" />
-          <p className="text-sm font-medium text-gray-700">No building admins yet</p>
-          <p className="text-xs text-gray-400 mt-1 mb-4">Add one to grant scoped access to a building or block</p>
+          <p className="text-sm font-medium text-gray-700">No admins yet</p>
+          <p className="text-xs text-gray-400 mt-1 mb-4">Add a society-wide admin, or one scoped to specific buildings</p>
           <button
             onClick={() => setShowForm(true)}
             className="inline-flex items-center gap-2 bg-primary-500 hover:bg-primary-600 text-white text-sm font-semibold px-4 py-2 rounded-xl"
           >
             <Plus className="w-4 h-4" />
-            Add Building Admin
+            Add Admin
           </button>
         </div>
       ) : (
@@ -206,7 +246,7 @@ export default function BuildingAdminsPage() {
                   Phone
                 </th>
                 <th className="text-left px-5 py-3 text-xs text-gray-500 uppercase tracking-wide font-medium">
-                  Managed Blocks
+                  Scope
                 </th>
                 <th className="text-left px-5 py-3 text-xs text-gray-500 uppercase tracking-wide font-medium">
                   Added
@@ -222,7 +262,11 @@ export default function BuildingAdminsPage() {
                   </td>
                   <td className="px-5 py-3 text-gray-600 font-mono text-xs">{admin.phone}</td>
                   <td className="px-5 py-3">
-                    {editId === admin.id ? (
+                    {admin.role === 'ADMIN' ? (
+                      <span className="text-xs bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-full font-medium">
+                        Entire society
+                      </span>
+                    ) : editId === admin.id ? (
                       <div className="flex items-center gap-2">
                         <input
                           className="border border-gray-200 rounded-lg px-2 py-1 text-xs w-40 focus:outline-none focus:ring-1 focus:ring-primary-200"
@@ -262,7 +306,7 @@ export default function BuildingAdminsPage() {
                                 key={b}
                                 className="text-xs bg-primary-50 text-primary-700 px-2 py-0.5 rounded-full font-medium"
                               >
-                                {b}
+                                Building {b}
                               </span>
                             ))
                           )}
