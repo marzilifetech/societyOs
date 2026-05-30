@@ -170,7 +170,7 @@ export default function DoctorDetailPage() {
             <div className="py-16 text-center">
               <Calendar className="w-10 h-10 text-gray-300 mx-auto mb-3" />
               <p className="font-medium text-gray-700">No appointments yet</p>
-              <p className="text-sm text-gray-400 mt-1">This doctor's bookings will appear here.</p>
+              <p className="text-sm text-gray-400 mt-1">This doctor&apos;s bookings will appear here.</p>
             </div>
           ) : (
             <table className="w-full text-sm">

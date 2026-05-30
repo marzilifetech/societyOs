@@ -168,7 +168,7 @@ export default function SocietiesPage() {
           <p className="text-[12px] font-medium text-gray-500 tracking-wide uppercase">Platform</p>
           <h1 className="text-[28px] font-semibold tracking-tight text-gray-950 mt-1">Societies</h1>
           <p className="text-[14px] text-gray-500 mt-1">
-            Onboard, suspend, archive — control every society's lifecycle.
+            Onboard, suspend, archive — control every society&apos;s lifecycle.
           </p>
         </div>
         <Link href="/societies/new">
@@ -205,7 +205,7 @@ export default function SocietiesPage() {
 
       {isError ? (
         <Card>
-          <p className="text-[13px] text-red-700">Couldn't load societies.</p>
+          <p className="text-[13px] text-red-700">Couldn&apos;t load societies.</p>
           <Button variant="secondary" size="sm" className="mt-2" onClick={() => refetch()}>
             Try again
           </Button>

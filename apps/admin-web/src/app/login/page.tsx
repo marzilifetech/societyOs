@@ -470,7 +470,7 @@ function OtpStep({
       </Field>
 
       <div className="flex items-center justify-between text-[12px]">
-        <span className="text-gray-500">Didn't receive it?</span>
+        <span className="text-gray-500">Didn&apos;t receive it?</span>
         {resendCountdown > 0 ? (
           <span className="text-gray-400">Resend in {resendCountdown}s</span>
         ) : (

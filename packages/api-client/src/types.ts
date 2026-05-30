@@ -98,6 +98,7 @@ export interface Resident {
   name: string;
   phone: string;
   email?: string;
+  dateOfBirth?: string | null;
   status: 'ACTIVE' | 'PENDING' | 'INACTIVE';
   unit?: Unit;
   createdAt: string;
@@ -194,7 +195,7 @@ export interface MaintenanceBill {
   amount: number;
   dueDate: string;
   paidAt?: string;
-  status: 'PENDING' | 'PAID' | 'OVERDUE' | 'PARTIAL';
+  status: 'PENDING' | 'PAID' | 'OVERDUE' | 'PARTIAL' | 'WAIVED';
   breakdown?: BillBreakdown;
 }
 

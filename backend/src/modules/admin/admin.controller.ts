@@ -602,6 +602,7 @@ export class AdminController {
     return this.adminService.importResidentsCsv(societyId, csv);
   }
 
+
   @Post('residents/import/preview')
   previewResidentsImport(
     @SocietyId() societyId: string,
@@ -617,6 +618,7 @@ export class AdminController {
     const csv = this.adminService.residentsImportTemplate();
     return new StreamableFile(Buffer.from(csv, 'utf8'));
   }
+
 
   @Get('residents/:id')
   getResidentDetail(@SocietyId() societyId: string, @Param('id') id: string) {

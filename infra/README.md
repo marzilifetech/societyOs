@@ -130,6 +130,7 @@ Every push to `main` then rebuilds and redeploys the admin app automatically.
 ```bash
 curl https://society-dev.marzitech.in/v1/health      # → {"status":"ok"}
 ```
+
 Then open `https://society-admin-dev.marzitech.in`.
 
 ## Redeploy (day-to-day)
@@ -144,19 +145,20 @@ cd infra/instance && ./deploy.sh    # backend
 ```bash
 cd infra/terraform && terraform destroy
 ```
+
 Removes everything tagged — **except** the S3 bucket and the `societyos_dev`
 database (both referenced read-only, so your data survives). Drop the database
 manually if you truly want it gone.
 
 ## Cost (approximate, ap-south-1)
 
-| Item | $/mo |
-|---|---|
-| Lightsail instance `small_3_0` | ~12 |
-| Static IP (attached) | 0 |
-| VPC peering | 0 |
-| Secrets Manager (1 secret) | ~0.40 |
-| RDS (shared — new database only) | ~0 |
-| S3 `societyos-dev-uploads` | <1 |
-| Amplify (admin-web, low traffic) | ~3–7 |
-| **Total** | **≈ $16–20/mo** |
+| Item                             | $/mo            |
+| -------------------------------- | --------------- |
+| Lightsail instance `small_3_0`   | ~12             |
+| Static IP (attached)             | 0               |
+| VPC peering                      | 0               |
+| Secrets Manager (1 secret)       | ~0.40           |
+| RDS (shared — new database only) | ~0              |
+| S3 `societyos-dev-uploads`       | <1              |
+| Amplify (admin-web, low traffic) | ~3–7            |
+| **Total**                        | **≈ $16–20/mo** |

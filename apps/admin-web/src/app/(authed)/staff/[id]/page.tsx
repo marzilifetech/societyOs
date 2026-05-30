@@ -223,6 +223,7 @@ export default function StaffDetailPage() {
     onError: (err: Error) => toast.error(err.message),
   });
 
+
   const updateEmergencyContactMutation = useMutation({
     mutationFn: () =>
       api.patch(`/admin/staff/${staffId}`, {
@@ -257,6 +258,7 @@ export default function StaffDetailPage() {
     },
     onError: (err: Error) => toast.error(err.message),
   });
+
 
   const uploadDocMutation = useMutation({
     mutationFn: async () => {
@@ -483,6 +485,7 @@ export default function StaffDetailPage() {
             </button>
           </div>
 
+
           <div className="bg-white rounded-2xl border border-gray-100 p-5 mb-4">
             <h2 className="font-semibold text-gray-900 mb-3">Emergency Contact</h2>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -513,6 +516,7 @@ export default function StaffDetailPage() {
               Save Emergency Contact
             </button>
           </div>
+
 
           <Link
             href={`/staff/${staffId}/attendance`}
