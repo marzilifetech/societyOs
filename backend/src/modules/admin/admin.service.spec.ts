@@ -5,7 +5,7 @@ import {
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
-import { ComplaintStatus, LeaveStatus, UserRole } from '@prisma/client';
+import { ComplaintStatus, LeaveStatus, UserRole, InfrastructureType, InfrastructureStatus } from '@prisma/client';
 import { AdminService } from './admin.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
@@ -19,13 +19,16 @@ const mockPrisma: Record<string, any> = {
   leaveRequest: { findUnique: jest.fn(), update: jest.fn() },
   visitor: { findUnique: jest.fn(), update: jest.fn(), findMany: jest.fn() },
   resident: { findFirst: jest.fn(), findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), count: jest.fn(), findMany: jest.fn() },
-  user: { findFirst: jest.fn(), findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), updateMany: jest.fn(), findMany: jest.fn(), count: jest.fn() },
+  user: { findFirst: jest.fn(), findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), updateMany: jest.fn(), findMany: jest.fn(), count: jest.fn(), delete: jest.fn() },
   flat: { findFirst: jest.fn(), findMany: jest.fn(), create: jest.fn(), update: jest.fn(), delete: jest.fn(), count: jest.fn() },
   society: { findUnique: jest.fn(), findMany: jest.fn(), create: jest.fn(), update: jest.fn(), groupBy: jest.fn(), count: jest.fn() },
   staffMember: { findUnique: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(), update: jest.fn(), create: jest.fn(), count: jest.fn() },
   staffDocument: { findMany: jest.fn(), create: jest.fn(), findFirst: jest.fn(), delete: jest.fn(), update: jest.fn() },
   staffLoan: { findMany: jest.fn(), create: jest.fn(), count: jest.fn() },
   maintenanceBill: { findUnique: jest.fn(), update: jest.fn() },
+  domesticHelp: { findMany: jest.fn() },
+  pestControlSchedule: { findMany: jest.fn() },
+  infrastructureItem: { findFirst: jest.fn(), findMany: jest.fn(), create: jest.fn() },
 };
 mockPrisma.$transaction = jest.fn((arg: unknown) => {
   if (typeof arg === 'function') return (arg as (tx: typeof mockPrisma) => unknown)(mockPrisma);
@@ -1505,6 +1508,267 @@ describe('AdminService', () => {
       expect(r1.id).not.toEqual(r2.id);
       // sos_<uuid> — 4 hyphens in v4 UUID
       expect(r1.id).toMatch(/^sos_[0-9a-f-]{36}$/i);
+    });
+  });
+
+  // ─── createBuildingAdmin (scope: society-wide vs building-scoped) ────────────
+
+  describe('createBuildingAdmin', () => {
+    it('creates a society-wide ADMIN with no managed blocks when scope=SOCIETY', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+      mockPrisma.user.create.mockImplementation(({ data }: any) => ({ id: 'u-new', ...data }));
+
+      await service.createBuildingAdmin('soc-1', {
+        name: 'Asha',
+        phone: '+919000000001',
+        managedBlocks: ['A', 'B'], // should be ignored for society scope
+        scope: 'SOCIETY',
+      });
+
+      expect(mockPrisma.user.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            role: UserRole.ADMIN,
+            managedBlocks: [],
+            societyId: 'soc-1',
+          }),
+        }),
+      );
+    });
+
+    it('defaults to society-wide ADMIN when scope is omitted', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+      mockPrisma.user.create.mockImplementation(({ data }: any) => ({ id: 'u-new', ...data }));
+
+      await service.createBuildingAdmin('soc-1', {
+        name: 'Asha',
+        phone: '+919000000002',
+        managedBlocks: [],
+      });
+
+      expect(mockPrisma.user.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ role: UserRole.ADMIN }) }),
+      );
+    });
+
+    it('creates a BUILDING_ADMIN scoped to selected blocks when scope=BUILDINGS', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+      mockPrisma.user.create.mockImplementation(({ data }: any) => ({ id: 'u-new', ...data }));
+
+      await service.createBuildingAdmin('soc-1', {
+        name: 'Ravi',
+        phone: '+919000000003',
+        managedBlocks: ['A', 'C'],
+        scope: 'BUILDINGS',
+      });
+
+      expect(mockPrisma.user.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            role: UserRole.BUILDING_ADMIN,
+            managedBlocks: ['A', 'C'],
+          }),
+        }),
+      );
+    });
+
+    it('rejects building scope with no blocks (BadRequestException)', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.createBuildingAdmin('soc-1', {
+          name: 'Ravi',
+          phone: '+919000000004',
+          managedBlocks: [],
+          scope: 'BUILDINGS',
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.user.create).not.toHaveBeenCalled();
+    });
+
+    it('conflicts when phone already exists in society', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({ id: 'u-existing' });
+
+      await expect(
+        service.createBuildingAdmin('soc-1', {
+          name: 'Dup',
+          phone: '+919000000005',
+          managedBlocks: [],
+          scope: 'SOCIETY',
+        }),
+      ).rejects.toThrow(ConflictException);
+      expect(mockPrisma.user.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('listBuildingAdmins', () => {
+    it('returns both society admins and building admins', async () => {
+      mockPrisma.user.findMany.mockResolvedValue([]);
+
+      await service.listBuildingAdmins('soc-1');
+
+      expect(mockPrisma.user.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            societyId: 'soc-1',
+            role: { in: [UserRole.ADMIN, UserRole.BUILDING_ADMIN] },
+          }),
+        }),
+      );
+    });
+  });
+
+  describe('removeBuildingAdmin', () => {
+    it('removes a society ADMIN', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({ id: 'u1', role: UserRole.ADMIN });
+      mockPrisma.user.delete.mockResolvedValue({});
+      await expect(service.removeBuildingAdmin('u1')).resolves.toEqual({ success: true });
+      expect(mockPrisma.user.delete).toHaveBeenCalledWith({ where: { id: 'u1' } });
+    });
+
+    it('removes a BUILDING_ADMIN', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({ id: 'u2', role: UserRole.BUILDING_ADMIN });
+      mockPrisma.user.delete.mockResolvedValue({});
+      await expect(service.removeBuildingAdmin('u2')).resolves.toEqual({ success: true });
+    });
+
+    it('refuses to remove a SUPER_ADMIN', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({ id: 'u3', role: UserRole.SUPER_ADMIN });
+      await expect(service.removeBuildingAdmin('u3')).rejects.toThrow(NotFoundException);
+      expect(mockPrisma.user.delete).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── Infrastructure ─────────────────────────────────────────────────────────
+
+  describe('createInfrastructureItem', () => {
+    it('creates an item, uppercasing type and defaulting status to OPERATIONAL', async () => {
+      mockPrisma.infrastructureItem.create.mockImplementation(({ data }: any) => ({ id: 'i1', ...data }));
+
+      await service.createInfrastructureItem('soc-1', { name: 'Main Lift', type: 'lift' });
+
+      expect(mockPrisma.infrastructureItem.create).toHaveBeenCalledWith({
+        data: {
+          societyId: 'soc-1',
+          name: 'Main Lift',
+          type: InfrastructureType.LIFT,
+          status: InfrastructureStatus.OPERATIONAL,
+        },
+      });
+    });
+
+    it('rejects an invalid type', async () => {
+      await expect(
+        service.createInfrastructureItem('soc-1', { name: 'X', type: 'ELEVATOR' }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.infrastructureItem.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects an invalid status', async () => {
+      await expect(
+        service.createInfrastructureItem('soc-1', { name: 'X', type: 'LIFT', status: 'BROKEN' }),
+      ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('importInfrastructureCsv', () => {
+    it('throws BadRequestException for header-only CSV', async () => {
+      await expect(service.importInfrastructureCsv('soc-1', 'name,type,status')).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('creates valid rows and records errors for invalid type', async () => {
+      mockPrisma.infrastructureItem.findFirst.mockResolvedValue(null);
+      mockPrisma.infrastructureItem.create.mockResolvedValue({ id: 'i1' });
+
+      const csv =
+        'name,type,status\n' +
+        'Lift A,LIFT,OPERATIONAL\n' +
+        'Bad One,ELEVATOR,OPERATIONAL\n';
+      const result = await service.importInfrastructureCsv('soc-1', csv);
+
+      expect(result.created).toBe(1);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toMatchObject({ row: 3 });
+    });
+
+    it('skips rows whose name already exists', async () => {
+      mockPrisma.infrastructureItem.findFirst.mockResolvedValue({ id: 'existing' });
+
+      const csv = 'name,type,status\nLift A,LIFT,OPERATIONAL\n';
+      const result = await service.importInfrastructureCsv('soc-1', csv);
+
+      expect(result.created).toBe(0);
+      expect(result.skipped).toBe(1);
+      expect(mockPrisma.infrastructureItem.create).not.toHaveBeenCalled();
+    });
+
+    it('does not write in preview mode', async () => {
+      mockPrisma.infrastructureItem.findFirst.mockResolvedValue(null);
+
+      const csv = 'name,type,status\nLift A,LIFT,OPERATIONAL\n';
+      const result = await service.previewInfrastructureCsv('soc-1', csv);
+
+      expect(result.preview).toBe(true);
+      expect(result.valid).toHaveLength(1);
+      expect(mockPrisma.infrastructureItem.create).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── Domestic help / pest control (society-wide getters) ────────────────────
+
+  describe('getDomesticHelpers', () => {
+    it('scopes the query to the society via flat relation', async () => {
+      mockPrisma.domesticHelp.findMany.mockResolvedValue([]);
+      await service.getDomesticHelpers('soc-1');
+      expect(mockPrisma.domesticHelp.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { resident: { flat: { societyId: 'soc-1' } } },
+        }),
+      );
+    });
+  });
+
+  describe('getPestControlJobs', () => {
+    it('returns all jobs for the society newest-first', async () => {
+      mockPrisma.pestControlSchedule.findMany.mockResolvedValue([]);
+      await service.getPestControlJobs('soc-1');
+      expect(mockPrisma.pestControlSchedule.findMany).toHaveBeenCalledWith({
+        where: { societyId: 'soc-1' },
+        orderBy: { scheduledAt: 'desc' },
+      });
+    });
+  });
+
+  // ─── CSV: dateOfBirth in resident import ────────────────────────────────────
+
+  describe('processResidentsCsv (dateOfBirth)', () => {
+    it('passes dateOfBirth to user.create when the column is present', async () => {
+      mockPrisma.user.findFirst.mockResolvedValue(null);
+      mockPrisma.flat.findFirst.mockResolvedValue(null);
+      mockPrisma.user.create.mockResolvedValue({ id: 'u-new' });
+
+      const csv = 'name,phone,dateOfBirth\nAlice,9876543210,1990-05-01';
+      await service.importResidentsCsv('soc-1', csv);
+
+      expect(mockPrisma.user.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ dateOfBirth: new Date('1990-05-01') }),
+        }),
+      );
+    });
+
+    it('leaves dateOfBirth undefined when the column is absent', async () => {
+      mockPrisma.user.findFirst.mockResolvedValue(null);
+      mockPrisma.flat.findFirst.mockResolvedValue(null);
+      mockPrisma.user.create.mockResolvedValue({ id: 'u-new' });
+
+      const csv = 'name,phone\nBob,9876543211';
+      await service.importResidentsCsv('soc-1', csv);
+
+      const arg = mockPrisma.user.create.mock.calls[0][0];
+      expect(arg.data.dateOfBirth).toBeUndefined();
     });
   });
 });
