@@ -17,10 +17,12 @@ type BuildingAdmin = {
   createdAt: string;
 };
 
+type Block = { block: string; flatCount: number; occupiedCount: number };
+
 type CreateForm = {
   name: string;
   phone: string;
-  managedBlocks: string;
+  managedBlocks: string[];
 };
 
 export default function BuildingAdminsPage() {
@@ -28,25 +30,39 @@ export default function BuildingAdminsPage() {
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [editBlocks, setEditBlocks] = useState('');
-  const [form, setForm] = useState<CreateForm>({ name: '', phone: '', managedBlocks: '' });
+  const [form, setForm] = useState<CreateForm>({ name: '', phone: '', managedBlocks: [] });
 
   const { data: admins = [], isLoading, isError, refetch } = useQuery<BuildingAdmin[]>({
     queryKey: ['building-admins'],
     queryFn: () => api.get<BuildingAdmin[]>('/admin/building-admins'),
   });
 
+  const { data: blocks = [] } = useQuery<Block[]>({
+    queryKey: ['admin-blocks'],
+    queryFn: () => api.get<Block[]>('/admin/blocks'),
+    enabled: showForm,
+  });
+
+  const toggleBlock = (b: string) =>
+    setForm((f) => ({
+      ...f,
+      managedBlocks: f.managedBlocks.includes(b)
+        ? f.managedBlocks.filter((x) => x !== b)
+        : [...f.managedBlocks, b],
+    }));
+
   const createMutation = useMutation({
     mutationFn: () =>
       api.post('/admin/building-admins', {
         name: form.name.trim(),
         phone: form.phone.trim(),
-        managedBlocks: form.managedBlocks.split(',').map((s) => s.trim()).filter(Boolean),
+        managedBlocks: form.managedBlocks,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['building-admins'] });
       toast.success('Building admin created');
       setShowForm(false);
-      setForm({ name: '', phone: '', managedBlocks: '' });
+      setForm({ name: '', phone: '', managedBlocks: [] });
     },
     onError: (err: Error) => toast.error(err.message ?? 'Failed to create'),
   });
@@ -114,14 +130,38 @@ export default function BuildingAdminsPage() {
             </div>
             <div className="sm:col-span-2">
               <label className="block text-xs text-gray-500 mb-1">
-                Managed Blocks (comma-separated, leave empty for all)
+                Buildings / Blocks {form.managedBlocks.length === 0 && <span className="text-gray-400">(none selected = all buildings)</span>}
               </label>
-              <input
-                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-200"
-                placeholder="e.g. A, B, C"
-                value={form.managedBlocks}
-                onChange={(e) => setForm((f) => ({ ...f, managedBlocks: e.target.value }))}
-              />
+              {blocks.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {blocks.map((b) => {
+                    const selected = form.managedBlocks.includes(b.block);
+                    return (
+                      <button
+                        key={b.block}
+                        type="button"
+                        onClick={() => toggleBlock(b.block)}
+                        className={
+                          'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium border transition ' +
+                          (selected
+                            ? 'bg-primary-500 border-primary-500 text-white'
+                            : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300')
+                        }
+                      >
+                        {selected && <Check className="w-3.5 h-3.5" />}
+                        Building {b.block}
+                        <span className={selected ? 'text-white/70' : 'text-gray-400'}>
+                          ({b.flatCount})
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400">
+                  No buildings found yet — add flats first, or leave empty to grant access to all.
+                </p>
+              )}
             </div>
           </div>
           <button

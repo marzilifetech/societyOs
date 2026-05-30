@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
 import { PushService } from '../../common/notification/push.service';
-import { UserStatus, UserRole, ComplaintStatus, TravelPauseStatus } from '@prisma/client';
+import { UserStatus, UserRole, ComplaintStatus, TravelPauseStatus, InfrastructureType, InfrastructureStatus } from '@prisma/client';
 import { requireLeavePendingInSociety } from '../../common/utils/leave-admin.util';
 import { ComplianceService } from '../compliance/compliance.service';
 import { AuditService } from '../../common/audit/audit.service';
@@ -2979,5 +2979,114 @@ async createStaff(
       where: { societyId },
       orderBy: { scheduledAt: 'desc' },
     });
+  }
+
+  // ── Infrastructure CRUD + bulk import ───────────────────────────────────────
+
+  async createInfrastructureItem(
+    societyId: string,
+    dto: { name: string; type: string; status?: string },
+  ) {
+    const type = dto.type?.toUpperCase();
+    if (!Object.values(InfrastructureType).includes(type as InfrastructureType)) {
+      throw new BadRequestException(
+        `Invalid type "${dto.type}". Allowed: ${Object.values(InfrastructureType).join(', ')}`,
+      );
+    }
+    const status = (dto.status?.toUpperCase() as InfrastructureStatus) || InfrastructureStatus.OPERATIONAL;
+    if (!Object.values(InfrastructureStatus).includes(status)) {
+      throw new BadRequestException(
+        `Invalid status "${dto.status}". Allowed: ${Object.values(InfrastructureStatus).join(', ')}`,
+      );
+    }
+    return this.prisma.infrastructureItem.create({
+      data: { societyId, name: dto.name.trim(), type: type as InfrastructureType, status },
+    });
+  }
+
+  infrastructureImportTemplate(): string {
+    return (
+      'name,type,status\n' +
+      'Main Lift,LIFT,OPERATIONAL\n' +
+      'Backup Generator,GENERATOR,OPERATIONAL\n' +
+      'Borewell Pump,WATER,MAINTENANCE\n'
+    );
+  }
+
+  async exportInfrastructureCsv(societyId: string): Promise<string> {
+    const items = await this.prisma.infrastructureItem.findMany({
+      where: { societyId },
+      orderBy: { name: 'asc' },
+    });
+    const header = 'name,type,status\n';
+    const body = items.map((i) => toCsvRow([i.name, i.type, i.status])).join('\n');
+    return header + body;
+  }
+
+  async previewInfrastructureCsv(societyId: string, csvText: string) {
+    return this.importInfrastructureCsv(societyId, csvText, true);
+  }
+
+  async importInfrastructureCsv(societyId: string, csvText: string, previewOnly = false) {
+    const { headers, rows } = parseCsv(csvText);
+    if (headers.length === 0 || rows.length === 0) {
+      throw new BadRequestException('CSV is empty or has only a header');
+    }
+
+    const validTypes = Object.values(InfrastructureType) as string[];
+    const validStatuses = Object.values(InfrastructureStatus) as string[];
+
+    let created = 0;
+    let skipped = 0;
+    const errors: { row: number; reason: string }[] = [];
+    const valid: { row: number; name: string; type: string; status: string }[] = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const record = rowToRecord(headers, rows[i]);
+      const name = record['name']?.trim();
+      const type = record['type']?.trim().toUpperCase();
+      const statusRaw = record['status']?.trim().toUpperCase();
+      const status = statusRaw || InfrastructureStatus.OPERATIONAL;
+
+      if (!name || !type) {
+        errors.push({ row: i + 2, reason: 'Missing name or type' });
+        continue;
+      }
+      if (!validTypes.includes(type)) {
+        errors.push({ row: i + 2, reason: `Invalid type "${type}" (allowed: ${validTypes.join(', ')})` });
+        continue;
+      }
+      if (!validStatuses.includes(status)) {
+        errors.push({ row: i + 2, reason: `Invalid status "${status}" (allowed: ${validStatuses.join(', ')})` });
+        continue;
+      }
+
+      try {
+        const existing = await this.prisma.infrastructureItem.findFirst({
+          where: { societyId, name },
+        });
+        if (existing) {
+          skipped++;
+          continue;
+        }
+
+        valid.push({ row: i + 2, name, type, status });
+        if (previewOnly) continue;
+
+        await this.prisma.infrastructureItem.create({
+          data: {
+            societyId,
+            name,
+            type: type as InfrastructureType,
+            status: status as InfrastructureStatus,
+          },
+        });
+        created++;
+      } catch (err) {
+        errors.push({ row: i + 2, reason: (err as Error).message });
+      }
+    }
+
+    return { created, skipped, errors, valid, preview: previewOnly };
   }
 }

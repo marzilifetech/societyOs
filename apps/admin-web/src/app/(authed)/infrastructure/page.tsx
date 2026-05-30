@@ -3,8 +3,8 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Wrench, AlertTriangle, Check } from 'lucide-react';
-import { api } from '@/lib/api';
+import { Wrench, AlertTriangle, Check, Plus, Upload, Download, X } from 'lucide-react';
+import { api, downloadAdminFile } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { ErrorState } from '@/components/ui/ErrorState';
 
@@ -23,18 +23,24 @@ type Incident = {
 type InfraItem = {
   id: string;
   name: string;
-  category: string;
+  type: string;
   status: string;
-  location?: string;
-  lastMaintenanceAt?: string;
   incidents?: Incident[];
 };
+
+const INFRA_TYPES = ['LIFT', 'POWER', 'WATER', 'GENERATOR', 'WIFI'] as const;
+const INFRA_STATUSES = ['OPERATIONAL', 'MAINTENANCE', 'FAULT'] as const;
 
 export default function InfrastructurePage() {
   const qc = useQueryClient();
   const [showIncidentForm, setShowIncidentForm] = useState<string | null>(null);
   const [incidentForm, setIncidentForm] = useState({ title: '', description: '', severity: 'MEDIUM' });
   const [activeTab, setActiveTab] = useState<'items' | 'incidents'>('items');
+  const [showAdd, setShowAdd] = useState(false);
+  const [addForm, setAddForm] = useState({ name: '', type: 'LIFT', status: 'OPERATIONAL' });
+  const [showImport, setShowImport] = useState(false);
+  const [importCsv, setImportCsv] = useState('');
+  const [preview, setPreview] = useState<any>(null);
 
   const { data: items, isLoading: itemsLoading, isError: itemsError, refetch: refetchItems } = useQuery<InfraItem[]>({
     queryKey: ['infrastructure-items'],
@@ -67,13 +73,73 @@ export default function InfrastructurePage() {
     onError: (err: Error) => toast.error(err.message),
   });
 
+  const addMutation = useMutation({
+    mutationFn: () => api.post('/admin/infrastructure', { ...addForm, name: addForm.name.trim() }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['infrastructure-items'] });
+      toast.success('Item added');
+      setShowAdd(false);
+      setAddForm({ name: '', type: 'LIFT', status: 'OPERATIONAL' });
+    },
+    onError: (err: Error) => toast.error(err.message ?? 'Failed to add'),
+  });
+
+  const previewMutation = useMutation({
+    mutationFn: (csv: string) => api.post('/admin/infrastructure/import/preview', { csv }),
+    onSuccess: (data) => setPreview(data),
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const importMutation = useMutation({
+    mutationFn: (csv: string) =>
+      api.post<{ created: number; skipped: number; errors: { row: number; reason: string }[] }>(
+        '/admin/infrastructure/import',
+        { csv },
+      ),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['infrastructure-items'] });
+      setShowImport(false);
+      setImportCsv('');
+      setPreview(null);
+      toast.success(`Imported ${data.created} items (${data.skipped} skipped)`);
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const onFile = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const csv = String(reader.result ?? '');
+      setImportCsv(csv);
+      previewMutation.mutate(csv);
+    };
+    reader.readAsText(file);
+  };
+
   const openIncidents = incidents?.filter((i) => !i.resolvedAt && i.status !== 'RESOLVED') ?? [];
 
   return (
     <div className="p-6 lg:p-8">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Infrastructure</h1>
-        <p className="text-gray-500 text-sm mt-1">{items?.length ?? 0} items · {openIncidents.length} open incidents</p>
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Infrastructure</h1>
+          <p className="text-gray-500 text-sm mt-1">{items?.length ?? 0} items · {openIncidents.length} open incidents</p>
+        </div>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => downloadAdminFile('/admin/infrastructure/import/template', 'infrastructure-import-template.csv').catch((e: Error) => toast.error(e.message))}
+            className="inline-flex items-center gap-1 border border-gray-200 px-3 py-2 rounded-xl text-sm"
+          >
+            <Download className="w-4 h-4" /> Template
+          </button>
+          <button onClick={() => setShowImport(true)} className="inline-flex items-center gap-1 border border-gray-200 px-3 py-2 rounded-xl text-sm">
+            <Upload className="w-4 h-4" /> Import CSV
+          </button>
+          <button onClick={() => setShowAdd(true)} className="inline-flex items-center gap-1 bg-primary-500 text-white px-3 py-2 rounded-xl text-sm font-semibold">
+            <Plus className="w-4 h-4" /> Add Item
+          </button>
+        </div>
       </div>
 
       <div className="flex gap-2 mb-6">
@@ -95,7 +161,15 @@ export default function InfrastructurePage() {
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm py-16 flex flex-col items-center text-center">
           <Wrench className="w-10 h-10 text-gray-300 mb-3" />
           <p className="text-sm font-medium text-gray-700">No infrastructure items yet</p>
-          <p className="text-xs text-gray-400 mt-1">Items like lifts, gates, and meters will appear here once added</p>
+          <p className="text-xs text-gray-400 mt-1 mb-4">Add items one by one, or bulk upload a CSV</p>
+          <div className="flex gap-2">
+            <button onClick={() => setShowImport(true)} className="inline-flex items-center gap-1 border border-gray-200 px-3 py-2 rounded-xl text-sm">
+              <Upload className="w-4 h-4" /> Import CSV
+            </button>
+            <button onClick={() => setShowAdd(true)} className="inline-flex items-center gap-1 bg-primary-500 text-white px-3 py-2 rounded-xl text-sm font-semibold">
+              <Plus className="w-4 h-4" /> Add Item
+            </button>
+          </div>
         </div>
       ) : null}
 
@@ -106,25 +180,23 @@ export default function InfrastructurePage() {
             <thead>
               <tr className="border-b border-gray-100">
                 <th className="text-left text-xs font-semibold text-gray-500 px-6 py-3">Name</th>
-                <th className="text-left text-xs font-semibold text-gray-500 px-6 py-3">Category</th>
-                <th className="text-left text-xs font-semibold text-gray-500 px-6 py-3">Location</th>
+                <th className="text-left text-xs font-semibold text-gray-500 px-6 py-3">Type</th>
                 <th className="text-left text-xs font-semibold text-gray-500 px-6 py-3">Status</th>
                 <th className="text-left text-xs font-semibold text-gray-500 px-6 py-3">Actions</th>
               </tr>
             </thead>
             <tbody>
               {itemsLoading ? (
-                <tr><td colSpan={5} className="px-6 py-12 text-center text-gray-400 text-sm">Loading…</td></tr>
+                <tr><td colSpan={4} className="px-6 py-12 text-center text-gray-400 text-sm">Loading…</td></tr>
               ) : itemsError ? (
-                <tr><td colSpan={5} className="px-6 py-12"><ErrorState onRetry={refetchItems} message="Infrastructure information couldn't be loaded. Your data is safe — please try again." /></td></tr>
+                <tr><td colSpan={4} className="px-6 py-12"><ErrorState onRetry={refetchItems} message="Infrastructure information couldn't be loaded. Your data is safe — please try again." /></td></tr>
               ) : (
                 items!.map((item) => (
                   <tr key={item.id} className="border-b border-gray-50 hover:bg-gray-50/50">
                     <td className="px-6 py-4">
                       <div className="font-medium text-gray-900 text-sm">{item.name}</div>
                     </td>
-                    <td className="px-6 py-4 text-sm text-gray-600">{item.category}</td>
-                    <td className="px-6 py-4 text-sm text-gray-600">{item.location ?? '—'}</td>
+                    <td className="px-6 py-4 text-sm text-gray-600">{item.type}</td>
                     <td className="px-6 py-4">
                       <span className={cn(
                         'text-xs font-medium px-2.5 py-1 rounded-full',
@@ -242,6 +314,100 @@ export default function InfrastructurePage() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Add item modal */}
+      {showAdd && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-5 w-full max-w-md space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="font-semibold text-gray-900">Add Infrastructure Item</h2>
+              <button aria-label="Close" onClick={() => setShowAdd(false)} className="text-gray-400 hover:text-gray-600"><X className="w-4 h-4" /></button>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Name *</label>
+              <input
+                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-200"
+                placeholder="e.g. Main Lift, Borewell Pump"
+                value={addForm.name}
+                onChange={(e) => setAddForm((f) => ({ ...f, name: e.target.value }))}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Type *</label>
+                <select
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary-200"
+                  value={addForm.type}
+                  onChange={(e) => setAddForm((f) => ({ ...f, type: e.target.value }))}
+                >
+                  {INFRA_TYPES.map((t) => <option key={t} value={t}>{t.charAt(0) + t.slice(1).toLowerCase()}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Status</label>
+                <select
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary-200"
+                  value={addForm.status}
+                  onChange={(e) => setAddForm((f) => ({ ...f, status: e.target.value }))}
+                >
+                  {INFRA_STATUSES.map((s) => <option key={s} value={s}>{s.charAt(0) + s.slice(1).toLowerCase()}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setShowAdd(false)} className="text-gray-500 text-sm px-4 py-2">Cancel</button>
+              <button
+                disabled={!addForm.name.trim() || addMutation.isPending}
+                onClick={() => addMutation.mutate()}
+                className="bg-primary-500 text-white px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-50"
+              >
+                {addMutation.isPending ? 'Adding…' : 'Add Item'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Import CSV modal */}
+      {showImport && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-5 w-full max-w-lg space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="font-semibold text-gray-900">Import infrastructure CSV</h2>
+              <button aria-label="Close" onClick={() => { setShowImport(false); setPreview(null); setImportCsv(''); }} className="text-gray-400 hover:text-gray-600"><X className="w-4 h-4" /></button>
+            </div>
+            <p className="text-xs text-gray-500">
+              Columns: <code className="bg-gray-100 px-1 rounded">name, type, status</code>. Type: {INFRA_TYPES.join(', ')}. Status optional (defaults to Operational).
+            </p>
+            <button
+              type="button"
+              onClick={() => downloadAdminFile('/admin/infrastructure/import/template', 'infrastructure-import-template.csv').catch((e: Error) => toast.error(e.message))}
+              className="text-xs text-primary-600 inline-flex items-center gap-1"
+            >
+              <Download className="w-3.5 h-3.5" /> Download template
+            </button>
+            <input type="file" accept=".csv" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
+            {preview && (
+              <div className="text-xs bg-gray-50 rounded-xl p-3 max-h-40 overflow-y-auto">
+                <p className="font-medium mb-1">Preview: {preview.valid?.length ?? 0} valid, {preview.errors?.length ?? 0} errors</p>
+                {preview.errors?.map((e: any) => (
+                  <p key={e.row} className="text-red-600">Row {e.row}: {e.reason}</p>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <button
+                disabled={!importCsv || importMutation.isPending}
+                onClick={() => importMutation.mutate(importCsv)}
+                className="bg-primary-500 text-white px-4 py-2 rounded-xl text-sm disabled:opacity-50"
+              >
+                {importMutation.isPending ? 'Importing…' : 'Import'}
+              </button>
+              <button onClick={() => { setShowImport(false); setPreview(null); setImportCsv(''); }} className="text-gray-500 text-sm px-4 py-2">Cancel</button>
+            </div>
+          </div>
         </div>
       )}
     </div>
