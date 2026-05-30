@@ -174,6 +174,13 @@ function TagEditor({ id, initialTags, onSave }: { id: string; initialTags: strin
 
 // ─── New request modal ────────────────────────────────────────────────────────
 
+interface StaffOption {
+  id: string;
+  name: string;
+  designation: string;
+  categories: string[];
+}
+
 function NewRequestModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const [form, setForm] = useState({
     residentId: '',
@@ -183,6 +190,7 @@ function NewRequestModal({ onClose, onCreated }: { onClose: () => void; onCreate
     isPaid: false,
     reminderMinutes: '',
     tags: [] as string[],
+    staffId: '',
   });
   const [tagInput, setTagInput] = useState('');
   const [residentSearch, setResidentSearch] = useState('');
@@ -190,6 +198,12 @@ function NewRequestModal({ onClose, onCreated }: { onClose: () => void; onCreate
   const { data: residents } = useQuery({
     queryKey: ['admin-residents-search'],
     queryFn: () => api.get<any[]>('/admin/residents'),
+  });
+
+  const { data: allStaff = [] } = useQuery<StaffOption[]>({
+    queryKey: ['admin-staff'],
+    queryFn: () => api.get<StaffOption[]>('/admin/staff'),
+    staleTime: 60_000,
   });
 
   const filtered = residents?.filter((r: any) => {
@@ -202,9 +216,30 @@ function NewRequestModal({ onClose, onCreated }: { onClose: () => void; onCreate
     );
   }) ?? [];
 
+  // Filter staff by category match — same logic as auto-assign
+  const cat = form.category.toUpperCase();
+  const relevantStaff = cat
+    ? allStaff.filter((s) => s.categories.some((c) => c.toUpperCase() === cat))
+    : [];
+  const otherStaff = cat
+    ? allStaff.filter((s) => !s.categories.some((c) => c.toUpperCase() === cat))
+    : allStaff;
+
+  const assignMutation = useMutation({
+    mutationFn: ({ srId, staffId }: { srId: string; staffId: string }) =>
+      api.patch(`/service-requests/${srId}/assign`, { staffIds: [staffId] }),
+  });
+
   const createMutation = useMutation({
-    mutationFn: (data: any) => api.post('/admin/service-requests', data),
-    onSuccess: () => {
+    mutationFn: (data: any) => api.post<any>('/admin/service-requests', data),
+    onSuccess: async (sr) => {
+      if (form.staffId && sr?.id) {
+        try {
+          await assignMutation.mutateAsync({ srId: sr.id, staffId: form.staffId });
+        } catch {
+          toast.error('Request created but staff assignment failed — assign manually.');
+        }
+      }
       toast.success('Service request created');
       onCreated();
       onClose();
@@ -235,8 +270,8 @@ function NewRequestModal({ onClose, onCreated }: { onClose: () => void; onCreate
     });
   }
 
-  // find selected resident label
   const selectedResident = residents?.find((r: any) => r.id === form.residentId);
+  const busy = createMutation.isPending || assignMutation.isPending;
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
@@ -284,8 +319,39 @@ function NewRequestModal({ onClose, onCreated }: { onClose: () => void; onCreate
               className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-50"
               placeholder="e.g. Plumbing, Electrical..."
               value={form.category}
-              onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
+              onChange={(e) => setForm((f) => ({ ...f, category: e.target.value, staffId: '' }))}
             />
+          </div>
+
+          {/* Assign To */}
+          <div>
+            <label className="text-xs font-medium text-gray-600 block mb-1">
+              Assign To
+              {relevantStaff.length > 0 && (
+                <span className="ml-1.5 text-primary-500 font-normal">
+                  {relevantStaff.length} suggested for {form.category}
+                </span>
+              )}
+            </label>
+            <select
+              className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-700 outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-50 bg-white"
+              value={form.staffId}
+              onChange={(e) => setForm((f) => ({ ...f, staffId: e.target.value }))}
+            >
+              <option value="">Unassigned</option>
+              {relevantStaff.length > 0 && (
+                <optgroup label={`Suggested — ${form.category}`}>
+                  {relevantStaff.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name} — {s.designation}</option>
+                  ))}
+                </optgroup>
+              )}
+              <optgroup label={relevantStaff.length > 0 ? 'Other staff' : 'All staff'}>
+                {otherStaff.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name} — {s.designation}</option>
+                ))}
+              </optgroup>
+            </select>
           </div>
 
           {/* Description */}
@@ -366,10 +432,10 @@ function NewRequestModal({ onClose, onCreated }: { onClose: () => void; onCreate
             </button>
             <button
               type="submit"
-              disabled={createMutation.isPending}
+              disabled={busy}
               className="flex-1 py-2 bg-primary-500 text-white rounded-xl text-sm font-semibold disabled:opacity-50"
             >
-              {createMutation.isPending ? 'Creating…' : 'Create Request'}
+              {busy ? 'Creating…' : 'Create Request'}
             </button>
           </div>
         </form>
@@ -700,7 +766,7 @@ export default function ServiceRequestsPage() {
                                       );
                                     }}
                                   />
-                                  {s.user?.name ?? s.designation}
+                                  {s.name ?? s.designation}
                                 </label>
                               ))}
                             </div>
