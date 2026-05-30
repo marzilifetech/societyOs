@@ -1511,19 +1511,14 @@ describe('AdminService', () => {
     });
   });
 
-  // ─── createBuildingAdmin (scope: society-wide vs building-scoped) ────────────
+  // ─── createBuildingAdmin (society-wide admins; no block scoping) ─────────────
 
   describe('createBuildingAdmin', () => {
-    it('creates a society-wide ADMIN with no managed blocks when scope=SOCIETY', async () => {
+    it('creates a society-wide ADMIN with no block scoping', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(null);
       mockPrisma.user.create.mockImplementation(({ data }: any) => ({ id: 'u-new', ...data }));
 
-      await service.createBuildingAdmin('soc-1', {
-        name: 'Asha',
-        phone: '+919000000001',
-        managedBlocks: ['A', 'B'], // should be ignored for society scope
-        scope: 'SOCIETY',
-      });
+      await service.createBuildingAdmin('soc-1', { name: 'Asha', phone: '+919000000001' });
 
       expect(mockPrisma.user.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1536,66 +1531,11 @@ describe('AdminService', () => {
       );
     });
 
-    it('defaults to society-wide ADMIN when scope is omitted', async () => {
-      mockPrisma.user.findUnique.mockResolvedValue(null);
-      mockPrisma.user.create.mockImplementation(({ data }: any) => ({ id: 'u-new', ...data }));
-
-      await service.createBuildingAdmin('soc-1', {
-        name: 'Asha',
-        phone: '+919000000002',
-        managedBlocks: [],
-      });
-
-      expect(mockPrisma.user.create).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ role: UserRole.ADMIN }) }),
-      );
-    });
-
-    it('creates a BUILDING_ADMIN scoped to selected blocks when scope=BUILDINGS', async () => {
-      mockPrisma.user.findUnique.mockResolvedValue(null);
-      mockPrisma.user.create.mockImplementation(({ data }: any) => ({ id: 'u-new', ...data }));
-
-      await service.createBuildingAdmin('soc-1', {
-        name: 'Ravi',
-        phone: '+919000000003',
-        managedBlocks: ['A', 'C'],
-        scope: 'BUILDINGS',
-      });
-
-      expect(mockPrisma.user.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            role: UserRole.BUILDING_ADMIN,
-            managedBlocks: ['A', 'C'],
-          }),
-        }),
-      );
-    });
-
-    it('rejects building scope with no blocks (BadRequestException)', async () => {
-      mockPrisma.user.findUnique.mockResolvedValue(null);
-
-      await expect(
-        service.createBuildingAdmin('soc-1', {
-          name: 'Ravi',
-          phone: '+919000000004',
-          managedBlocks: [],
-          scope: 'BUILDINGS',
-        }),
-      ).rejects.toThrow(BadRequestException);
-      expect(mockPrisma.user.create).not.toHaveBeenCalled();
-    });
-
     it('conflicts when phone already exists in society', async () => {
       mockPrisma.user.findUnique.mockResolvedValue({ id: 'u-existing' });
 
       await expect(
-        service.createBuildingAdmin('soc-1', {
-          name: 'Dup',
-          phone: '+919000000005',
-          managedBlocks: [],
-          scope: 'SOCIETY',
-        }),
+        service.createBuildingAdmin('soc-1', { name: 'Dup', phone: '+919000000005' }),
       ).rejects.toThrow(ConflictException);
       expect(mockPrisma.user.create).not.toHaveBeenCalled();
     });

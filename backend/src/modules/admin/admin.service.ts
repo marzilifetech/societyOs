@@ -1887,11 +1887,13 @@ async createStaff(
   // ── Building Admins ──────────────────────────────────────────────────────────
 
   async listBuildingAdmins(societyId: string) {
+    // Includes any legacy BUILDING_ADMIN rows so they still appear as admins;
+    // block scoping is no longer offered when onboarding.
     return this.prisma.user.findMany({
       where: { societyId, role: { in: [UserRole.ADMIN, UserRole.BUILDING_ADMIN] } },
       select: {
         id: true, name: true, phone: true, email: true, status: true, role: true,
-        managedBlocks: true, createdAt: true,
+        createdAt: true,
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -1899,7 +1901,7 @@ async createStaff(
 
   async createBuildingAdmin(
     societyId: string,
-    dto: { name: string; phone: string; managedBlocks: string[]; scope?: 'SOCIETY' | 'BUILDINGS' },
+    dto: { name: string; phone: string },
   ) {
     const existing = await this.prisma.user.findUnique({
       where: { phone_societyId: { phone: dto.phone, societyId } },
@@ -1908,28 +1910,19 @@ async createStaff(
       throw new ConflictException('A user with this phone already exists in the society');
     }
 
-    // Scope is authoritative: a society admin (ADMIN) spans the whole society
-    // with no block restriction; a building admin (BUILDING_ADMIN) is limited
-    // to the selected blocks.
-    const isSociety = (dto.scope ?? 'SOCIETY') === 'SOCIETY';
-    if (!isSociety && (!dto.managedBlocks || dto.managedBlocks.length === 0)) {
-      throw new BadRequestException('Select at least one building for a building-scoped admin');
-    }
-    const role = isSociety ? UserRole.ADMIN : UserRole.BUILDING_ADMIN;
-    const managedBlocks = isSociety ? [] : dto.managedBlocks;
-
+    // Admins are society-wide: full access across the society, no block scoping.
     return this.prisma.user.create({
       data: {
         phone: dto.phone,
         name: dto.name,
-        role,
+        role: UserRole.ADMIN,
         status: UserStatus.ACTIVE,
         societyId,
-        managedBlocks,
+        managedBlocks: [],
       } as any,
       select: {
         id: true, name: true, phone: true, email: true, status: true, role: true,
-        managedBlocks: true, createdAt: true,
+        createdAt: true,
       },
     });
   }

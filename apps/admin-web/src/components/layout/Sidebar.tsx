@@ -78,7 +78,7 @@ const NAV_SECTIONS: { label: string; items: Item[] }[] = [
     items: [
       { href: '/platform',        icon: Layers,           label: 'Platform' },
       { href: '/societies',       icon: Building2,        label: 'Societies' },
-      { href: '/building-admins', icon: UserCog,          label: 'Building Admins' },
+      { href: '/building-admins', icon: UserCog,          label: 'Admins' },
       { href: '/audit',           icon: ScrollText,       label: 'Audit Log' },
       { href: '/settings',        icon: Settings,         label: 'Settings' },
     ],

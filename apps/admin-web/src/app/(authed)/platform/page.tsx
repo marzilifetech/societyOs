@@ -177,7 +177,7 @@ export default function PlatformOverviewPage() {
             </Link>
             <Link href="/building-admins" className="block">
               <Button variant="ghost" fullWidth>
-                Building admins
+                Admins
               </Button>
             </Link>
             <Link href="/audit" className="block">
