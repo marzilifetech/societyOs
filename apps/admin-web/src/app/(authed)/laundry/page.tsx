@@ -134,7 +134,7 @@ export default function LaundryBookingsPage() {
           <div className="py-16 text-center">
             <Shirt className="w-10 h-10 text-gray-300 mx-auto mb-3" />
             <p className="font-medium text-gray-700">No laundry bookings</p>
-            <p className="text-sm text-gray-400 mt-1">Resident bookings will appear here as they're scheduled.</p>
+            <p className="text-sm text-gray-400 mt-1">Resident bookings will appear here as they&apos;re scheduled.</p>
           </div>
         ) : (
           <table className="w-full">

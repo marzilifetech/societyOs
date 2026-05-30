@@ -194,7 +194,7 @@ export interface MaintenanceBill {
   amount: number;
   dueDate: string;
   paidAt?: string;
-  status: 'PENDING' | 'PAID' | 'OVERDUE' | 'PARTIAL';
+  status: 'PENDING' | 'PAID' | 'OVERDUE' | 'PARTIAL' | 'WAIVED';
   breakdown?: BillBreakdown;
 }
 

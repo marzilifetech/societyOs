@@ -348,7 +348,7 @@ export default function DashboardPage() {
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
           <h2 className="font-semibold text-gray-900">Recent Service Requests</h2>
-          <a href="/service-requests" className="text-sm text-primary-500 hover:underline">View all</a>
+          <Link href="/service-requests" className="text-sm text-primary-500 hover:underline">View all</Link>
         </div>
         <div className="divide-y divide-gray-50">
           {!recentSR?.length ? (

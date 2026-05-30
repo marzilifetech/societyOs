@@ -317,21 +317,6 @@ export class AdminController {
     return this.adminService.dismissStaff(societyId, id);
   }
 
-  @Post('staff/:id/documents')
-  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  addStaffDocument(
-    @Param('id') id: string,
-    @Body() body: { documentType: string; fileUrl: string },
-  ) {
-    return this.adminService.addStaffDocument(id, body.documentType, body.fileUrl);
-  }
-
-  @Patch('staff/:id/dismiss')
-  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  dismissStaff(@Param('id') id: string) {
-    return this.adminService.dismissStaff(id);
-  }
-
   @Get('staff/:id/salary-slips')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   getStaffSalarySlips(@SocietyId() societyId: string, @Param('id') id: string) {
@@ -352,21 +337,6 @@ export class AdminController {
     @Body() body: { amount: number; reason?: string; status?: string },
   ) {
     return this.adminService.createStaffLoan(societyId, id, body.amount, body.reason, body.status);
-  }
-
-  @Get('staff/:id/loans')
-  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  getStaffLoans(@Param('id') id: string) {
-    return this.adminService.getStaffLoans(id);
-  }
-
-  @Post('staff/:id/loans')
-  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  createStaffLoan(
-    @Param('id') id: string,
-    @Body() body: { amount: number; reason?: string; status?: string },
-  ) {
-    return this.adminService.createStaffLoan(id, body.amount, body.reason, body.status);
   }
 
   @Get('residents/:id/documents')
