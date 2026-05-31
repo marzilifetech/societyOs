@@ -84,6 +84,11 @@ export class ResidentController {
       if (!url) return true;
       if (url.startsWith('s3://')) return true;
       if (bucket && url.includes(bucket)) return true;
+      // Marzi media service stores assets in its own S3 bucket; document
+      // upload now flows through POST /v1/media, so accept those too — both the
+      // public CDN URL and the bare private S3 key (uploads/private/...).
+      if (url.includes('marzi-community-storage')) return true;
+      if (url.startsWith('uploads/private/') || url.startsWith('uploads/public/')) return true;
       return false;
     };
     const urls = [body.aadhaarUrl, body.panUrl, body.idProofUrl, body.addressProofUrl, body.idProof, body.addressProof];

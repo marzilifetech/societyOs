@@ -8,7 +8,11 @@ export class SocietyService {
 
   async findAll() {
     const all = await this.prisma.society.findMany({
-      where: { showInDirectory: true, archivedAt: null },
+      // Only ACTIVE societies appear in the pre-login directory. `status`
+      // guards against SUSPENDED/ARCHIVED societies leaking even if their
+      // `showInDirectory` flag is left on. The internal Platform society is
+      // kept out by never enabling its `showInDirectory` flag.
+      where: { showInDirectory: true, archivedAt: null, status: 'ACTIVE' },
       select: { id: true, name: true, city: true },
       orderBy: { name: 'asc' },
     });

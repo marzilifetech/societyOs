@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { api } from '../../../src/lib/api';
-import { uploadToPresignedUrl } from '../../../src/lib/photo-upload';
+import { uploadViaMedia } from '../../../src/lib/photo-upload';
 import { DateField } from '../../../src/components/common/DateField';
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
@@ -69,12 +69,11 @@ export default function UploadRecordScreen() {
     setLocalUri(uri);
     setUploading(true);
     try {
-      const presign = await api.post<{ url: string; key: string }>('/upload/presign', {
+      const { s3Key } = await uploadViaMedia(uri, {
         contentType: 'image/jpeg',
-        folder: 'health-records',
+        visibility: 'private',
       });
-      await uploadToPresignedUrl(uri, presign.url, 'image/jpeg');
-      setUploadedKey(presign.key);
+      setUploadedKey(s3Key);
     } catch (e: any) {
       setLocalUri(null);
       setUploadedKey(null);

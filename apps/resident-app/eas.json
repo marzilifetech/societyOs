@@ -17,7 +17,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "http://localhost:3000/v1"
+        "EXPO_PUBLIC_API_URL": "https://society-dev.marzitech.in/v1"
       }
     },
     "preview": {
@@ -30,7 +30,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://staging-api.societyos.app/v1"
+        "EXPO_PUBLIC_API_URL": "https://society-dev.marzitech.in/v1"
       }
     },
     "production": {
@@ -43,7 +43,7 @@
         "buildType": "app-bundle"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://api.societyos.app/v1"
+        "EXPO_PUBLIC_API_URL": "https://society-dev.marzitech.in/v1"
       }
     }
   },

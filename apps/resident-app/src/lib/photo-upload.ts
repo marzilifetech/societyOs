@@ -54,3 +54,82 @@ export async function presignAndUpload(
   await uploadToPresignedUrl(uri, url, (body.contentType as string) ?? 'image/jpeg');
   return key;
 }
+
+// ── Marzi media service (POST /v1/media via our backend proxy) ──────────────
+
+export type MediaVisibility = 'public' | 'private';
+
+export type MediaUploadResult = {
+  /** Marzi asset id (ULID). */
+  assetId: string;
+  /** Public CDN URL — populated for `public` assets, null for `private`. */
+  publicUrl: string | null;
+  /** S3 object key, e.g. `uploads/private/<uid>/<asset>.jpg`. */
+  s3Key: string;
+};
+
+const EXT_BY_CONTENT_TYPE: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/jpg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+  'application/pdf': 'pdf',
+};
+
+type CreateMediaResponse = {
+  asset_id: string;
+  s3_key: string;
+  public_url: string | null;
+  upload: { method: string; url: string; fields: Record<string, string> };
+};
+
+/**
+ * Upload a local file through the Marzi media service (3 steps, all behind our
+ * backend `/media` proxy which injects the user's Marzi token):
+ *   1. POST /media           → asset + presigned S3 POST target
+ *   2. POST to S3 (multipart) → the file bytes
+ *   3. POST /media/:id/confirm → flip the asset PENDING → ACTIVE
+ *
+ * Use `visibility: 'private'` for sensitive documents (KYC, medical) — those
+ * return `publicUrl: null` and must be fetched through Marzi; use `'public'`
+ * for avatars / visitor / complaint photos that are rendered directly.
+ */
+export async function uploadViaMedia(
+  uri: string,
+  opts: { contentType?: string; visibility?: MediaVisibility; filename?: string } = {},
+): Promise<MediaUploadResult> {
+  const contentType = opts.contentType ?? 'image/jpeg';
+  const visibility = opts.visibility ?? 'public';
+  const ext = EXT_BY_CONTENT_TYPE[contentType] ?? 'bin';
+  const filename = opts.filename ?? `upload.${ext}`;
+
+  // 1. Create the asset + get the presigned S3 POST descriptor.
+  const created = await api.post<CreateMediaResponse>('/media', {
+    filename,
+    content_type: contentType,
+    visibility,
+  });
+
+  // 2. Upload straight to S3. For an S3 POST policy every signed form field
+  //    must be appended BEFORE the file, and the file field must be LAST.
+  const form = new FormData();
+  for (const [k, v] of Object.entries(created.upload.fields)) {
+    form.append(k, v);
+  }
+  form.append('file', { uri, name: filename, type: contentType } as any);
+  const res = await fetch(created.upload.url, { method: 'POST', body: form });
+  // S3 returns 204 No Content (or 201) on success.
+  if (!res.ok && res.status !== 204) {
+    throw new Error(`Upload failed (${res.status})`);
+  }
+
+  // 3. Confirm so Marzi marks the asset ACTIVE.
+  await api.post(`/media/${created.asset_id}/confirm`, {});
+
+  return {
+    assetId: created.asset_id,
+    publicUrl: created.public_url,
+    s3Key: created.s3_key,
+  };
+}

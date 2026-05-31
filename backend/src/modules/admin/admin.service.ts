@@ -2353,7 +2353,10 @@ async createStaff(
           address: dto.address.trim(),
           city: dto.city.trim(),
           pincode: dto.pincode.trim(),
-          showInDirectory: dto.showInDirectory ?? false,
+          // Default new/onboarded societies to visible in the resident-app
+          // pre-login directory. Admin can still explicitly pass `false` to
+          // keep a society hidden, or hide it later via updateSocietyAdmin.
+          showInDirectory: dto.showInDirectory ?? true,
           config: this.societySeeder.buildDefaultConfig(dto.config) as any,
         },
       });

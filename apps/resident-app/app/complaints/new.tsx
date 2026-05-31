@@ -5,6 +5,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
+import { uploadViaMedia } from '../../src/lib/photo-upload';
 import { useTheme } from '../../src/hooks/useTheme';
 import { ScreenHeader, BottomActionBar } from '../../src/components/ui';
 
@@ -59,18 +60,11 @@ export default function NewComplaintScreen() {
       if (photoUri) {
         setUploading(true);
         try {
-          const { url, key } = await api.post<{ url: string; key: string }>('/upload/presign', {
+          const { publicUrl, s3Key } = await uploadViaMedia(photoUri, {
             contentType: 'image/jpeg',
-            folder: 'complaints',
+            visibility: 'public',
           });
-          const formData = new FormData();
-          formData.append('file', {
-            uri: photoUri,
-            name: 'photo.jpg',
-            type: 'image/jpeg',
-          } as any);
-          await fetch(url, { method: 'PUT', body: formData });
-          photoUrl = key;
+          photoUrl = publicUrl ?? s3Key;
         } finally {
           setUploading(false);
         }

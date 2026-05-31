@@ -5,7 +5,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
-import { pickImageFromLibrary, uploadToPresignedUrl } from '../../src/lib/photo-upload';
+import { pickImageFromLibrary, uploadViaMedia } from '../../src/lib/photo-upload';
 
 const ROLES = ['Cook', 'Maid', 'Driver', 'Gardener', 'Security', 'Other'];
 
@@ -25,12 +25,11 @@ export default function AddDomesticHelpScreen() {
     setLocalPhotoUri(uri);
     setUploading(true);
     try {
-      const presign = await api.post<{ url: string; key: string }>('/upload/presign', {
+      const { publicUrl, s3Key } = await uploadViaMedia(uri, {
         contentType: 'image/jpeg',
-        folder: 'domestic-help',
+        visibility: 'public',
       });
-      await uploadToPresignedUrl(uri, presign.url, 'image/jpeg');
-      setPhotoKey(presign.key);
+      setPhotoKey(publicUrl ?? s3Key);
     } catch (e: any) {
       setLocalPhotoUri(null);
       setPhotoKey(null);
@@ -41,7 +40,7 @@ export default function AddDomesticHelpScreen() {
   };
 
   const { mutate, isPending } = useMutation({
-    mutationFn: () => api.post('/domestic-help', { name, role, phone, gateAccess, photoKey }),
+    mutationFn: () => api.post('/domestic-help', { name, role, phone, gateAccess, photoUrl: photoKey || undefined }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['domestic-help'] });
       Alert.alert('Registered', `${name} has been registered.`);
