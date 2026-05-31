@@ -89,13 +89,17 @@ async function main() {
   const SOCIETY_ID = 'a1b2c3d4-e5f6-4789-abcd-ef0123456789';
   const society = await prisma.society.upsert({
     where: { id: SOCIETY_ID } as any,
-    update: {},
+    update: { showInDirectory: true },
     create: {
       id: SOCIETY_ID,
       name: 'Green Valley Heights',
       address: '42 Sector 14, Green Valley',
       city: 'Bengaluru',
       pincode: '560001',
+      // Visible in the resident-app pre-login directory so local dev / QA
+      // reproduce the multi-society list. Platform + suspended/archived demo
+      // societies are intentionally left hidden.
+      showInDirectory: true,
     },
   });
 

@@ -7,6 +7,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
+import { uploadViaMedia } from '../../src/lib/photo-upload';
 import { useTheme } from '../../src/hooks/useTheme';
 import { FREQUENCY_PRESETS, type Day } from '../../src/lib/visitorConfig';
 import { DateField } from '../../src/components/common/DateField';
@@ -26,19 +27,11 @@ type CreateVisitorResponse = {
 };
 
 async function uploadPhoto(uri: string): Promise<string> {
-  const { url, key } = await api.post<{ url: string; key: string }>('/upload/presign', {
+  const { publicUrl, s3Key } = await uploadViaMedia(uri, {
     contentType: 'image/jpeg',
-    folder: 'visitors',
+    visibility: 'public',
   });
-  // S3 presigned PUT requires the raw file body — NOT FormData.
-  const blob = await fetch(uri).then((r) => r.blob());
-  const res = await fetch(url, {
-    method: 'PUT',
-    body: blob,
-    headers: { 'Content-Type': 'image/jpeg' },
-  });
-  if (!res.ok) throw new Error(`Photo upload failed: ${res.status}`);
-  return key;
+  return publicUrl ?? s3Key;
 }
 
 export default function NewVisitorScreen() {

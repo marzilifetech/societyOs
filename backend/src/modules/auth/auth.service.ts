@@ -251,6 +251,15 @@ export class AuthService {
         marziPair.refreshToken,
         30 * 24 * 60 * 60,
       );
+      // Park Marzi's ACCESS token too (24h lifetime) so server-side calls to
+      // the Marzi media service can authenticate as this user without forwarding
+      // the client's LOCAL token (which Marzi cannot verify). Refreshed on every
+      // Marzi-backed /auth/refresh. See MarziMediaClient.
+      await this.redis.set(
+        `marzi:access:${user.id}`,
+        marziPair.accessToken,
+        24 * 60 * 60,
+      );
     }
 
     await this.bumpActivity(user.id);
@@ -361,6 +370,12 @@ export class AuthService {
         `marzi:refresh:${user.id}`,
         newMarziPair.refreshToken,
         30 * 24 * 60 * 60,
+      );
+      // Re-park the rotated Marzi access token (24h) for media calls.
+      await this.redis.set(
+        `marzi:access:${user.id}`,
+        newMarziPair.accessToken,
+        24 * 60 * 60,
       );
     } else {
       this.logger.log(

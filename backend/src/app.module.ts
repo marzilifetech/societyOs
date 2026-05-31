@@ -47,6 +47,7 @@ import { DomesticHelpModule } from './modules/domestic-help/domestic-help.module
 import { FamilyMemberModule } from './modules/family-member/family-member.module';
 import { ParkingModule } from './modules/parking/parking.module';
 import { UploadModule } from './modules/upload/upload.module';
+import { MediaModule } from './modules/media/media.module';
 import { VehicleModule } from './modules/vehicle/vehicle.module';
 
 import { envValidationSchema } from './common/config/env.validation';
@@ -146,6 +147,7 @@ tryAdd('./modules/compliance/compliance.module', 'ComplianceModule');
     FamilyMemberModule,
     ParkingModule,
     UploadModule,
+    MediaModule,
     VehicleModule,
     ...optionalModules,
   ],

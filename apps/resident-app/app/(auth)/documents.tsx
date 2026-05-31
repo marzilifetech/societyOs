@@ -15,6 +15,7 @@ import { useMutation } from '@tanstack/react-query';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
+import { uploadViaMedia } from '../../src/lib/photo-upload';
 
 type UploadState = {
   // local preview shown while picking / uploading / on retry. Preserved across
@@ -32,31 +33,16 @@ type UploadState = {
 
 const EMPTY: UploadState = { localUri: '', mime: '', s3Url: '', uploading: false, error: null };
 
-class UploadFailedError extends Error {
-  status?: number;
-  constructor(message: string, status?: number) {
-    super(message);
-    this.status = status;
-  }
-}
-
-async function presignAndUpload(uri: string, folder: string, contentType: string): Promise<string> {
-  // 1. Ask backend for a presigned PUT URL
-  const presigned = await api.post<{ url: string; key: string; publicUrl: string }>(
-    '/upload/presign',
-    { folder, contentType },
-  );
-
-  // 2. PUT the file to S3
-  const blob = await (await fetch(uri)).blob();
-  const putRes = await fetch(presigned.url, {
-    method: 'PUT',
-    headers: { 'Content-Type': contentType },
-    body: blob,
+async function uploadKycDocument(uri: string, contentType: string): Promise<string> {
+  // KYC documents are sensitive → upload as PRIVATE through the Marzi media
+  // service. Private assets have no public_url, so we persist the S3 key
+  // (admin review fetches the asset via Marzi). `_folder` is retained for the
+  // call signature but no longer used (Marzi derives the key path itself).
+  const { publicUrl, s3Key } = await uploadViaMedia(uri, {
+    contentType,
+    visibility: 'private',
   });
-  if (!putRes.ok) throw new UploadFailedError(`Upload failed (${putRes.status})`, putRes.status);
-
-  return presigned.publicUrl;
+  return publicUrl ?? s3Key;
 }
 
 /** Map an upload error to a short user-facing string. */
@@ -75,7 +61,7 @@ function describeUploadError(err: unknown): string {
   ) {
     return "Couldn't reach the server. Check your internet and try again.";
   }
-  // S3 PUT failures bubble up as `Upload failed (NNN)` from presignAndUpload.
+  // S3 upload failures bubble up as `Upload failed (NNN)` from uploadKycDocument.
   const status = e.status ?? (msg.match(/Upload failed \((\d+)\)/)?.[1]);
   if (status) {
     const n = Number(status);
@@ -104,7 +90,7 @@ function UploadField({
   const upload = async (localUri: string, mime: string) => {
     onChange({ localUri, mime, s3Url: '', uploading: true, error: null });
     try {
-      const s3Url = await presignAndUpload(localUri, folder, mime);
+      const s3Url = await uploadKycDocument(localUri, mime);
       onChange({ localUri, mime, s3Url, uploading: false, error: null });
     } catch (err) {
       // Preserve localUri + mime so the user can retry without re-picking the

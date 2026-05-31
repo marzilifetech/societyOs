@@ -24,15 +24,11 @@ export class SocietyController {
     return this.societyService.findAll();
   }
 
-  @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.societyService.findOne(id);
-  }
-
-  @Get(':id/flats')
-  getFlats(@Param('id') id: string) {
-    return this.societyService.getFlats(id);
-  }
+  // NOTE: static-segment GET routes (`budget`, `bylaws`) MUST be declared
+  // before the dynamic `@Get(':id')` below. NestJS/Express match in
+  // declaration order, so a `:id` route placed first would capture
+  // `/societies/budget` and `/societies/bylaws` (resolving them as
+  // findOne('budget') → 404 and bypassing their auth guards).
 
   // ─── Budget ───────────────────────────────────────────────────────────────
 
@@ -100,5 +96,18 @@ export class SocietyController {
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   deleteBylaw(@Param('id') id: string, @SocietyId() societyId: string) {
     return this.societyService.deleteBylaw(societyId, id);
+  }
+
+  // ─── Dynamic `:id` routes (declared LAST so they don't shadow the static
+  //     `budget`/`bylaws` segments above) ──────────────────────────────────
+
+  @Get(':id')
+  findOne(@Param('id') id: string) {
+    return this.societyService.findOne(id);
+  }
+
+  @Get(':id/flats')
+  getFlats(@Param('id') id: string) {
+    return this.societyService.getFlats(id);
   }
 }
