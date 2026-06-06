@@ -40,6 +40,8 @@ export default function UploadRecordScreen() {
 
   const handlePickFile = async (source: 'camera' | 'gallery') => {
     let uri: string | null = null;
+    let mime: string | undefined;
+    let name: string | undefined;
     if (source === 'camera') {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== 'granted') {
@@ -51,7 +53,11 @@ export default function UploadRecordScreen() {
         allowsEditing: false,
         quality: 0.8,
       });
-      if (!r.canceled) uri = r.assets[0]?.uri ?? null;
+      if (!r.canceled) {
+        uri = r.assets[0]?.uri ?? null;
+        mime = r.assets[0]?.mimeType;
+        name = r.assets[0]?.fileName ?? undefined;
+      }
     } else {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
@@ -63,14 +69,19 @@ export default function UploadRecordScreen() {
         allowsEditing: false,
         quality: 0.8,
       });
-      if (!r.canceled) uri = r.assets[0]?.uri ?? null;
+      if (!r.canceled) {
+        uri = r.assets[0]?.uri ?? null;
+        mime = r.assets[0]?.mimeType;
+        name = r.assets[0]?.fileName ?? undefined;
+      }
     }
     if (!uri) return;
     setLocalUri(uri);
     setUploading(true);
     try {
       const { s3Key } = await uploadViaMedia(uri, {
-        contentType: 'image/jpeg',
+        contentType: mime,
+        filename: name,
         visibility: 'private',
       });
       setUploadedKey(s3Key);

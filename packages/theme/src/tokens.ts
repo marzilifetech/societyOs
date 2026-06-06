@@ -1,27 +1,38 @@
+// Two token scales: defaultTokens (compact) and seniorTokens (the larger,
+// higher-contrast scale used by default in the Marzi Senior Community apps).
+//
+// Tuning principles:
+//  - Senior is bigger than default, but only modestly so — never so big that
+//    a typical title wraps to a second line on a phone-width screen.
+//  - Corner radii are intentionally small/sharp across both scales (modern
+//    look). Pill-rounded UI looked toy-like for our audience.
+//  - Touch targets are generous (≥48px) without being huge.
+
 export const defaultTokens = {
   fontXs: 12,
   fontSm: 14,
   fontBase: 16,
   fontLg: 18,
   fontXl: 20,
-  font2xl: 24,
-  font3xl: 30,
-  font4xl: 36,
+  font2xl: 22,
+  font3xl: 26,
+  font4xl: 32,
   fontWeight: { regular: '400', medium: '500', semibold: '600', bold: '700' } as const,
 
-  touchTarget: 52,
-  touchTargetSm: 44,
-  touchTargetLg: 60,
+  touchTarget: 48,
+  touchTargetSm: 40,
+  touchTargetLg: 56,
 
   cardPadding: 16,
   cardPaddingLg: 20,
   sectionGap: 16,
   screenPadding: 20,
 
-  radiusSm: 12,
-  radiusMd: 16,
-  radiusLg: 20,
-  radiusXl: 28,
+  // Paper design — corners are nearly flat (was 12 / 16 / 20 / 28).
+  radiusSm: 2,
+  radiusMd: 4,
+  radiusLg: 6,
+  radiusXl: 8,
 
   bgPrimary: '#FFFFFF',
   bgCard: '#F7F7F8',
@@ -56,29 +67,33 @@ export const defaultTokens = {
 };
 
 export const seniorTokens: typeof defaultTokens = {
-  fontXs: 16,
-  fontSm: 18,
-  fontBase: 20,
-  fontLg: 24,
-  fontXl: 28,
-  font2xl: 34,
-  font3xl: 40,
-  font4xl: 48,
+  // ~15–20% larger than default. Big enough to be elder-friendly, small
+  // enough that titles stay on one line and lists don't break.
+  fontXs: 13,
+  fontSm: 15,
+  fontBase: 17,
+  fontLg: 19,
+  fontXl: 22,
+  font2xl: 24,
+  font3xl: 28,
+  font4xl: 34,
   fontWeight: { regular: '400', medium: '500', semibold: '600', bold: '700' } as const,
 
-  touchTarget: 64,
-  touchTargetSm: 56,
-  touchTargetLg: 76,
+  touchTarget: 56,
+  touchTargetSm: 48,
+  touchTargetLg: 64,
 
-  cardPadding: 24,
-  cardPaddingLg: 28,
-  sectionGap: 24,
-  screenPadding: 24,
+  cardPadding: 18,
+  cardPaddingLg: 22,
+  sectionGap: 18,
+  screenPadding: 20,
 
-  radiusSm: 16,
-  radiusMd: 20,
-  radiusLg: 28,
-  radiusXl: 36,
+  // Same flat paper radii as default — the senior treatment is bigger text
+  // and contrast, NOT rounder shapes.
+  radiusSm: 2,
+  radiusMd: 4,
+  radiusLg: 6,
+  radiusXl: 8,
 
   bgPrimary: '#FFFFFF',
   bgCard: '#F4F4F6',
@@ -88,9 +103,9 @@ export const seniorTokens: typeof defaultTokens = {
   borderDefault: 'rgba(0,0,0,0.18)',
 
   textPrimary: '#000000',
-  textSecondary: 'rgba(0,0,0,0.85)',
-  textMuted: 'rgba(0,0,0,0.65)',
-  textDisabled: 'rgba(0,0,0,0.40)',
+  textSecondary: 'rgba(0,0,0,0.80)',
+  textMuted: 'rgba(0,0,0,0.55)',
+  textDisabled: 'rgba(0,0,0,0.35)',
 
   accentPrimary: '#821A52',
   accentSecondary: '#49CDAD',
@@ -101,13 +116,13 @@ export const seniorTokens: typeof defaultTokens = {
   glowPrimary: 'rgba(130,26,82,0.40)',
   glowEmergency: 'rgba(220,38,38,0.50)',
 
-  lineHeightTight: 1.3,
-  lineHeightBase: 1.6,
-  lineHeightRelaxed: 1.75,
-  lineHeight: 1.6,
+  lineHeightTight: 1.25,
+  lineHeightBase: 1.45,
+  lineHeightRelaxed: 1.6,
+  lineHeight: 1.45,
 
-  iconSm: 24,
-  iconMd: 30,
-  iconLg: 40,
-  iconXl: 52,
+  iconSm: 20,
+  iconMd: 24,
+  iconLg: 32,
+  iconXl: 42,
 };

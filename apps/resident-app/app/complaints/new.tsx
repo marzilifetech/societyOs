@@ -34,6 +34,8 @@ export default function NewComplaintScreen() {
   const [description, setDescription] = useState('');
   const [isAnonymous, setIsAnonymous] = useState(false);
   const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const [photoType, setPhotoType] = useState<string | undefined>(undefined);
+  const [photoName, setPhotoName] = useState<string | undefined>(undefined);
   const [uploading, setUploading] = useState(false);
 
   const pickImage = async () => {
@@ -48,11 +50,18 @@ export default function NewComplaintScreen() {
       quality: 0.8,
     });
     if (!result.canceled) {
-      setPhotoUri(result.assets[0].uri);
+      const asset = result.assets[0];
+      setPhotoUri(asset.uri);
+      setPhotoType(asset.mimeType);
+      setPhotoName(asset.fileName ?? undefined);
     }
   };
 
-  const removePhoto = () => setPhotoUri(null);
+  const removePhoto = () => {
+    setPhotoUri(null);
+    setPhotoType(undefined);
+    setPhotoName(undefined);
+  };
 
   const mutation = useMutation<{ id: string }, Error>({
     mutationFn: async () => {
@@ -61,7 +70,8 @@ export default function NewComplaintScreen() {
         setUploading(true);
         try {
           const { publicUrl, s3Key } = await uploadViaMedia(photoUri, {
-            contentType: 'image/jpeg',
+            contentType: photoType,
+            filename: photoName,
             visibility: 'public',
           });
           photoUrl = publicUrl ?? s3Key;

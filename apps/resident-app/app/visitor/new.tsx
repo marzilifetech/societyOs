@@ -26,9 +26,13 @@ type CreateVisitorResponse = {
   qrToken: string;
 };
 
-async function uploadPhoto(uri: string): Promise<string> {
+async function uploadPhoto(
+  uri: string,
+  opts?: { contentType?: string; filename?: string },
+): Promise<string> {
   const { publicUrl, s3Key } = await uploadViaMedia(uri, {
-    contentType: 'image/jpeg',
+    contentType: opts?.contentType,
+    filename: opts?.filename,
     visibility: 'public',
   });
   return publicUrl ?? s3Key;
@@ -39,6 +43,8 @@ export default function NewVisitorScreen() {
   const qc = useQueryClient();
   const [form, setForm] = useState<VisitorForm>({ name: '', phone: '', purpose: '', vehicleNo: '' });
   const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const [photoType, setPhotoType] = useState<string | undefined>(undefined);
+  const [photoName, setPhotoName] = useState<string | undefined>(undefined);
   const [uploading, setUploading] = useState(false);
   const [isRecurring, setIsRecurring] = useState(false);
   const [selectedDays, setSelectedDays] = useState<Day[]>([]);
@@ -57,7 +63,12 @@ export default function NewVisitorScreen() {
         aspect: [3, 4],
         quality: 0.7,
       });
-      if (!result.canceled) setPhotoUri(result.assets[0].uri);
+      if (!result.canceled) {
+        const asset = result.assets[0];
+        setPhotoUri(asset.uri);
+        setPhotoType(asset.mimeType);
+        setPhotoName(asset.fileName ?? undefined);
+      }
     } else {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
@@ -70,7 +81,12 @@ export default function NewVisitorScreen() {
         aspect: [3, 4],
         quality: 0.7,
       });
-      if (!result.canceled) setPhotoUri(result.assets[0].uri);
+      if (!result.canceled) {
+        const asset = result.assets[0];
+        setPhotoUri(asset.uri);
+        setPhotoType(asset.mimeType);
+        setPhotoName(asset.fileName ?? undefined);
+      }
     }
   };
 
@@ -96,7 +112,7 @@ export default function NewVisitorScreen() {
       if (photoUri) {
         setUploading(true);
         try {
-          photoUrl = await uploadPhoto(photoUri);
+          photoUrl = await uploadPhoto(photoUri, { contentType: photoType, filename: photoName });
         } finally {
           setUploading(false);
         }

@@ -11,7 +11,11 @@ interface AccessibilityState {
 export const useAccessibilityStore = create<AccessibilityState>()(
   persist(
     (set) => ({
-      seniorMode: false,
+      // Default ON: this is the Marzi Senior Community app — elders are the
+      // primary audience, so the larger/higher-contrast token set is the
+      // baseline experience. Users who want a denser UI can toggle it off
+      // in Settings → Accessibility.
+      seniorMode: true,
       toggleSeniorMode: () => set((s) => ({ seniorMode: !s.seniorMode })),
       setSeniorMode: (val) => set({ seniorMode: val }),
     }),

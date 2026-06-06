@@ -77,6 +77,40 @@ const EXT_BY_CONTENT_TYPE: Record<string, string> = {
   'application/pdf': 'pdf',
 };
 
+const CONTENT_TYPE_BY_EXT: Record<string, string> = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+  gif: 'image/gif',
+  pdf: 'application/pdf',
+};
+
+/** Lower-cased extension from a filename or uri (ignores query strings). */
+function extensionOf(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const match = /\.([a-zA-Z0-9]+)(?:[?#].*)?$/.exec(value);
+  return match ? match[1].toLowerCase() : undefined;
+}
+
+/**
+ * Resolve the real content type: an explicit value wins, else infer from the
+ * filename extension, else the uri extension (expo-image-picker copies the file
+ * to a cache uri whose extension matches the source — png stays png), else
+ * default to JPEG. Avoids sending every image as image/jpeg.
+ */
+function resolveContentType(
+  uri: string,
+  opts: { contentType?: string; filename?: string },
+): string {
+  if (opts.contentType) return opts.contentType;
+  return (
+    CONTENT_TYPE_BY_EXT[extensionOf(opts.filename) ?? ''] ??
+    CONTENT_TYPE_BY_EXT[extensionOf(uri) ?? ''] ??
+    'image/jpeg'
+  );
+}
+
 type CreateMediaResponse = {
   asset_id: string;
   s3_key: string;
@@ -99,9 +133,11 @@ export async function uploadViaMedia(
   uri: string,
   opts: { contentType?: string; visibility?: MediaVisibility; filename?: string } = {},
 ): Promise<MediaUploadResult> {
-  const contentType = opts.contentType ?? 'image/jpeg';
+  const contentType = resolveContentType(uri, opts);
   const visibility = opts.visibility ?? 'public';
   const ext = EXT_BY_CONTENT_TYPE[contentType] ?? 'bin';
+  // Keep the real filename the user picked (e.g. "Screenshot ….png") when we
+  // have it; otherwise synthesise one with the correct extension.
   const filename = opts.filename ?? `upload.${ext}`;
 
   // 1. Create the asset + get the presigned S3 POST descriptor.

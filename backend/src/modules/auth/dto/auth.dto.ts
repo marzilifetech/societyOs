@@ -2,13 +2,10 @@ import { IsString, IsUUID, Length, Matches } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 // Accept a real Indian mobile (10 digits, leading 6-9, optional +91/91 prefix)
-// OR a reserved TEST number in the range 1111100001–1111100300 (300 numbers,
-// suffix 00001–00300). No real Indian mobile starts with 1, so the test range
-// can never collide with a live number. Used by QA to log in without a real SMS.
-const TEST_SUFFIX = '(?:0000[1-9]|000[1-9]\\d|00[12]\\d\\d|00300)'; // 00001–00300
-export const PHONE_PATTERN = new RegExp(
-  `^(?:\\+?91)?(?:[6-9]\\d{9}|11111${TEST_SUFFIX})$`,
-);
+// OR any reserved TEST number in the 11111 series (10 digits, leading 11111 —
+// i.e. 1111100000–1111199999). No real Indian mobile starts with 1, so the test
+// range can never collide with a live number. Used by QA / admin to log in.
+export const PHONE_PATTERN = /^(?:\+?91)?(?:[6-9]\d{9}|11111\d{5})$/;
 const PHONE_MESSAGE = 'phone must be a valid Indian mobile number';
 
 export class SendOtpDto {

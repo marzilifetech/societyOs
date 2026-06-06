@@ -79,13 +79,16 @@ const spacing = {
   '5xl': 48,
 };
 
+// Paper design — keep corners flat. See spacing.ts for the source of truth.
+// Note: `full` is intentionally NOT 9999 here — capsule pills and circular
+// avatars should become slight-rounded paper rectangles too.
 const borderRadius = {
-  sm: 12,
-  md: 16,
-  lg: 20,
-  xl: 28,
-  '2xl': 36,
-  full: 9999,
+  sm: 2,
+  md: 4,
+  lg: 6,
+  xl: 8,
+  '2xl': 10,
+  full: 6,
 };
 
 const tailwindThemeExtend = {

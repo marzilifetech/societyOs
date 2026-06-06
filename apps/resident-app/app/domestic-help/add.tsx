@@ -26,7 +26,7 @@ export default function AddDomesticHelpScreen() {
     setUploading(true);
     try {
       const { publicUrl, s3Key } = await uploadViaMedia(uri, {
-        contentType: 'image/jpeg',
+        // contentType is inferred from the picked file's extension (png/jpg/…)
         visibility: 'public',
       });
       setPhotoKey(publicUrl ?? s3Key);

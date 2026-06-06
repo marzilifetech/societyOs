@@ -51,7 +51,7 @@ export function StatusChip({ label, tone = 'neutral', icon, size = 'sm' }: Statu
         alignSelf: 'flex-start',
         paddingVertical: padY,
         paddingHorizontal: padX,
-        borderRadius: 999,
+        borderRadius: 4, // paper design — slight-rounded rectangle, not pill
         backgroundColor: c.bg,
         borderWidth: 1,
         borderColor: c.border,

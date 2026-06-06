@@ -2,13 +2,10 @@ import * as SecureStore from 'expo-secure-store';
 import { ApiClient, type TokenPair } from '@societyos/api-client';
 import { router } from 'expo-router';
 
-const runtimeProcess = globalThis as typeof globalThis & {
-  process?: {
-    env?: Record<string, string | undefined>;
-  };
-};
-
-const BASE_URL = runtimeProcess.process?.env?.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000/v1';
+// Reference process.env.EXPO_PUBLIC_API_URL directly so babel-preset-expo
+// inlines the value into the production bundle. (A dynamic/aliased lookup is
+// NOT inlined and falls back to localhost in release builds.)
+const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000/v1';
 
 let _cachedAccess: string | null = null;
 let _cachedRefresh: string | null = null;
