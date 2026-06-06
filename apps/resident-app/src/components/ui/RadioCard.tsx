@@ -71,7 +71,7 @@ export function RadioCard({
           style={{
             width: 40,
             height: 40,
-            borderRadius: 20,
+            borderRadius: t.radiusMd, // paper design — slight square, not circle
             backgroundColor: selected ? t.accentPrimary : t.bgCardStrong,
             alignItems: 'center',
             justifyContent: 'center',
@@ -116,7 +116,7 @@ function RadioDot({ selected }: { selected: boolean }) {
       style={{
         width: 22,
         height: 22,
-        borderRadius: 11,
+        borderRadius: 4, // paper design — square selection indicator (checkbox-style)
         borderWidth: 2,
         borderColor: selected ? t.accentPrimary : t.borderDefault,
         alignItems: 'center',
@@ -128,7 +128,7 @@ function RadioDot({ selected }: { selected: boolean }) {
           style={{
             width: 10,
             height: 10,
-            borderRadius: 5,
+            borderRadius: 2,
             backgroundColor: t.accentPrimary,
           }}
         />

@@ -11,7 +11,7 @@ export function StatusBadge({ status, config }: Props) {
   const meta = config[status];
   if (!meta) {
     return (
-      <View style={{ backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 }}>
+      <View style={{ backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 4, paddingHorizontal: 10, paddingVertical: 4 }}>
         <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: t.fontXs, fontWeight: '600' }}>{status}</Text>
       </View>
     );
@@ -25,7 +25,7 @@ export function StatusBadge({ status, config }: Props) {
     );
   }
   return (
-    <View style={{ backgroundColor: meta.bg, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 }}>
+    <View style={{ backgroundColor: meta.bg, borderRadius: 4, paddingHorizontal: 10, paddingVertical: 4 }}>
       <Text style={{ color: meta.color, fontSize: t.fontXs, fontWeight: '600' }}>{meta.label}</Text>
     </View>
   );

@@ -11,13 +11,19 @@ export const spacing = {
   '5xl': 48,
 };
 
+// Paper design: surfaces are flat with minimal corner rounding. Anything
+// that previously used `rounded-xl` / `rounded-2xl` / `rounded-full` gets a
+// sharp paper edge instead. We intentionally retire the fully-circular
+// option — capsule pills and circular avatars become slight-rounded
+// rectangles to match the paper aesthetic. If a truly circular element is
+// ever needed, set `borderRadius: 9999` inline at the call site.
 export const radius = {
-  sm: 12,
-  md: 16,
-  lg: 20,
-  xl: 28,
-  '2xl': 36,
-  full: 9999,
+  sm: 2,
+  md: 4,
+  lg: 6,
+  xl: 8,
+  '2xl': 10,
+  full: 6,
 };
 
 export const fontSize = {

@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "expo start",
     "android": "expo run:android",
+    "android:release": "SENTRY_DISABLE_AUTO_UPLOAD=true expo run:android --variant release",
     "ios": "expo run:ios",
+    "ios:release": "SENTRY_DISABLE_AUTO_UPLOAD=true expo run:ios --configuration Release",
     "build:android": "eas build --platform android",
     "build:ios": "eas build --platform ios",
     "lint": "eslint . --ext .ts,.tsx",

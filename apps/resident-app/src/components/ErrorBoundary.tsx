@@ -53,7 +53,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
           onPress={this.reset}
           accessibilityLabel="Retry"
           accessibilityRole="button"
-          style={{ backgroundColor: '#821A52', borderRadius: 16, paddingVertical: 14, paddingHorizontal: 28, width: '100%', alignItems: 'center', marginBottom: 12 }}
+          style={{ backgroundColor: '#821A52', borderRadius: 4, paddingVertical: 14, paddingHorizontal: 28, width: '100%', alignItems: 'center', marginBottom: 12 }}
         >
           <Text style={{ color: '#fff', fontWeight: '600' }}>Retry</Text>
         </TouchableOpacity>
@@ -61,7 +61,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
           onPress={this.report}
           accessibilityLabel="Report issue"
           accessibilityRole="button"
-          style={{ backgroundColor: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.1)', borderWidth: 1, borderRadius: 16, paddingVertical: 14, paddingHorizontal: 28, width: '100%', alignItems: 'center' }}
+          style={{ backgroundColor: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.1)', borderWidth: 1, borderRadius: 4, paddingVertical: 14, paddingHorizontal: 28, width: '100%', alignItems: 'center' }}
         >
           <Text style={{ color: '#F5F5F7', fontWeight: '600' }}>Report Issue</Text>
         </TouchableOpacity>
