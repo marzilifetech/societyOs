@@ -7,14 +7,16 @@ import hi from '../locales/hi.json';
 import kn from '../locales/kn.json';
 import ta from '../locales/ta.json';
 import mr from '../locales/mr.json';
+import te from '../locales/te.json';
 
-export type AppLocale = 'en' | 'hi' | 'kn' | 'ta' | 'mr';
+export type AppLocale = 'en' | 'hi' | 'kn' | 'ta' | 'mr' | 'te';
 
 export const SUPPORTED_LOCALES: { code: AppLocale; name: string; native: string }[] = [
   { code: 'en', name: 'English', native: 'English' },
   { code: 'hi', name: 'Hindi', native: 'हिन्दी' },
   { code: 'kn', name: 'Kannada', native: 'ಕನ್ನಡ' },
   { code: 'ta', name: 'Tamil', native: 'தமிழ்' },
+  { code: 'te', name: 'Telugu', native: 'తెలుగు' },
   { code: 'mr', name: 'Marathi', native: 'मराठी' },
 ];
 
@@ -23,7 +25,7 @@ const STORAGE_KEY = 'app_locale';
 export async function loadStoredLocale(): Promise<AppLocale> {
   try {
     const v = await AsyncStorage.getItem(STORAGE_KEY);
-    if (v && ['en', 'hi', 'kn', 'ta', 'mr'].includes(v)) return v as AppLocale;
+    if (v && ['en', 'hi', 'kn', 'ta', 'mr', 'te'].includes(v)) return v as AppLocale;
   } catch {}
   return 'en';
 }
@@ -49,6 +51,7 @@ export async function initI18n() {
       kn: { translation: bundle(kn) },
       ta: { translation: bundle(ta) },
       mr: { translation: bundle(mr) },
+      te: { translation: bundle(te) },
     },
     lng: stored,
     fallbackLng: 'en',
