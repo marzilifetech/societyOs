@@ -4,7 +4,7 @@ import * as admin from 'firebase-admin';
 import IORedis from 'ioredis';
 import { Queue, Worker } from 'bullmq';
 import { PrismaService } from '../../prisma/prisma.service';
-import { isForceOn } from './notification-categories';
+import { getCategory, isForceOn } from './notification-categories';
 
 export interface PushNotificationAction {
   id: string;
@@ -270,7 +270,11 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
 
     const hasActions = !!notification.actions && notification.actions.length > 0;
     const dataOnly = !!notification.dataOnly || hasActions;
-    const highPriority = !!notification.critical || dataOnly;
+    // High FCM priority for critical, data-only/actionable, OR any category the
+    // registry marks 'high' importance (e.g. visitors_gate) — so time-sensitive
+    // alerts wake the device + show heads-up instead of being batched in doze.
+    const catImportance = notification.category ? getCategory(notification.category)?.importance : undefined;
+    const highPriority = !!notification.critical || dataOnly || catImportance === 'high';
 
     const android: admin.messaging.AndroidConfig = {
       priority: highPriority ? 'high' : 'normal',

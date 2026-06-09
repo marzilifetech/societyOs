@@ -11,6 +11,7 @@ import { CreateVisitorDto, CheckInVisitorDto } from './dto/visitor.dto';
 import { requireResidentByUserId } from '../../common/utils/resident-context';
 import { randomBytes } from 'crypto';
 import { VisitorGateway } from './visitor.gateway';
+import { PushService } from '../../common/notification/push.service';
 
 type VisitorWithResidentFlat = {
   resident: { flat: { societyId: string } };
@@ -21,7 +22,49 @@ export class VisitorService {
   constructor(
     private prisma: PrismaService,
     private visitorGateway: VisitorGateway,
+    private push: PushService,
   ) {}
+
+  /**
+   * Fire the actionable visitor-arrival push to the resident (photo + name +
+   * time). Best-effort: never blocks or fails the gate check-in. The push is
+   * data-tagged VISITOR_ARRIVAL so the app routes a tap to the approve/deny
+   * review screen for this visit.
+   */
+  private notifyResidentArrival(visitor: {
+    id: string;
+    name: string;
+    photoUrl?: string | null;
+    entryAt?: Date | null;
+    resident?: { userId?: string | null } | null;
+  }): void {
+    try {
+      const userId = visitor?.resident?.userId;
+      if (!userId) return;
+      const time = (visitor.entryAt ?? new Date()).toLocaleTimeString('en-IN', {
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: 'Asia/Kolkata',
+      });
+      void this.push
+        .send(
+          userId,
+          {
+            title: 'Visitor at the gate',
+            body: `${visitor.name} · ${time}`,
+            category: 'visitors_gate',
+            ...(visitor.photoUrl ? { imageUrl: visitor.photoUrl } : {}),
+            collapseKey: `visitor:${visitor.id}`,
+          },
+          { type: 'VISITOR_ARRIVAL', visitId: visitor.id, visitorName: visitor.name },
+        )
+        .catch(() => {
+          /* best-effort; gate flow must not depend on push delivery */
+        });
+    } catch {
+      /* never let an arrival push break the gate check-in */
+    }
+  }
 
   private assertSameSociety(visitor: VisitorWithResidentFlat, societyId: string) {
     if (visitor.resident.flat.societyId !== societyId) {
@@ -219,6 +262,9 @@ export class VisitorService {
       vehicleNumber: updated.vehicleNo ?? null,
       time: (updated.entryAt ?? new Date()).toISOString(),
     });
+
+    // Actionable visitor-arrival push to the resident (photo + name + time).
+    this.notifyResidentArrival(updated);
 
     return updated;
   }
