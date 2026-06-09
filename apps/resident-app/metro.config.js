@@ -33,4 +33,15 @@ config.resolver.extraNodeModules = {
   'react-native': path.resolve(rootNodeModules, 'react-native'),
 };
 
+// Web-only: expo-secure-store has no web implementation. Alias it to a
+// localStorage shim so the app can run under react-native-web for visual
+// verification. Native (ios/android) builds are unaffected.
+const _origResolveRequest = config.resolver.resolveRequest;
+config.resolver.resolveRequest = (context, moduleName, platform) => {
+  if (platform === 'web' && moduleName === 'expo-secure-store') {
+    return { type: 'sourceFile', filePath: path.resolve(projectRoot, 'src/lib/secure-store.web-shim.js') };
+  }
+  return (_origResolveRequest ?? context.resolveRequest)(context, moduleName, platform);
+};
+
 module.exports = config;

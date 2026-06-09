@@ -1,68 +1,66 @@
-import { ScrollView, View, Text, TouchableOpacity, RefreshControl, Linking } from 'react-native';
+import { ScrollView, View, Text, TouchableOpacity, RefreshControl } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useQuery } from '@tanstack/react-query';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../src/store/auth.store';
+import { useTheme } from '../../src/hooks/useTheme';
 import { api } from '../../src/lib/api';
+import { Display, RoundCard, IconCircle, PillButton, StatusPill, rd, type RdStatusTone } from '../../src/components/ui';
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
 
-type ResidentProfile = {
-  user?: { name?: string };
-  flat?: { block: string; number: string };
-};
-
+type ResidentProfile = { user?: { name?: string }; flat?: { block: string; number: string } };
 type ServiceRequestSummary = {
   id: string;
   category: string;
   description: string;
   status: string;
+  createdAt?: string;
+  assignedStaff?: { name?: string } | null;
+  assignee?: { name?: string } | null;
 };
-
 type Notice = { id: string; isRead: boolean };
-type PinnedNotice = { id: string; title: string; body: string; isPinned: boolean; category?: string };
-type EmergencyContact = { id?: string; label: string; phone: string; icon?: IoniconName; tint?: string };
-type SocietyResponse = { id: string; config?: { emergencyContacts?: EmergencyContact[] } };
+type PinnedNotice = { id: string; title: string; body: string; isPinned: boolean };
 
 const DISMISSED_PINNED_KEY = 'dismissed_pinned_notice_ids';
 
-const DEFAULT_CONTACT_META: Record<string, { icon: IoniconName; tint: string }> = {
-  Medical: { icon: 'medkit', tint: '#16A34A' },
-  Security: { icon: 'shield-checkmark', tint: '#2563EB' },
-  Fire: { icon: 'flame', tint: '#DC2626' },
-  Manager: { icon: 'person', tint: '#7C3AED' },
-  Plumber: { icon: 'water', tint: '#0EA5E9' },
-  Electrician: { icon: 'flash', tint: '#F59E0B' },
-};
-
-type QuickAction = { icon: IoniconName; label: string; route: string; tint: string };
-
+// 9 quick actions in the Figma 3×3 grid (node-id=22-1418 Home frame).
+type QuickAction = { icon: IoniconName; label: string; route: string; bg: string; tint: string };
 const QUICK_ACTIONS: QuickAction[] = [
-  { icon: 'warning', label: 'SOS', route: '/medical/sos', tint: '#DC2626' },
-  { icon: 'people', label: 'Visitor', route: '/visitor/new', tint: '#2563EB' },
-  { icon: 'construct', label: 'Services', route: '/services', tint: '#F97316' },
-  { icon: 'medkit', label: 'Medical', route: '/medical', tint: '#16A34A' },
-  { icon: 'restaurant', label: 'Canteen', route: '/canteen', tint: '#D97706' },
-  { icon: 'card', label: 'Payments', route: '/maintenance', tint: '#0EA5E9' },
-  { icon: 'chatbubble-ellipses', label: 'Complaints', route: '/complaints', tint: '#7C3AED' },
-  { icon: 'megaphone', label: 'Notices', route: '/notices', tint: '#0891B2' },
-  { icon: 'sparkles', label: 'Events', route: '/events', tint: '#DB2777' },
-  { icon: 'airplane', label: 'Travel', route: '/travel', tint: '#0284C7' },
-  { icon: 'home', label: 'Property', route: '/property', tint: '#65A30D' },
-  { icon: 'qr-code', label: 'Scan QR', route: '/scan', tint: '#475569' },
+  { icon: 'people', label: 'Visitor', route: '/visitor/new', bg: '#FCEBD8', tint: '#B26B2E' },
+  { icon: 'medkit', label: 'Medical', route: '/medical', bg: '#FCE4E6', tint: '#DC2626' },
+  { icon: 'restaurant', label: 'Canteen', route: '/canteen', bg: '#E5EDFB', tint: '#1D4ED8' },
+  { icon: 'card', label: 'Payments', route: '/maintenance', bg: '#E5EDFB', tint: '#2563EB' },
+  { icon: 'chatbubble-ellipses', label: 'Complaints', route: '/complaints', bg: '#FBF1D9', tint: '#B45309' },
+  { icon: 'airplane', label: 'Travel', route: '/travel', bg: '#D9F2EA', tint: '#0F9D77' },
+  { icon: 'home', label: 'Property', route: '/property', bg: '#FCE4EC', tint: '#C2185B' },
+  { icon: 'help-circle', label: 'Staff Help', route: '/help-requests', bg: '#E5EDFB', tint: '#2563EB' },
+  { icon: 'qr-code', label: 'Scan QR', route: '/scan', bg: '#ECECEE', tint: '#1F2937' },
 ];
 
-function getGreeting() {
-  const h = new Date().getHours();
-  if (h < 12) return 'Good morning';
-  if (h < 17) return 'Good afternoon';
-  return 'Good evening';
+const SR_STATUS: Record<string, { label: string; tone: RdStatusTone }> = {
+  PENDING: { label: 'Under Review', tone: 'pending' },
+  ASSIGNED: { label: 'Assigned', tone: 'pending' },
+  IN_PROGRESS: { label: 'In Progress', tone: 'active' },
+  ON_HOLD: { label: 'On Hold', tone: 'pending' },
+};
+const ACTIVE_STATUSES = Object.keys(SR_STATUS);
+
+function fmtWhen(iso?: string): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) +
+    ', ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 }
 
 export default function HomeScreen() {
+  const t = useTheme();
+  const qc = useQueryClient();
   useAuthStore((s) => s.user);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -70,26 +68,17 @@ export default function HomeScreen() {
     queryKey: ['resident-profile'],
     queryFn: () => api.get<ResidentProfile>('/residents/me'),
   });
-
   const { data: recentRequests, refetch: refetchRequests } = useQuery<ServiceRequestSummary[]>({
     queryKey: ['my-service-requests'],
     queryFn: () => api.get<ServiceRequestSummary[]>('/service-requests/my'),
   });
-
   const { data: notices } = useQuery<Notice[]>({
     queryKey: ['notices-summary'],
     queryFn: () => api.get<Notice[]>('/notices?limit=20'),
   });
-
   const { data: pinnedNotices } = useQuery<PinnedNotice[]>({
     queryKey: ['notices-pinned'],
     queryFn: () => api.get<PinnedNotice[]>('/notices?pinned=true&limit=1'),
-  });
-
-  const { data: societyContacts } = useQuery<SocietyResponse>({
-    queryKey: ['resident-society-contacts'],
-    queryFn: () => api.get<SocietyResponse>('/residents/society/emergency-contacts'),
-    staleTime: 5 * 60 * 1000,
   });
 
   const [dismissedPinnedIds, setDismissedPinnedIds] = useState<string[]>([]);
@@ -99,16 +88,17 @@ export default function HomeScreen() {
       try { setDismissedPinnedIds(JSON.parse(raw)); } catch { /* ignore */ }
     });
   }, []);
-
   const visiblePinned = pinnedNotices?.find((n) => !dismissedPinnedIds.includes(n.id));
-
   const dismissPinned = async (id: string) => {
     const next = [...dismissedPinnedIds, id];
     setDismissedPinnedIds(next);
     await AsyncStorage.setItem(DISMISSED_PINNED_KEY, JSON.stringify(next));
   };
 
-  const emergencyContacts: EmergencyContact[] = (societyContacts?.config?.emergencyContacts ?? []).slice(0, 4);
+  const cancelRequest = useMutation({
+    mutationFn: (id: string) => api.patch(`/service-requests/${id}/cancel`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['my-service-requests'] }),
+  });
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -117,213 +107,184 @@ export default function HomeScreen() {
   };
 
   const firstName = profile?.user?.name?.split(' ')[0] ?? 'Resident';
-  const flatNo = profile?.flat ? `${profile.flat.block}-${profile.flat.number}` : '';
-  const unreadNotices = notices?.filter((n: Notice) => !n.isRead).length ?? 0;
+  const flatNo = profile?.flat ? `${profile.flat.block} - ${profile.flat.number}` : '';
+  const unreadNotices = notices?.filter((n) => !n.isRead).length ?? 0;
+  const activeRequests = (recentRequests ?? []).filter((r) => ACTIVE_STATUSES.includes(r.status)).slice(0, 3);
 
   return (
-    <SafeAreaView className="flex-1 bg-white">
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#821A52" />
-        }
-      >
-        {/* Header */}
-        <View className="px-6 pt-4 pb-6">
-          <View className="flex-row justify-between items-start mb-6">
-            <View>
-              <Text className="text-sm text-gray-500">{getGreeting()},</Text>
-              <Text className="text-2xl font-bold text-gray-900 mt-0.5">{firstName}</Text>
-              {flatNo ? (
-                <Text className="text-sm text-primary-500 mt-0.5">Flat {flatNo}</Text>
-              ) : null}
-            </View>
-            <TouchableOpacity
-              className="bg-gray-100 border border-gray-200 rounded-full w-11 h-11 items-center justify-center"
-              onPress={() => router.push('/notices' as any)}
-              accessibilityRole="button"
-              accessibilityLabel={unreadNotices > 0 ? `Notifications, ${unreadNotices} unread` : 'Notifications'}
-            >
-              <Ionicons name="notifications-outline" size={22} color="#374151" />
-              {unreadNotices > 0 && (
-                <View className="absolute top-1 right-1 bg-primary-500 min-w-[16px] h-4 rounded-full items-center justify-center px-1">
-                  <Text className="text-white text-[9px] font-bold">{unreadNotices}</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-          </View>
-
-          {/* Pinned notice banner */}
-          {visiblePinned && (
-            <View className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 mb-4 flex-row items-start">
-              <View className="bg-amber-500 rounded-full w-8 h-8 items-center justify-center mr-3 mt-0.5">
-                <Ionicons name="megaphone" size={16} color="#FFFFFF" />
+    <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+      <LinearGradient
+        colors={['#FCEAEF', '#FFF6F1', '#FFFFFF']}
+        style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 280 }}
+      />
+      <SafeAreaView edges={['top']} style={{ flex: 1 }}>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: 28 }}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={t.accentPrimary} />}
+        >
+          {/* Greeting */}
+          <View style={{ paddingHorizontal: t.screenPadding, paddingTop: 8, paddingBottom: 18 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <View style={{ flex: 1 }}>
+                <Display size="lg">
+                  Hi, {firstName}{'  '}
+                  <Text style={{ color: t.accentPrimary }}>✦</Text>
+                </Display>
+                {flatNo ? (
+                  <TouchableOpacity
+                    onPress={() => router.push('/(tabs)/profile' as any)}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}
+                  >
+                    <Text style={{ color: t.textSecondary, fontSize: t.fontSm }}>Flat {flatNo}</Text>
+                    <Ionicons name="chevron-down" size={14} color={t.textMuted} />
+                  </TouchableOpacity>
+                ) : null}
               </View>
               <TouchableOpacity
                 onPress={() => router.push('/notices' as any)}
-                className="flex-1"
                 accessibilityRole="button"
-                accessibilityLabel={`Pinned notice: ${visiblePinned.title}`}
+                accessibilityLabel={unreadNotices > 0 ? `Notifications, ${unreadNotices} unread` : 'Notifications'}
+                style={{
+                  width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFFFFF',
+                  borderWidth: 1, borderColor: rd.cardBorder, alignItems: 'center', justifyContent: 'center',
+                }}
               >
-                <Text className="text-amber-900 font-semibold text-sm" numberOfLines={1}>
-                  {visiblePinned.title}
-                </Text>
-                <Text className="text-amber-800 text-xs mt-0.5" numberOfLines={2}>
-                  {visiblePinned.body}
-                </Text>
+                <Ionicons name="notifications-outline" size={22} color={t.textPrimary} />
+                {unreadNotices > 0 && (
+                  <View style={{
+                    position: 'absolute', top: 6, right: 6, minWidth: 16, height: 16, borderRadius: 8,
+                    backgroundColor: rd.crimson, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3,
+                  }}>
+                    <Text style={{ color: '#FFFFFF', fontSize: 9, fontWeight: '700' }}>{unreadNotices}</Text>
+                  </View>
+                )}
               </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => dismissPinned(visiblePinned.id)}
-                hitSlop={8}
-                className="ml-2 p-1"
-                accessibilityRole="button"
-                accessibilityLabel="Dismiss pinned notice"
-              >
-                <Ionicons name="close" size={18} color="#92400E" />
-              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Pinned notice */}
+          {visiblePinned && (
+            <View style={{ paddingHorizontal: t.screenPadding, marginBottom: 16 }}>
+              <RoundCard tone="white" style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+                <IconCircle icon="megaphone" size={36} bg={rd.amberSoft} color={rd.amberInk} style={{ marginRight: 12 }} />
+                <TouchableOpacity style={{ flex: 1 }} onPress={() => router.push('/notices' as any)}>
+                  <Text numberOfLines={1} style={{ fontWeight: '700', color: t.textPrimary, fontSize: t.fontSm }}>{visiblePinned.title}</Text>
+                  <Text numberOfLines={2} style={{ color: t.textMuted, fontSize: t.fontXs, marginTop: 2 }}>{visiblePinned.body}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => dismissPinned(visiblePinned.id)} hitSlop={8} style={{ padding: 2 }}>
+                  <Ionicons name="close" size={18} color={t.textMuted} />
+                </TouchableOpacity>
+              </RoundCard>
             </View>
           )}
 
-          {/* SOS Button */}
-          <TouchableOpacity
-            className="bg-red-600 rounded-2xl py-4 flex-row items-center justify-center gap-3"
-            onPress={() => router.push('/medical/sos')}
-            activeOpacity={0.85}
-            accessibilityRole="button"
-            accessibilityLabel="Emergency SOS - call for immediate help"
-          >
-            <Ionicons name="warning" size={24} color="#FFFFFF" />
-            <View>
-              <Text className="text-white font-bold text-base">Emergency SOS</Text>
-              <Text className="text-red-100 text-xs">Tap to alert security & medical</Text>
-            </View>
-          </TouchableOpacity>
-        </View>
-
-        {/* Emergency contacts grid */}
-        {emergencyContacts.length > 0 && (
-          <View className="px-6 mb-6">
-            <Text className="text-xl font-semibold text-gray-900 mb-4">Emergency Contacts</Text>
-            <View className="flex-row flex-wrap" style={{ marginHorizontal: -6 }}>
-              {emergencyContacts.map((c, idx) => {
-                const meta = DEFAULT_CONTACT_META[c.label] ?? {
-                  icon: 'call' as IoniconName,
-                  tint: '#0EA5E9',
-                };
-                const icon = c.icon ?? meta.icon;
-                const tint = c.tint ?? meta.tint;
-                return (
-                  <View key={c.id ?? `${c.label}-${idx}`} style={{ width: '50%', padding: 6 }}>
-                    <TouchableOpacity
-                      onPress={() => Linking.openURL(`tel:${c.phone}`)}
-                      className="bg-gray-50 border border-gray-200 rounded-2xl p-4 flex-row items-center"
-                      activeOpacity={0.7}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Call ${c.label} at ${c.phone}`}
-                    >
-                      <View
-                        className="w-10 h-10 rounded-xl items-center justify-center mr-3"
-                        style={{ backgroundColor: `${tint}1A` }}
-                      >
-                        <Ionicons name={icon} size={20} color={tint} />
-                      </View>
-                      <View className="flex-1">
-                        <Text className="text-sm font-semibold text-gray-900">{c.label}</Text>
-                        <Text className="text-xs text-gray-500 mt-0.5" numberOfLines={1}>
-                          {c.phone}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                  </View>
-                );
-              })}
-            </View>
-          </View>
-        )}
-
-        {/* Quick Actions */}
-        <View className="px-6 mb-6">
-          <Text className="text-xl font-semibold text-gray-900 mb-4">Quick Actions</Text>
-          <View className="flex-row flex-wrap gap-3">
-            {QUICK_ACTIONS.map((action) => (
-              <TouchableOpacity
-                key={action.label}
-                style={{ width: '30%' }}
-                className="min-h-[96px] bg-gray-50 border border-gray-200 rounded-2xl p-3 items-center justify-center"
-                onPress={() => router.push(action.route as any)}
-                activeOpacity={0.7}
-                accessibilityRole="button"
-                accessibilityLabel={action.label}
-              >
-                <View
-                  className="w-11 h-11 rounded-xl items-center justify-center mb-2"
-                  style={{ backgroundColor: `${action.tint}1A` }}
-                >
-                  <Ionicons name={action.icon} size={22} color={action.tint} />
+          {/* Emergency SOS banner */}
+          <View style={{ paddingHorizontal: t.screenPadding, marginBottom: 24 }}>
+            <TouchableOpacity activeOpacity={0.9} onPress={() => router.push('/medical/sos')} accessibilityRole="button" accessibilityLabel="Emergency SOS - alert security and medical">
+              <RoundCard tone="pink" padding={t.cardPaddingLg} style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: rd.crimson, fontSize: t.fontLg, fontWeight: '800' }}>Emergency SOS</Text>
+                  <Text style={{ color: t.textSecondary, fontSize: t.fontSm, marginTop: 3 }}>Tap to alert security & medical</Text>
                 </View>
-                <Text className="text-xs font-semibold text-gray-700 text-center">{action.label}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-
-        {/* Recent Requests */}
-        <View className="px-6 mb-8">
-          <View className="flex-row justify-between items-center mb-4">
-            <Text className="text-xl font-semibold text-gray-900">Recent Requests</Text>
-            <TouchableOpacity
-              onPress={() => router.push('/services' as any)}
-              accessibilityRole="button"
-              accessibilityLabel="See all service requests"
-            >
-              <Text className="text-primary-500 text-sm font-semibold">See all</Text>
+                <View style={{
+                  width: 52, height: 52, borderRadius: 26, backgroundColor: rd.crimson,
+                  alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <Text style={{ color: '#FFFFFF', fontWeight: '800', fontSize: t.fontSm, letterSpacing: 1 }}>SOS</Text>
+                </View>
+              </RoundCard>
             </TouchableOpacity>
           </View>
 
-          {!recentRequests?.length ? (
-            <View className="bg-gray-50 border border-gray-200 rounded-2xl p-6 items-center">
-              <Ionicons name="checkmark-circle" size={32} color="#22C55E" />
-              <Text className="text-gray-500 text-sm mt-2">No pending requests</Text>
+          {/* Quick Actions */}
+          <View style={{ paddingHorizontal: t.screenPadding, marginBottom: 26 }}>
+            <Display size="md" style={{ marginBottom: 16 }}>Quick Actions</Display>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 14 }}>
+              {QUICK_ACTIONS.map((a) => (
+                <TouchableOpacity
+                  key={a.label}
+                  onPress={() => router.push(a.route as any)}
+                  activeOpacity={0.85}
+                  accessibilityRole="button"
+                  accessibilityLabel={a.label}
+                  style={{ width: '31%' }}
+                >
+                  <RoundCard tone="white" padding={14} style={{ alignItems: 'center', minHeight: 104, justifyContent: 'center' }}>
+                    <IconCircle icon={a.icon} size={54} bg={a.bg} color={a.tint} />
+                    <Text style={{ marginTop: 10, fontSize: t.fontSm, fontWeight: '600', color: t.textPrimary, textAlign: 'center' }}>{a.label}</Text>
+                  </RoundCard>
+                </TouchableOpacity>
+              ))}
             </View>
-          ) : (
-            recentRequests.slice(0, 3).map((req: ServiceRequestSummary) => (
-              <TouchableOpacity
-                key={req.id}
-                className="bg-gray-50 border border-gray-200 rounded-2xl px-4 py-4 mb-3 justify-center"
-                onPress={() => router.push(`/services/${req.id}` as any)}
-                accessibilityRole="button"
-                accessibilityLabel={`Service request: ${req.category}, status ${req.status}`}
-              >
-                <View className="flex-row justify-between items-start">
-                  <View className="flex-1">
-                    <Text className="text-base font-medium text-gray-900 capitalize">{req.category}</Text>
-                    <Text className="text-sm text-gray-500 mt-0.5" numberOfLines={1}>
-                      {req.description}
-                    </Text>
-                  </View>
-                  <StatusBadge status={req.status} />
-                </View>
-              </TouchableOpacity>
-            ))
-          )}
-        </View>
-      </ScrollView>
-    </SafeAreaView>
-  );
-}
+          </View>
 
-function StatusBadge({ status }: { status: string }) {
-  const config: Record<string, { bg: string; text: string; label: string }> = {
-    PENDING: { bg: 'bg-amber-100', text: 'text-amber-700', label: 'Pending' },
-    ASSIGNED: { bg: 'bg-primary-100', text: 'text-primary-700', label: 'Assigned' },
-    IN_PROGRESS: { bg: 'bg-orange-100', text: 'text-orange-700', label: 'In Progress' },
-    COMPLETED: { bg: 'bg-green-100', text: 'text-green-700', label: 'Done' },
-    REJECTED: { bg: 'bg-red-100', text: 'text-red-700', label: 'Rejected' },
-  };
-  const c = config[status] ?? { bg: 'bg-gray-100', text: 'text-gray-600', label: status };
-  return (
-    <View className={`rounded-full px-2.5 py-1 ${c.bg}`}>
-      <Text className={`text-xs font-medium ${c.text}`}>{c.label}</Text>
+          {/* Active Requests */}
+          <View style={{ paddingHorizontal: t.screenPadding }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <Display size="md">Active Requests</Display>
+              {activeRequests.length > 0 ? (
+                <TouchableOpacity onPress={() => router.push('/(tabs)/services' as any)}>
+                  <Text style={{ color: t.accentPrimary, fontSize: t.fontSm, fontWeight: '700' }}>See all</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+
+            {activeRequests.length === 0 ? (
+              <RoundCard tone="white" style={{ alignItems: 'center', paddingVertical: 28 }}>
+                <Ionicons name="checkmark-circle" size={32} color={rd.green} />
+                <Text style={{ color: t.textMuted, fontSize: t.fontSm, marginTop: 8 }}>No active requests</Text>
+              </RoundCard>
+            ) : (
+              <View style={{ gap: 14 }}>
+                {activeRequests.map((r) => {
+                  const s = SR_STATUS[r.status] ?? { label: r.status, tone: 'neutral' as RdStatusTone };
+                  const who = r.assignedStaff?.name ?? r.assignee?.name;
+                  const when = fmtWhen(r.createdAt);
+                  return (
+                    <RoundCard key={r.id} tone="white" padding={t.cardPaddingLg}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <Text style={{ flex: 1, fontSize: t.fontBase, fontWeight: '700', color: t.textPrimary, textTransform: 'capitalize', marginRight: 10 }}>
+                          {r.category}
+                        </Text>
+                        <StatusPill label={s.label} tone={s.tone} />
+                      </View>
+                      {(when || who) ? (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 }}>
+                          <Ionicons name="calendar-outline" size={14} color={t.textMuted} />
+                          <Text style={{ fontSize: t.fontXs, color: t.textMuted }} numberOfLines={1}>
+                            {[when, who].filter(Boolean).join('  •  ')}
+                          </Text>
+                        </View>
+                      ) : null}
+                      <Text style={{ fontSize: t.fontSm, color: t.textSecondary, marginTop: 10 }} numberOfLines={2}>{r.description}</Text>
+                      <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
+                        <PillButton
+                          label="Cancel"
+                          tone="light"
+                          size="md"
+                          fullWidth={false}
+                          textColor={rd.crimson}
+                          onPress={() => cancelRequest.mutate(r.id)}
+                          style={{ flex: 1 }}
+                        />
+                        <PillButton
+                          label="Track Request"
+                          tone="dark"
+                          size="md"
+                          fullWidth={false}
+                          onPress={() => router.push(`/services/${r.id}` as any)}
+                          style={{ flex: 1 }}
+                        />
+                      </View>
+                    </RoundCard>
+                  );
+                })}
+              </View>
+            )}
+          </View>
+        </ScrollView>
+      </SafeAreaView>
     </View>
   );
 }

@@ -91,6 +91,12 @@ export class SosController {
     return this.sosService.flagFalseAlarm(id, user);
   }
 
+  /** Resident's own SOS alert history. */
+  @Get('history')
+  getHistory(@CurrentUser() user: JwtPayload) {
+    return this.sosService.getHistory(user.sub);
+  }
+
   @Get('active')
   getActive(@SocietyId() societyId: string) {
     return this.sosService.getActive(societyId);
