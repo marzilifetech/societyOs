@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
 import { setApiTokens, api } from '../lib/api';
+import { unregisterDeviceToken } from '../lib/push';
 
 interface AuthState {
   token: string | null;
@@ -60,6 +61,9 @@ export const useAuthStore = create<AuthState>((set) => ({
     // intentionally ignored — if the server is unreachable, the AT and RT
     // family will still expire on their TTL, and the local state must be
     // wiped regardless.
+    // Forget this device's push token server-side so a logged-out user stops
+    // receiving pushes. Best-effort and must run while the token is still valid.
+    await unregisterDeviceToken();
     try {
       await api.post('/auth/logout', {});
     } catch {

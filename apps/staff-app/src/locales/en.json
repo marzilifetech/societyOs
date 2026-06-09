@@ -140,7 +140,9 @@
     "helpRequests": "Help Requests",
     "on": "On",
     "off": "Off",
-    "dataSaverHint": "Compress images, manual load"
+    "dataSaverHint": "Compress images, manual load",
+    "alwaysOn": "Always on",
+    "notificationUpdateFailed": "Could not update notification settings. Please try again."
   },
   "tabs": {
     "home": "Home",

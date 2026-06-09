@@ -1,13 +1,16 @@
 import { useEffect } from 'react';
-import { Platform, View } from 'react-native';
+import { View } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import { useFonts } from 'expo-font';
-import * as Notifications from 'expo-notifications';
-import Constants from 'expo-constants';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { api } from '../src/lib/api';
+import {
+  setupNotificationHandler,
+  setupTapRouting,
+  ensureAndroidChannels,
+  registerDeviceToken,
+  subscribeToTokenRotation,
+} from '../src/lib/push';
 import {
   Montserrat_400Regular,
   Montserrat_500Medium,
@@ -30,42 +33,14 @@ import './global.css';
 
 initSentry();
 
+// Configure foreground display before any notification can arrive.
+setupNotificationHandler();
+
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 function RealtimeProvider() {
   useRealtime();
   return null;
-}
-
-const PUSH_TOKEN_KEY = 'expo_push_token';
-
-async function registerPushTokenOnce() {
-  try {
-    const stored = await AsyncStorage.getItem(PUSH_TOKEN_KEY);
-
-    const { status: existing } = await Notifications.getPermissionsAsync();
-    let granted = existing === 'granted';
-    if (!granted) {
-      const { status } = await Notifications.requestPermissionsAsync();
-      granted = status === 'granted';
-    }
-    if (!granted) return;
-
-    const projectId =
-      (Constants.expoConfig as any)?.extra?.eas?.projectId ??
-      (Constants as any).easConfig?.projectId;
-    // getExpoPushTokenAsync throws on iOS Simulator (no APNS) — caught below.
-    const tokenData = await Notifications.getExpoPushTokenAsync(
-      projectId ? { projectId } : undefined,
-    );
-    const token = tokenData.data;
-    if (!token || token === stored) return;
-
-    await api.post('/auth/device-token', { token, platform: Platform.OS });
-    await AsyncStorage.setItem(PUSH_TOKEN_KEY, token);
-  } catch {
-    /* swallow — push registration is best-effort (e.g. iOS Simulator) */
-  }
 }
 
 export default function RootLayout() {
@@ -100,13 +75,27 @@ export default function RootLayout() {
     }
   }, [isHydrated]);
 
-  // Register the Expo push token with the backend exactly once per token.
-  // Runs only after auth has hydrated AND we have a session — otherwise the
-  // /auth/device-token call would 401 and the token wouldn't be saved.
+  // Tap routing for notification responses (warm taps + cold start). Set up
+  // once on mount; deep-links into the app via the router.
   useEffect(() => {
-    if (isHydrated && token) {
-      registerPushTokenOnce();
-    }
+    const sub = setupTapRouting();
+    return () => sub.remove();
+  }, []);
+
+  // Register the NATIVE FCM device token with the backend once per token, and
+  // re-register whenever the token rotates. Runs only after auth has hydrated
+  // AND we have a session — otherwise the /notifications/devices call would 401.
+  useEffect(() => {
+    if (!isHydrated || !token) return;
+    let sub: ReturnType<typeof subscribeToTokenRotation> | undefined;
+    (async () => {
+      // Channels must exist before requesting the token so the first push
+      // lands on the correct (high-importance) channel.
+      await ensureAndroidChannels();
+      await registerDeviceToken();
+      sub = subscribeToTokenRotation();
+    })();
+    return () => sub?.remove();
   }, [isHydrated, token]);
 
   // Show a solid view matching the splash background — avoids a white flash

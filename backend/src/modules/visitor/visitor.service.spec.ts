@@ -9,11 +9,12 @@ import { makePrismaMock } from '../../../test/helpers/prisma-mock';
 describe('VisitorService gate flows', () => {
   const prisma = makePrismaMock(['visitor', 'resident']) as any;
   const visitorGateway = { emitVisitorArrived: jest.fn() } as any;
+  const push = { send: jest.fn().mockResolvedValue({ ok: true }) } as any;
   let service: VisitorService;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new VisitorService(prisma, visitorGateway);
+    service = new VisitorService(prisma, visitorGateway, push);
   });
 
   const visitorRow = (overrides: Record<string, unknown> = {}) => ({

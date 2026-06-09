@@ -11,9 +11,7 @@
       "resizeMode": "contain",
       "backgroundColor": "#3B3FBF"
     },
-    "assetBundlePatterns": [
-      "**/*"
-    ],
+    "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.societyos.resident",
@@ -29,12 +27,14 @@
         "backgroundColor": "#3B3FBF"
       },
       "package": "com.societyos.resident",
+      "googleServicesFile": "./google-services.json",
       "permissions": [
         "CAMERA",
         "READ_EXTERNAL_STORAGE",
         "ACCESS_FINE_LOCATION",
         "RECEIVE_BOOT_COMPLETED",
-        "VIBRATE"
+        "VIBRATE",
+        "POST_NOTIFICATIONS"
       ]
     },
     "plugins": [

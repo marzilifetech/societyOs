@@ -2,11 +2,13 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { VisitorService } from './visitor.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VisitorGateway } from './visitor.gateway';
+import { PushService } from '../../common/notification/push.service';
 
 const mockPrisma = {
   visitor: { updateMany: jest.fn(), findUnique: jest.fn() },
 };
 const mockGateway = { emitVisitorArrived: jest.fn() };
+const mockPush = { send: jest.fn() };
 
 describe('VisitorService.decide — idempotent / race-safe', () => {
   let service: VisitorService;
@@ -17,6 +19,7 @@ describe('VisitorService.decide — idempotent / race-safe', () => {
         VisitorService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: VisitorGateway, useValue: mockGateway },
+        { provide: PushService, useValue: mockPush },
       ],
     }).compile();
     service = mod.get<VisitorService>(VisitorService);
