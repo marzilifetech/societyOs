@@ -6,6 +6,27 @@ import { api } from './api';
 
 let registered = false;
 let responseSub: Notifications.Subscription | null = null;
+let tokenSub: Notifications.Subscription | null = null;
+
+// appType the backend expects for device-token routing.
+const APP_TYPE = 'staff' as const;
+
+/**
+ * POST the device push token to the backend. Preferred over the legacy
+ * /auth/device-token route — /notifications/devices stores the platform and
+ * supports multiple devices per user, and is what push.service.ts reads from.
+ */
+async function postDeviceToken(token: string): Promise<void> {
+  try {
+    await api.post('/notifications/devices', {
+      token,
+      platform: Platform.OS,
+      appType: APP_TYPE,
+    });
+  } catch (err: any) {
+    if (__DEV__) console.warn('[notifications] register device failed', err?.message);
+  }
+}
 
 export async function setupNotificationHandler() {
   Notifications.setNotificationHandler({
@@ -17,6 +38,66 @@ export async function setupNotificationHandler() {
       shouldShowList: true,
     }),
   });
+}
+
+/**
+ * Android notification channels. Channel id == backend category key so push
+ * payloads can target the right channel (push.service.ts sets channel_id to
+ * the category). HIGH/MAX importance + PUBLIC lockscreen visibility so staff
+ * alerts surface with full content. 'sos' is kept as a legacy alias of the
+ * emergency_sos channel.
+ */
+async function setupAndroidChannels() {
+  const PUBLIC = Notifications.AndroidNotificationVisibility.PUBLIC;
+
+  // Routine staff work + notices.
+  for (const id of ['staff_tasks', 'notices'] as const) {
+    await Notifications.setNotificationChannelAsync(id, {
+      name: id === 'staff_tasks' ? 'Tasks' : 'Notices',
+      importance: Notifications.AndroidImportance.DEFAULT,
+      lockscreenVisibility: PUBLIC,
+      vibrationPattern: [0, 250, 250, 250],
+    });
+  }
+
+  // Higher-priority categories: approvals + urgent notices + the generic
+  // fallback channel.
+  await Notifications.setNotificationChannelAsync('approval_results', {
+    name: 'Approvals',
+    importance: Notifications.AndroidImportance.HIGH,
+    lockscreenVisibility: PUBLIC,
+    vibrationPattern: [0, 250, 250, 250],
+  });
+  await Notifications.setNotificationChannelAsync('notices_urgent', {
+    name: 'Urgent Notices',
+    importance: Notifications.AndroidImportance.HIGH,
+    lockscreenVisibility: PUBLIC,
+    vibrationPattern: [0, 250, 250, 250],
+  });
+  await Notifications.setNotificationChannelAsync('default', {
+    name: 'default',
+    importance: Notifications.AndroidImportance.HIGH,
+    lockscreenVisibility: PUBLIC,
+    vibrationPattern: [0, 250, 250, 250],
+  });
+
+  // SOS / emergency channels — MAX importance, distinct vibration + lights so
+  // on-call staff notice even in noisy notification environments. We register
+  // both 'emergency_sos' (backend category key) and 'sos' (legacy alias kept
+  // for existing payloads). We deliberately do NOT set bypassDnd=true: it
+  // requires ACCESS_NOTIFICATION_POLICY plus an explicit user-side DND grant
+  // and silently no-ops otherwise.
+  const emergency: Notifications.NotificationChannelInput = {
+    name: 'Emergency Alerts',
+    importance: Notifications.AndroidImportance.MAX,
+    lockscreenVisibility: PUBLIC,
+    sound: 'default',
+    vibrationPattern: [0, 500, 250, 500],
+    enableVibrate: true,
+    enableLights: true,
+  };
+  await Notifications.setNotificationChannelAsync('emergency_sos', { ...emergency });
+  await Notifications.setNotificationChannelAsync('sos', { ...emergency });
 }
 
 export async function registerForPushNotifications(): Promise<string | null> {
@@ -44,58 +125,57 @@ export async function registerForPushNotifications(): Promise<string | null> {
     if (final !== 'granted') return null;
 
     if (Platform.OS === 'android') {
-      // Default channel — bumped to HIGH + PUBLIC so routine notifications
-      // surface on the lock screen with full content instead of "hidden".
-      await Notifications.setNotificationChannelAsync('default', {
-        name: 'default',
-        importance: Notifications.AndroidImportance.HIGH,
-        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
-        vibrationPattern: [0, 250, 250, 250],
-      });
-      // SOS / emergency channel — MAX importance, full lockscreen visibility,
-      // distinct vibration + lights so on-call staff notice even in noisy
-      // notification environments. We deliberately do NOT set bypassDnd=true:
-      // that requires ACCESS_NOTIFICATION_POLICY plus an explicit user-side
-      // grant in DND settings, and silently no-ops otherwise. Backend push
-      // payload should target channel_id="sos" for emergency alerts to land
-      // here (TODO: wire in push.service.ts).
-      await Notifications.setNotificationChannelAsync('sos', {
-        name: 'Emergency Alerts',
-        importance: Notifications.AndroidImportance.MAX,
-        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
-        sound: 'default',
-        vibrationPattern: [0, 500, 250, 500],
-        enableVibrate: true,
-        enableLights: true,
-      });
+      await setupAndroidChannels();
     }
 
+    // FCM device token. We deliberately do NOT fall back to Expo push tokens:
+    // the backend /notifications/devices contract + push.service.ts speak raw
+    // FCM, so an Expo token here would be unusable server-side.
     let token: string | null = null;
     try {
       const t = await Notifications.getDevicePushTokenAsync();
       token = t.data as unknown as string;
     } catch {
-      try {
-        const t = await Notifications.getExpoPushTokenAsync();
-        token = t.data;
-      } catch {
-        token = null;
-      }
+      token = null;
     }
     if (!token) return null;
 
-    try {
-      // Canonical push-token endpoint (resident-app uses this too).
-      await api.post('/auth/device-token', { token, platform: Platform.OS });
-    } catch (err: any) {
-      if (__DEV__) console.warn('[notifications] register device failed', err?.message);
-    }
+    await postDeviceToken(token);
     registered = true;
+
+    // Re-register if FCM rotates the token mid-session.
+    if (!tokenSub) {
+      tokenSub = Notifications.addPushTokenListener((t) => {
+        const next = t.data as unknown as string;
+        if (next) postDeviceToken(next).catch(() => {});
+      });
+    }
     return token;
   } catch (err) {
     if (__DEV__) console.warn('[notifications] error', err);
     return null;
   }
+}
+
+/** A single notification category preference returned by the backend. */
+export interface NotificationPreference {
+  key: string;
+  label: string;
+  description: string;
+  importance: string;
+  /** false => force-on category; the toggle must be shown as "Always on". */
+  mutable: boolean;
+  enabled: boolean;
+}
+
+export async function fetchNotificationPreferences(): Promise<NotificationPreference[]> {
+  return api.get<NotificationPreference[]>('/notifications/preferences');
+}
+
+export async function updateNotificationPreferences(
+  prefs: { category: string; enabled: boolean }[],
+): Promise<void> {
+  await api.patch('/notifications/preferences', { prefs });
 }
 
 export function attachNotificationTapHandler() {
@@ -106,10 +186,27 @@ export function attachNotificationTapHandler() {
     const id = (data as any).id;
     try {
       switch (type) {
+        // Backend notification categories (data.type == category key).
+        case 'staff_tasks':
         case 'task':
           if (id) router.push(`/tasks/${id}` as any);
           else router.push('/(tabs)/tasks' as any);
           break;
+        case 'approval_results':
+          // Approval results (e.g. visitor pre-approvals) -> visitors screen.
+          router.push('/visitors' as any);
+          break;
+        case 'notices':
+        case 'notices_urgent':
+        case 'notice':
+          router.push('/community/notices' as any);
+          break;
+        case 'emergency_sos':
+        case 'sos':
+          if (id) router.push(`/help-requests/${id}` as any);
+          else router.push('/help-requests' as any);
+          break;
+        // Legacy / app-specific types.
         case 'review':
           router.push('/reviews' as any);
           break;
@@ -119,9 +216,6 @@ export function attachNotificationTapHandler() {
         case 'help':
           if (id) router.push(`/help-requests/${id}` as any);
           else router.push('/help-requests' as any);
-          break;
-        case 'notice':
-          router.push('/community/notices' as any);
           break;
       }
     } catch {}
@@ -133,5 +227,9 @@ export function detachNotificationTapHandler() {
   if (responseSub) {
     responseSub.remove();
     responseSub = null;
+  }
+  if (tokenSub) {
+    tokenSub.remove();
+    tokenSub = null;
   }
 }

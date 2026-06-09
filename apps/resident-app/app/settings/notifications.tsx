@@ -4,22 +4,17 @@ import { View, Text, Switch, TouchableOpacity, ScrollView, Alert, ActivityIndica
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Notifications from 'expo-notifications';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../src/lib/api';
+import { openNotificationSettings } from '../../src/lib/push';
 
-const PREFS = [
-  { key: 'notices', label: 'Notices & Announcements', desc: 'Society circulars and important updates' },
-  { key: 'visitors', label: 'Visitor Alerts', desc: 'When a visitor checks in or is denied' },
-  { key: 'serviceRequests', label: 'Service Request Updates', desc: 'Status changes on your requests' },
-  { key: 'maintenance', label: 'Maintenance Reminders', desc: 'Due date reminders for bills' },
-  { key: 'events', label: 'Upcoming Events', desc: 'Reminders for events you registered for' },
-  { key: 'sos', label: 'SOS Alerts', desc: 'Emergency alerts in your society' },
-];
-
-type NotificationPrefs = Record<string, boolean>;
-
-type AuthMeResponse = {
-  notificationPrefs?: NotificationPrefs;
+type Preference = {
+  key: string;
+  label: string;
+  description: string;
+  importance: string;
+  mutable: boolean;
+  enabled: boolean;
 };
 
 function readPermissionStatus(permission: unknown) {
@@ -36,10 +31,11 @@ function readPermissionStatus(permission: unknown) {
 
 export default function NotificationSettingsScreen() {
   const t = useTheme();
-  const [prefs, setPrefs] = useState<NotificationPrefs>(
-    Object.fromEntries(PREFS.map((p) => [p.key, true])),
-  );
+  const qc = useQueryClient();
   const [permissionStatus, setPermissionStatus] = useState<string>('undetermined');
+  // Local enabled-overrides keyed by category so toggles feel instant while
+  // the source of truth remains the server response.
+  const [overrides, setOverrides] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     Notifications.getPermissionsAsync().then((permission) =>
@@ -47,27 +43,42 @@ export default function NotificationSettingsScreen() {
     );
   }, []);
 
-  const { data: me } = useQuery<AuthMeResponse>({
-    queryKey: ['auth-me'],
-    queryFn: () => api.get<AuthMeResponse>('/auth/me'),
+  const { data: prefs, isLoading } = useQuery<Preference[]>({
+    queryKey: ['notification-preferences'],
+    queryFn: () => api.get<Preference[]>('/notifications/preferences'),
   });
 
-  useEffect(() => {
-    if (me?.notificationPrefs) {
-      setPrefs((current) => ({ ...current, ...me.notificationPrefs }));
-    }
-  }, [me]);
+  const isEnabled = (p: Preference) =>
+    p.key in overrides ? overrides[p.key] : p.enabled;
 
   const saveMutation = useMutation<void, Error>({
-    mutationFn: () => api.patch<void>('/auth/notification-prefs', { prefs }),
-    onSuccess: () => Alert.alert('Saved', 'Notification preferences updated.'),
+    mutationFn: () => {
+      const list = prefs ?? [];
+      return api.patch<void>('/notifications/preferences', {
+        prefs: list
+          .filter((p) => p.mutable)
+          .map((p) => ({ category: p.key, enabled: isEnabled(p) })),
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['notification-preferences'] });
+      setOverrides({});
+      Alert.alert('Saved', 'Notification preferences updated.');
+    },
     onError: (err: Error) => Alert.alert('Error', err.message),
   });
 
   const requestPermission = async () => {
     const permission = await Notifications.requestPermissionsAsync();
-    setPermissionStatus(readPermissionStatus(permission));
+    const status = readPermissionStatus(permission);
+    setPermissionStatus(status);
+    // If still not granted, the only remaining path is the OS settings screen.
+    if (status !== 'granted') {
+      openNotificationSettings();
+    }
   };
+
+  const list = prefs ?? [];
 
   return (
     <SafeAreaView className="flex-1 bg-white">
@@ -95,31 +106,45 @@ export default function NotificationSettingsScreen() {
           </View>
         )}
 
-        <View className="mx-6 bg-gray-50 rounded-2xl overflow-hidden mb-6">
-          {PREFS.map((pref, idx) => (
-            <View
-              key={pref.key}
-              className={`flex-row items-center px-5 py-4 ${idx < PREFS.length - 1 ? 'border-b border-gray-100' : ''}`}
-            >
-              <View className="flex-1 mr-4">
-                <Text className="text-sm font-medium text-gray-900">{pref.label}</Text>
-                <Text className="text-xs text-gray-400 mt-0.5">{pref.desc}</Text>
+        {isLoading ? (
+          <View className="py-16 items-center">
+            <ActivityIndicator size="large" color="#3B3FBF" />
+          </View>
+        ) : (
+          <View className="mx-6 bg-gray-50 rounded-2xl overflow-hidden mb-6">
+            {list.map((pref, idx) => (
+              <View
+                key={pref.key}
+                className={`flex-row items-center px-5 py-4 ${idx < list.length - 1 ? 'border-b border-gray-100' : ''}`}
+              >
+                <View className="flex-1 mr-4">
+                  <Text className="text-sm font-medium text-gray-900">{pref.label}</Text>
+                  {pref.description ? (
+                    <Text className="text-xs text-gray-400 mt-0.5">{pref.description}</Text>
+                  ) : null}
+                </View>
+                {pref.mutable ? (
+                  <Switch
+                    value={isEnabled(pref)}
+                    onValueChange={(val: boolean) =>
+                      setOverrides((o) => ({ ...o, [pref.key]: val }))
+                    }
+                    trackColor={{ false: '#E5E7EB', true: '#C7C9F5' }}
+                    thumbColor={isEnabled(pref) ? '#3B3FBF' : '#9CA3AF'}
+                  />
+                ) : (
+                  <Text className="text-xs font-semibold text-primary-500">Always on</Text>
+                )}
               </View>
-              <Switch
-                value={prefs[pref.key]}
-                onValueChange={(val: boolean) => setPrefs((p) => ({ ...p, [pref.key]: val }))}
-                trackColor={{ false: '#E5E7EB', true: '#C7C9F5' }}
-                thumbColor={prefs[pref.key] ? '#3B3FBF' : '#9CA3AF'}
-              />
-            </View>
-          ))}
-        </View>
+            ))}
+          </View>
+        )}
 
         <View className="px-6 mb-8">
           <TouchableOpacity
             className="bg-primary-500 rounded-2xl py-4 items-center"
             onPress={() => saveMutation.mutate()}
-            disabled={saveMutation.isPending}
+            disabled={saveMutation.isPending || isLoading}
           >
             {saveMutation.isPending ? (
               <ActivityIndicator color="#fff" />
