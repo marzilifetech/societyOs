@@ -55,6 +55,9 @@ secrets.*
 **/google-services.json
 **/GoogleService-Info.plist
 
+# Deploy-time materialised runtime secret (infra/instance/deploy.sh) — never commit
+backend.env
+
 # Terraform — state holds generated secrets in plaintext; tfvars holds tokens
 **/.terraform/
 *.tfstate
@@ -62,3 +65,5 @@ secrets.*
 *.tfvars
 !*.tfvars.example
 crash.log
+keystores/
+builds/
