@@ -4,14 +4,33 @@ import * as admin from 'firebase-admin';
 import IORedis from 'ioredis';
 import { Queue, Worker } from 'bullmq';
 import { PrismaService } from '../../prisma/prisma.service';
+import { isForceOn } from './notification-categories';
+
+export interface PushNotificationAction {
+  id: string;
+  title: string;
+  destructive?: boolean;
+}
 
 export interface PushNotification {
   title: string;
   body: string;
-  /** Category key matched against `User.notificationPrefs[category]` (default true). */
+  /** Category key matched against the NotificationPreference table (default true). */
   category?: string;
   /** Critical messages (e.g. SOS) bypass quiet hours and category opt-out. */
   critical?: boolean;
+  /** Optional rich image (Android BigPicture / iOS NSE attachment). */
+  imageUrl?: string;
+  /** Optional action buttons; rendered client-side from a data-only payload. */
+  actions?: PushNotificationAction[];
+  /** FCM collapse key (Android) / apns-collapse-id (iOS) for deduping. */
+  collapseKey?: string;
+  /**
+   * When true (or when `actions` are present) the message is sent data-only and
+   * high-priority — no top-level `notification` block — so the client builds the
+   * notification + action buttons itself.
+   */
+  dataOnly?: boolean;
 }
 
 const QUIET_START_HOUR = 22; // 22:00 IST
@@ -187,6 +206,184 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * All push tokens for a user: every Device.token UNION the legacy
+   * `user.fcmToken` (kept as a migration fallback), de-duplicated.
+   */
+  private async resolveTokens(userId: string): Promise<string[]> {
+    const [devices, user] = await Promise.all([
+      this.prisma.device.findMany({ where: { userId }, select: { token: true } }),
+      this.prisma.user.findUnique({ where: { id: userId }, select: { fcmToken: true } }),
+    ]);
+    const tokens = new Set<string>();
+    for (const d of devices) if (d.token) tokens.add(d.token);
+    if (user?.fcmToken) tokens.add(user.fcmToken);
+    return [...tokens];
+  }
+
+  /**
+   * Whether a user has opted out of a given category.
+   *
+   * Force-on categories and critical messages are never opted out. Otherwise the
+   * NotificationPreference table wins; in its absence we fall back to the legacy
+   * `user.notificationPrefs` JSON for migration continuity.
+   */
+  private async isOptedOut(
+    userId: string,
+    category?: string,
+    critical?: boolean,
+  ): Promise<boolean> {
+    if (critical === true) return false;
+    if (!category) return false;
+    if (isForceOn(category)) return false;
+
+    const pref = await this.prisma.notificationPreference.findUnique({
+      where: { userId_category: { userId, category } },
+      select: { enabled: true },
+    });
+    if (pref) return !pref.enabled;
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { notificationPrefs: true },
+    });
+    const prefs = (user?.notificationPrefs as any) || {};
+    return prefs[category] === false;
+  }
+
+  /**
+   * Build the FCM multicast message body for the given tokens. Centralises the
+   * simple (top-level notification) vs. data-only (action buttons / rich) modes,
+   * SOS channel routing, collapse keys and APNs payload shaping.
+   */
+  private buildMessage(
+    tokens: string[],
+    notification: PushNotification,
+    data?: Record<string, string>,
+  ): admin.messaging.MulticastMessage {
+    // Route critical-tagged or SOS-category alerts to the dedicated `sos`
+    // Android channel (declared by staff-app in src/lib/notifications.ts with
+    // MAX importance + lockscreen PUBLIC). Non-critical payloads fall through
+    // to the default channel.
+    const isSos =
+      notification.critical || notification.category === 'sos' || data?.type === 'SOS_TRIGGERED';
+    const channelId = isSos ? 'sos' : 'default';
+
+    const hasActions = !!notification.actions && notification.actions.length > 0;
+    const dataOnly = !!notification.dataOnly || hasActions;
+    const highPriority = !!notification.critical || dataOnly;
+
+    const android: admin.messaging.AndroidConfig = {
+      priority: highPriority ? 'high' : 'normal',
+    };
+    const apnsHeaders: Record<string, string> = {};
+    if (notification.collapseKey) {
+      android.collapseKey = notification.collapseKey;
+      apnsHeaders['apns-collapse-id'] = notification.collapseKey;
+    }
+
+    const message: admin.messaging.MulticastMessage = {
+      tokens,
+      data,
+      android,
+    };
+
+    if (dataOnly) {
+      // Data-only: client renders the notification + action buttons. Carry the
+      // display fields and serialized actions in the data dictionary.
+      const richData: Record<string, string> = { ...(data || {}) };
+      richData.title = notification.title;
+      richData.body = notification.body;
+      richData.channelId = channelId;
+      if (notification.imageUrl) richData.imageUrl = notification.imageUrl;
+      if (hasActions) richData.actions = JSON.stringify(notification.actions);
+      message.data = richData;
+      // NOTE: intentionally NO `android.notification` block here — a data-only
+      // message must omit it so the client's background handler fires and builds
+      // the notification + action buttons (channel id carried in `data`).
+      message.android = android;
+      message.apns = {
+        ...(Object.keys(apnsHeaders).length ? { headers: apnsHeaders } : {}),
+        payload: {
+          aps: {
+            'content-available': 1,
+            'mutable-content': 1,
+            alert: { title: notification.title, body: notification.body },
+            // iOS action category id — the client registers actions under this.
+            ...(notification.category ? { category: notification.category } : {}),
+            sound: notification.critical ? 'default' : undefined,
+            ...(isSos ? { 'interruption-level': 'critical' as const } : {}),
+          },
+        },
+      };
+      return message;
+    }
+
+    // Simple message: top-level notification block.
+    message.notification = { title: notification.title, body: notification.body };
+    message.android = {
+      ...android,
+      notification: {
+        channelId,
+        ...(notification.imageUrl ? { imageUrl: notification.imageUrl } : {}),
+      },
+    };
+    message.apns = {
+      ...(Object.keys(apnsHeaders).length ? { headers: apnsHeaders } : {}),
+      payload: {
+        aps: {
+          sound: notification.critical ? 'default' : undefined,
+          // iOS critical-alert flag: respected only when the app's bundle has
+          // Apple's critical-alerts entitlement granted. No-op otherwise.
+          ...(isSos ? { 'interruption-level': 'critical' as const } : {}),
+        },
+      },
+    };
+    return message;
+  }
+
+  /** Delete Device rows + null matching user.fcmToken for the given invalid tokens. */
+  private async cleanupInvalidTokens(tokens: string[]): Promise<number> {
+    if (!tokens.length) return 0;
+    let cleaned = 0;
+    const devRes = await this.prisma.device
+      .deleteMany({ where: { token: { in: tokens } } })
+      .catch(() => null);
+    cleaned += devRes?.count || 0;
+    const userRes = await this.prisma.user
+      .updateMany({ where: { fcmToken: { in: tokens } }, data: { fcmToken: null } })
+      .catch(() => null);
+    cleaned += userRes?.count || 0;
+    return cleaned;
+  }
+
+  /** Best-effort audit row; never throws into the send path. */
+  private async writeLog(entry: {
+    userId?: string | null;
+    societyId?: string | null;
+    notification: PushNotification;
+    data?: Record<string, string>;
+    status: 'SENT' | 'FAILED' | 'SKIPPED';
+  }): Promise<void> {
+    try {
+      await this.prisma.notificationLog.create({
+        data: {
+          userId: entry.userId ?? null,
+          societyId: entry.societyId ?? null,
+          category: entry.notification.category ?? 'uncategorized',
+          title: entry.notification.title,
+          body: entry.notification.body,
+          data: (entry.data ?? undefined) as any,
+          status: entry.status as any,
+          dedupKey: entry.notification.collapseKey ?? null,
+          sentAt: entry.status === 'SENT' ? new Date() : null,
+        },
+      });
+    } catch (e) {
+      this.logger.debug(`[push] notification log skipped: ${(e as Error).message}`);
+    }
+  }
+
+  /**
    * Send immediately (quiet-hours and opt-out already honored by caller where needed).
    */
   private async sendNow(
@@ -196,18 +393,17 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
   ): Promise<{ ok: boolean; reason?: string }> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, phone: true, fcmToken: true, notificationPrefs: true },
+      select: { id: true, phone: true },
     });
     if (!user) return { ok: false, reason: 'user_not_found' };
 
-    if (notification.category && !notification.critical) {
-      const prefs = (user.notificationPrefs as any) || {};
-      if (prefs[notification.category] === false) {
-        return { ok: false, reason: 'opted_out' };
-      }
+    if (await this.isOptedOut(userId, notification.category, notification.critical)) {
+      await this.writeLog({ userId, notification, data, status: 'SKIPPED' });
+      return { ok: false, reason: 'opted_out' };
     }
 
-    if (!user.fcmToken) {
+    const tokens = await this.resolveTokens(userId);
+    if (!tokens.length) {
       return { ok: false, reason: 'no_token' };
     }
 
@@ -215,42 +411,32 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
       return { ok: false, reason: 'firebase_not_initialized' };
     }
 
-    // Route critical-tagged or SOS-category alerts to the dedicated `sos`
-    // Android channel (declared by staff-app in src/lib/notifications.ts with
-    // MAX importance + lockscreen PUBLIC). Non-critical payloads fall through
-    // to the default channel.
-    const isSos = notification.critical || notification.category === 'sos' || data?.type === 'SOS_TRIGGERED';
-    const channelId = isSos ? 'sos' : 'default';
-
     try {
-      await admin.messaging().send({
-        token: user.fcmToken,
-        notification: { title: notification.title, body: notification.body },
-        data,
-        android: {
-          priority: notification.critical ? 'high' : 'normal',
-          notification: { channelId },
-        },
-        apns: {
-          payload: {
-            aps: {
-              sound: notification.critical ? 'default' : undefined,
-              // iOS critical-alert flag: respected only when the app's
-              // bundle has Apple's critical-alerts entitlement granted. No-op
-              // otherwise — degrades to standard notification.
-              ...(isSos ? { 'interruption-level': 'critical' as const } : {}),
-            },
-          },
-        },
+      const message = this.buildMessage(tokens, notification, data);
+      const res = await admin.messaging().sendEachForMulticast(message);
+
+      const invalidTokens: string[] = [];
+      res.responses.forEach((r, i) => {
+        const code = (r.error as any)?.errorInfo?.code || r.error?.message;
+        if (
+          code &&
+          /Unregistered|registration-token-not-registered|invalid-argument/i.test(String(code))
+        ) {
+          invalidTokens.push(tokens[i]);
+        }
       });
-      return { ok: true };
+      await this.cleanupInvalidTokens(invalidTokens);
+
+      if (res.successCount > 0) {
+        await this.writeLog({ userId, notification, data, status: 'SENT' });
+        return { ok: true };
+      }
+      await this.writeLog({ userId, notification, data, status: 'FAILED' });
+      return { ok: false, reason: 'all_failed' };
     } catch (err) {
       const code = (err as any)?.errorInfo?.code || (err as Error).message;
-      if (typeof code === 'string' && /Unregistered|registration-token-not-registered|invalid-argument/i.test(code)) {
-        await this.prisma.user.update({ where: { id: userId }, data: { fcmToken: null } }).catch(() => {});
-        return { ok: false, reason: 'token_invalid' };
-      }
       this.logger.warn(`FCM send failed user=${userId}: ${code}`);
+      await this.writeLog({ userId, notification, data, status: 'FAILED' });
       return { ok: false, reason: String(code) };
     }
   }
@@ -262,15 +448,12 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
   ): Promise<{ ok: boolean; reason?: string }> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, phone: true, fcmToken: true, notificationPrefs: true },
+      select: { id: true, phone: true },
     });
     if (!user) return { ok: false, reason: 'user_not_found' };
 
-    if (notification.category && !notification.critical) {
-      const prefs = (user.notificationPrefs as any) || {};
-      if (prefs[notification.category] === false) {
-        return { ok: false, reason: 'opted_out' };
-      }
+    if (await this.isOptedOut(userId, notification.category, notification.critical)) {
+      return { ok: false, reason: 'opted_out' };
     }
 
     if (!notification.critical && isInQuietHoursIST()) {
@@ -293,53 +476,62 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
   ): Promise<{ sent: number; failed: number; cleaned: number }> {
     if (!this.initialized) return { sent: 0, failed: 0, cleaned: 0 };
 
-    const where: Record<string, unknown> = { societyId, fcmToken: { not: null } };
+    const where: Record<string, unknown> = { societyId };
     if (role) where.role = role;
     const users = await this.prisma.user.findMany({
       where: where as any,
       select: { id: true, fcmToken: true, notificationPrefs: true },
     });
+    if (!users.length) return { sent: 0, failed: 0, cleaned: 0 };
 
-    const eligible = users.filter((u) => {
-      if (notification.critical) return true;
-      if (notification.category) {
-        const prefs = (u.notificationPrefs as any) || {};
-        if (prefs[notification.category] === false) return false;
+    // Batch eligibility (no per-user queries — avoids N+1 on a society broadcast).
+    const category = notification.category;
+    const bypass = notification.critical === true || !category || isForceOn(category);
+    const userIds = users.map((u) => u.id);
+
+    const prefByUser = new Map<string, boolean>();
+    if (!bypass && category) {
+      const prefRows = await this.prisma.notificationPreference.findMany({
+        where: { userId: { in: userIds }, category },
+        select: { userId: true, enabled: true },
+      });
+      for (const p of prefRows) prefByUser.set(p.userId, p.enabled);
+    }
+
+    const eligibleIds = new Set<string>();
+    for (const u of users) {
+      if (bypass) {
+        eligibleIds.add(u.id);
+        continue;
       }
-      return true;
-    });
+      const pref = prefByUser.get(u.id);
+      const optedOut =
+        pref !== undefined ? !pref : ((u.notificationPrefs as any) || {})[category!] === false;
+      if (!optedOut) eligibleIds.add(u.id);
+    }
+    if (!eligibleIds.size) return { sent: 0, failed: 0, cleaned: 0 };
 
-    const tokens = eligible.map((u) => u.fcmToken!).filter(Boolean);
+    // One query for all device tokens of eligible recipients (+ legacy fcmToken).
+    const devices = await this.prisma.device.findMany({
+      where: { userId: { in: [...eligibleIds] } },
+      select: { token: true },
+    });
+    const tokenSet = new Set<string>();
+    for (const d of devices) if (d.token) tokenSet.add(d.token);
+    for (const u of users) if (eligibleIds.has(u.id) && u.fcmToken) tokenSet.add(u.fcmToken);
+
+    const tokens = [...tokenSet];
     if (!tokens.length) return { sent: 0, failed: 0, cleaned: 0 };
 
     let sent = 0;
     let failed = 0;
     let cleaned = 0;
-    // Same SOS routing as sendNow — route to the `sos` channel on Android
-    // and bump iOS to interruption-level=critical when the alert is tagged.
-    const isSos = notification.critical || notification.category === 'sos' || data?.type === 'SOS_TRIGGERED';
-    const channelId = isSos ? 'sos' : 'default';
 
     const chunks = chunk(tokens, 500);
     for (const c of chunks) {
       try {
-        const res = await admin.messaging().sendEachForMulticast({
-          tokens: c,
-          notification: { title: notification.title, body: notification.body },
-          data,
-          android: {
-            priority: notification.critical ? 'high' : 'normal',
-            notification: { channelId },
-          },
-          apns: {
-            payload: {
-              aps: {
-                sound: notification.critical ? 'default' : undefined,
-                ...(isSos ? { 'interruption-level': 'critical' as const } : {}),
-              },
-            },
-          },
-        });
+        const message = this.buildMessage(c, notification, data);
+        const res = await admin.messaging().sendEachForMulticast(message);
         sent += res.successCount;
         failed += res.failureCount;
 
@@ -350,20 +542,14 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
             invalidTokens.push(c[i]);
           }
         });
-        if (invalidTokens.length) {
-          const result = await this.prisma.user
-            .updateMany({
-              where: { fcmToken: { in: invalidTokens } },
-              data: { fcmToken: null },
-            })
-            .catch(() => null);
-          cleaned += result?.count || 0;
-        }
+        cleaned += await this.cleanupInvalidTokens(invalidTokens);
       } catch (e) {
         this.logger.warn(`multicast chunk failed: ${(e as Error).message}`);
         failed += c.length;
       }
     }
+
+    await this.writeLog({ societyId, notification, data, status: 'SENT' });
     return { sent, failed, cleaned };
   }
 

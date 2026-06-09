@@ -329,6 +329,40 @@ export class VisitorService {
     });
   }
 
+  /**
+   * Resident decision on a pending visitor (from the actionable push).
+   *
+   * Idempotent & race-safe: the state transition is an atomic conditional update
+   * scoped to `approvalStatus = 'PENDING'`, so the FIRST decision wins. Duplicate
+   * taps, the same resident on multiple devices, two family members, or FCM
+   * at-least-once redelivery all collapse to a no-op that returns the decision
+   * that actually took effect (`applied: false`). No row-level race.
+   */
+  async decide(
+    visitorId: string,
+    societyId: string,
+    userId: string,
+    action: 'APPROVE' | 'REJECT',
+  ): Promise<{ decision: string; applied: boolean; visitor: unknown }> {
+    // Ownership + society scoping (only the owning resident may decide).
+    await this.findById(visitorId, societyId, userId);
+
+    const target = action === 'APPROVE' ? 'APPROVED' : 'REJECTED';
+
+    const res = await this.prisma.visitor.updateMany({
+      where: { id: visitorId, approvalStatus: 'PENDING' },
+      data: { approvalStatus: target, approvedById: userId, approvedAt: new Date() },
+    });
+
+    const visitor = await this.prisma.visitor.findUnique({
+      where: { id: visitorId },
+      include: { resident: { include: { user: true, flat: true } } },
+    });
+
+    // applied=false => a prior decision already won; we return that decision.
+    return { decision: visitor!.approvalStatus, applied: res.count > 0, visitor };
+  }
+
   async deny(visitorId: string, societyId: string, userId?: string) {
     const existing = await this.findById(visitorId, societyId, userId);
     if (existing.status === VisitorStatus.DENIED) {

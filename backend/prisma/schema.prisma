@@ -383,6 +383,27 @@ enum FeedbackTarget {
 
 // ─── Multi-tenant Root ────────────────────────────────────────────────────────
 
+// ─── Notification Delivery ──────────────────────────────────────────────────
+
+enum DevicePlatform {
+  ios
+  android
+  web
+}
+
+enum NotificationStatus {
+  QUEUED
+  SENT
+  FAILED
+  DEFERRED
+  SKIPPED
+}
+
+enum RecurringNotificationStatus {
+  ACTIVE
+  PAUSED
+}
+
 model Society {
   id        String   @id @default(uuid())
   name      String
@@ -393,55 +414,57 @@ model Society {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users               User[]
-  flats               Flat[]
-  staff               StaffMember[]
-  serviceRequests     ServiceRequest[]
-  complaints          Complaint[]
-  canteenMenus        CanteenMenu[]
-  events              Event[]
-  medicalStaff        MedicalStaff[]
-  notices             Notice[]
-  polls               Poll[]
-  sosAlerts           SosAlert[]
-  propertyListings    PropertyListing[]
-  holidays            Holiday[]
-  staffNotices        StaffNotice[]
-  staffMessages       StaffMessage[]
-  staffMessageGroups  StaffMessageGroup[]
-  trainingMaterials   TrainingMaterial[]
-  recognitions        Recognition[]
-  lostFoundItems      LostFoundItem[]
-  amenities           Amenity[]
-  parkingSlots        ParkingSlot[]
-  communityPosts      CommunityPost[]
-  agmMeetings         AgmMeeting[]
-  documentRequests    DocumentRequest[]
-  infrastructureItems InfrastructureItem[]
-  packages            Package[]
-  feedback            Feedback[]
-  emergencyContacts   EmergencyContact[]
-  securityRounds      SecurityRound[]
-  societyBudgets      SocietyBudget[]
-  conciergeRequests   ConciergeRequest[]
-  laundryBookings      LaundryBooking[]
-  securityIncidents    SecurityIncident[]
-  housekeepingRequests HousekeepingRequest[]
-  pestControlSchedules PestControlSchedule[]
-  canteenPreOrders     CanteenPreOrder[]
-  vendors              Vendor[]
-  vendorOrders         VendorOrder[]
-  showInDirectory      Boolean               @default(false)
-  archivedAt           DateTime?
-  status               SocietyStatus         @default(ACTIVE)
-  suspendedAt          DateTime?
-  suspendedReason      String?
-  suspendedById        String?
+  users                  User[]
+  flats                  Flat[]
+  staff                  StaffMember[]
+  serviceRequests        ServiceRequest[]
+  complaints             Complaint[]
+  canteenMenus           CanteenMenu[]
+  events                 Event[]
+  medicalStaff           MedicalStaff[]
+  notices                Notice[]
+  polls                  Poll[]
+  sosAlerts              SosAlert[]
+  propertyListings       PropertyListing[]
+  holidays               Holiday[]
+  staffNotices           StaffNotice[]
+  staffMessages          StaffMessage[]
+  staffMessageGroups     StaffMessageGroup[]
+  trainingMaterials      TrainingMaterial[]
+  recognitions           Recognition[]
+  lostFoundItems         LostFoundItem[]
+  amenities              Amenity[]
+  parkingSlots           ParkingSlot[]
+  communityPosts         CommunityPost[]
+  agmMeetings            AgmMeeting[]
+  documentRequests       DocumentRequest[]
+  infrastructureItems    InfrastructureItem[]
+  packages               Package[]
+  feedback               Feedback[]
+  emergencyContacts      EmergencyContact[]
+  securityRounds         SecurityRound[]
+  societyBudgets         SocietyBudget[]
+  conciergeRequests      ConciergeRequest[]
+  laundryBookings        LaundryBooking[]
+  securityIncidents      SecurityIncident[]
+  housekeepingRequests   HousekeepingRequest[]
+  pestControlSchedules   PestControlSchedule[]
+  canteenPreOrders       CanteenPreOrder[]
+  vendors                Vendor[]
+  vendorOrders           VendorOrder[]
+  notificationLogs       NotificationLog[]
+  recurringNotifications RecurringNotification[]
+  showInDirectory        Boolean                 @default(false)
+  archivedAt             DateTime?
+  status                 SocietyStatus           @default(ACTIVE)
+  suspendedAt            DateTime?
+  suspendedReason        String?
+  suspendedById          String?
   /// Stable opaque code shown in onboarding ("MZ-XXXX"). NULL until first set.
-  shortCode            String?               @unique
+  shortCode              String?                 @unique
   /// Optional Hindi-friendly contact fields surfaced in the SuperAdmin console.
-  contactEmail         String?
-  contactPhone         String?
+  contactEmail           String?
+  contactPhone           String?
 
   @@index([status])
   @@map("societies")
@@ -476,6 +499,11 @@ model User {
   sosAlerts   SosAlert[]
   consentLog  ConsentLog[]
 
+  devices                 Device[]
+  notificationPreferences NotificationPreference[]
+  notificationLogs        NotificationLog[]
+  recurringNotifications  RecurringNotification[]
+
   @@unique([phone, societyId])
   @@index([societyId])
   @@map("users")
@@ -500,52 +528,54 @@ model Resident {
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
-  user               User                @relation(fields: [userId], references: [id])
-  flat               Flat                @relation(fields: [flatId], references: [id])
-  visitors           Visitor[]
-  serviceRequests    ServiceRequest[]
-  complaints         Complaint[]
-  appointments       Appointment[]
-  maintenanceBills   MaintenanceBill[]
-  payments           Payment[]
-  travelPauses       TravelPause[]
-  propertyListings   PropertyListing[]
-  pollVotes          PollVote[]
-  eventRegistrations EventRegistration[]
-  showInDirectory    Boolean             @default(false)
-  walletBalance      Decimal             @default(0)
-  /** Optional: { name, phone } for resident emergency contact (BRD resident profile). */
-  emergencyContact   Json?
-  dateOfBirth        DateTime?
-  roleNote           String?
-  appActivatedAt     DateTime?
-  walletTxns         WalletTransaction[]
-  familyMembers      FamilyMember[]
-  healthVitals       HealthVital[]
-  medications        Medication[]
-  healthRecords      HealthRecord[]
-  domesticHelps      DomesticHelp[]
-  parkingSlot        ParkingSlot?        @relation(fields: [parkingSlotId], references: [id])
-  parkingSlotId      String?
-  vehicles           Vehicle[]
-  amenityBookings    AmenityBooking[]
-  communityPosts     CommunityPost[]
-  postComments       PostComment[]
-  documentRequests   DocumentRequest[]
-  subscriptions      Subscription[]
-  laundryRequests    LaundryRequest[]
-  packages           Package[]
-  conciergeRequests  ConciergeRequest[]
-  feedback           Feedback[]
-  dishRatings        DishRating[]
-  eventFeedback      EventFeedback[]
-  travelRequests     TravelRequest[]
-  propertyInterests  PropertyInterest[]
-  laundryBookings        LaundryBooking[]
-  postLikes              PostLike[]
-  housekeepingRequests   HousekeepingRequest[]
-  canteenPreOrders       CanteenPreOrder[]
-  vendorOrders           VendorOrder[]
+  user                 User                  @relation(fields: [userId], references: [id])
+  flat                 Flat                  @relation(fields: [flatId], references: [id])
+  visitors             Visitor[]
+  serviceRequests      ServiceRequest[]
+  complaints           Complaint[]
+  appointments         Appointment[]
+  maintenanceBills     MaintenanceBill[]
+  payments             Payment[]
+  travelPauses         TravelPause[]
+  propertyListings     PropertyListing[]
+  pollVotes            PollVote[]
+  eventRegistrations   EventRegistration[]
+  showInDirectory      Boolean               @default(false)
+  walletBalance        Decimal               @default(0)
+  /**
+   * Optional: { name, phone } for resident emergency contact (BRD resident profile).
+   */
+  emergencyContact     Json?
+  dateOfBirth          DateTime?
+  roleNote             String?
+  appActivatedAt       DateTime?
+  walletTxns           WalletTransaction[]
+  familyMembers        FamilyMember[]
+  healthVitals         HealthVital[]
+  medications          Medication[]
+  healthRecords        HealthRecord[]
+  domesticHelps        DomesticHelp[]
+  parkingSlot          ParkingSlot?          @relation(fields: [parkingSlotId], references: [id])
+  parkingSlotId        String?
+  vehicles             Vehicle[]
+  amenityBookings      AmenityBooking[]
+  communityPosts       CommunityPost[]
+  postComments         PostComment[]
+  documentRequests     DocumentRequest[]
+  subscriptions        Subscription[]
+  laundryRequests      LaundryRequest[]
+  packages             Package[]
+  conciergeRequests    ConciergeRequest[]
+  feedback             Feedback[]
+  dishRatings          DishRating[]
+  eventFeedback        EventFeedback[]
+  travelRequests       TravelRequest[]
+  propertyInterests    PropertyInterest[]
+  laundryBookings      LaundryBooking[]
+  postLikes            PostLike[]
+  housekeepingRequests HousekeepingRequest[]
+  canteenPreOrders     CanteenPreOrder[]
+  vendorOrders         VendorOrder[]
 
   @@index([flatId])
   @@map("residents")
@@ -622,13 +652,13 @@ model StaffDocument {
 }
 
 model StaffLoan {
-  id            String      @id @default(uuid())
+  id            String   @id @default(uuid())
   staffMemberId String
-  amount        Decimal     @db.Decimal(10, 2)
+  amount        Decimal  @db.Decimal(10, 2)
   reason        String?
-  status        String      @default("PENDING")
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  status        String   @default("PENDING")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   staffMember StaffMember @relation(fields: [staffMemberId], references: [id])
 
@@ -671,23 +701,23 @@ model Visitor {
 // ─── Service Requests ─────────────────────────────────────────────────────────
 
 model ServiceRequest {
-  id            String               @id @default(uuid())
-  societyId     String
-  residentId    String
-  assignedToIds String[]             @default([])
-  category      String
-  description   String
-  adminNote     String?
-  status        ServiceRequestStatus @default(PENDING)
-  slaDeadline   DateTime?
-  scheduledTime DateTime?
-  preferredTime String?
-  resolvedAt    DateTime?
-  confirmedAt   DateTime?
-  disputeReason String?
-  rating        Decimal?             @db.Decimal(3, 2)
-  ratingText    String?
-  ratedAt       DateTime?
+  id              String               @id @default(uuid())
+  societyId       String
+  residentId      String
+  assignedToIds   String[]             @default([])
+  category        String
+  description     String
+  adminNote       String?
+  status          ServiceRequestStatus @default(PENDING)
+  slaDeadline     DateTime?
+  scheduledTime   DateTime?
+  preferredTime   String?
+  resolvedAt      DateTime?
+  confirmedAt     DateTime?
+  disputeReason   String?
+  rating          Decimal?             @db.Decimal(3, 2)
+  ratingText      String?
+  ratedAt         DateTime?
   proofPhotos     Json?
   ratingNote      String?
   tags            String[]
@@ -702,10 +732,10 @@ model ServiceRequest {
   acceptedAt     DateTime?
   rejectedReason String?
 
-  society    Society        @relation(fields: [societyId], references: [id])
-  resident   Resident       @relation(fields: [residentId], references: [id])
-  photos     ServicePhoto[]
-  notes      TaskNote[]
+  society  Society        @relation(fields: [societyId], references: [id])
+  resident Resident       @relation(fields: [residentId], references: [id])
+  photos   ServicePhoto[]
+  notes    TaskNote[]
 
   @@index([societyId, status])
   @@index([residentId])
@@ -874,7 +904,9 @@ model SosAlert {
   id               String    @id @default(uuid())
   societyId        String
   residentId       String
-  /** Optional context (e.g. staff at a flat, resident situation). */
+  /**
+   * Optional context (e.g. staff at a flat, resident situation).
+   */
   note             String?
   lat              Float?
   lng              Float?
@@ -895,13 +927,13 @@ model SosAlert {
 // ─── Payments & Maintenance ───────────────────────────────────────────────────
 
 model MaintenanceBill {
-  id         String        @id @default(uuid())
-  flatId     String
-  residentId String
-  period     String
-  breakdown  Json
-  total      Decimal       @db.Decimal(10, 2)
-  dueDate    DateTime
+  id            String        @id @default(uuid())
+  flatId        String
+  residentId    String
+  period        String
+  breakdown     Json
+  total         Decimal       @db.Decimal(10, 2)
+  dueDate       DateTime
   status        PaymentStatus @default(PENDING)
   paymentMethod String?
   createdAt     DateTime      @default(now())
@@ -1380,7 +1412,7 @@ model Medication {
   isActive      Boolean  @default(true)
   createdAt     DateTime @default(now())
 
-  resident Resident       @relation(fields: [residentId], references: [id])
+  resident Resident         @relation(fields: [residentId], references: [id])
   doses    MedicationDose[]
 
   @@index([residentId])
@@ -1933,8 +1965,8 @@ model MedicationDose {
   id           String     @id @default(cuid())
   medicationId String
   medication   Medication @relation(fields: [medicationId], references: [id], onDelete: Cascade)
-  date         DateTime   // date this dose is scheduled for (date portion only)
-  slot         String     // morning | afternoon | evening | night
+  date         DateTime // date this dose is scheduled for (date portion only)
+  slot         String // morning | afternoon | evening | night
   taken        Boolean    @default(false)
   takenAt      DateTime?
   createdAt    DateTime   @default(now())
@@ -1967,7 +1999,7 @@ model HousekeepingRequest {
   resident    Resident @relation(fields: [residentId], references: [id])
   societyId   String
   society     Society  @relation(fields: [societyId], references: [id])
-  type        String   // DEEP_CLEAN | REGULAR | BATHROOM | KITCHEN | WINDOWS
+  type        String // DEEP_CLEAN | REGULAR | BATHROOM | KITCHEN | WINDOWS
   scheduledAt DateTime
   notes       String?
   status      String   @default("PENDING") // PENDING | CONFIRMED | IN_PROGRESS | COMPLETED | CANCELLED
@@ -1986,17 +2018,17 @@ model HousekeepingRequest {
 // ─── Pest Control Schedules ───────────────────────────────────────────────────
 
 model PestControlSchedule {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   societyId   String
-  society     Society  @relation(fields: [societyId], references: [id])
-  type        String   // MOSQUITO | COCKROACH | RODENT | TERMITE | GENERAL
+  society     Society   @relation(fields: [societyId], references: [id])
+  type        String // MOSQUITO | COCKROACH | RODENT | TERMITE | GENERAL
   scheduledAt DateTime
   areas       String[]
   notes       String?
-  status      String   @default("SCHEDULED") // SCHEDULED | COMPLETED | CANCELLED
+  status      String    @default("SCHEDULED") // SCHEDULED | COMPLETED | CANCELLED
   completedAt DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@index([societyId, scheduledAt])
   @@map("pest_control_schedules")
@@ -2010,7 +2042,7 @@ model CanteenPreOrder {
   resident    Resident @relation(fields: [residentId], references: [id])
   societyId   String
   society     Society  @relation(fields: [societyId], references: [id])
-  items       Json     // [{dishId, name, quantity, unitPrice}]
+  items       Json // [{dishId, name, quantity, unitPrice}]
   totalAmount Decimal  @db.Decimal(10, 2)
   pickupAt    DateTime
   status      String   @default("PENDING") // PENDING | CONFIRMED | READY | COLLECTED | CANCELLED
@@ -2030,7 +2062,7 @@ model Vendor {
   societyId String
   society   Society       @relation(fields: [societyId], references: [id])
   name      String
-  category  String        // GROCERY | PHARMACY | BAKERY | DAIRY | VEGETABLES | OTHER
+  category  String // GROCERY | PHARMACY | BAKERY | DAIRY | VEGETABLES | OTHER
   phone     String?
   logoUrl   String?
   isActive  Boolean       @default(true)
@@ -2045,23 +2077,110 @@ model Vendor {
 // ─── Vendor Orders ────────────────────────────────────────────────────────────
 
 model VendorOrder {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   vendorId    String
-  vendor      Vendor   @relation(fields: [vendorId], references: [id])
+  vendor      Vendor    @relation(fields: [vendorId], references: [id])
   residentId  String
-  resident    Resident @relation(fields: [residentId], references: [id])
+  resident    Resident  @relation(fields: [residentId], references: [id])
   societyId   String
-  society     Society  @relation(fields: [societyId], references: [id])
-  items       Json     // [{name, quantity, unitPrice}]
-  totalAmount Decimal  @db.Decimal(10, 2)
-  status      String   @default("PENDING") // PENDING | CONFIRMED | OUT_FOR_DELIVERY | DELIVERED | CANCELLED
+  society     Society   @relation(fields: [societyId], references: [id])
+  items       Json // [{name, quantity, unitPrice}]
+  totalAmount Decimal   @db.Decimal(10, 2)
+  status      String    @default("PENDING") // PENDING | CONFIRMED | OUT_FOR_DELIVERY | DELIVERED | CANCELLED
   notes       String?
   deliveryAt  DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@index([residentId])
   @@index([vendorId, status])
   @@index([societyId])
   @@map("vendor_orders")
+}
+
+// ─── Notification tables ──────────────────────────────────────────────────────
+
+/// One row per push-capable device. Replaces the single User.fcmToken so a user
+/// can be reached on multiple devices; rows are deleted on invalid-token errors.
+model Device {
+  id         String         @id @default(uuid())
+  userId     String
+  token      String         @unique
+  platform   DevicePlatform
+  appType    String? // 'resident' | 'staff' | 'admin'
+  lastSeenAt DateTime       @default(now())
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("devices")
+}
+
+/// Per-user, per-category mute state. Absence of a row = category default.
+/// Force-on categories (e.g. emergency_sos) are enforced server-side regardless.
+model NotificationPreference {
+  id        String   @id @default(uuid())
+  userId    String
+  category  String
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, category])
+  @@index([userId])
+  @@map("notification_preferences")
+}
+
+/// Audit trail of every notification attempt; dedupKey supports send-side
+/// idempotency (paired with a Redis SET NX guard).
+model NotificationLog {
+  id        String             @id @default(uuid())
+  userId    String?
+  societyId String?
+  category  String
+  type      String?
+  title     String
+  body      String
+  data      Json?
+  status    NotificationStatus @default(QUEUED)
+  dedupKey  String?
+  error     String?
+  createdAt DateTime           @default(now())
+  sentAt    DateTime?
+
+  user    User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  society Society? @relation(fields: [societyId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([societyId, category])
+  @@index([dedupKey])
+  @@map("notification_logs")
+}
+
+/// Admin/resident-configured recurring info notifications (e.g. milk vendor at
+/// 7am). Backed by a BullMQ repeatable job keyed by jobKey.
+model RecurringNotification {
+  id        String                      @id @default(uuid())
+  societyId String
+  userId    String? // null = society-wide; set = a specific resident
+  category  String                      @default("daily_help")
+  title     String
+  body      String
+  cron      String
+  timezone  String                      @default("Asia/Kolkata")
+  data      Json?
+  status    RecurringNotificationStatus @default(ACTIVE)
+  jobKey    String?                     @unique
+  createdAt DateTime                    @default(now())
+  updatedAt DateTime                    @updatedAt
+
+  society Society @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  user    User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([societyId])
+  @@map("recurring_notifications")
 }

@@ -50,6 +50,11 @@ creds.txt
 *creds*
 secrets.*
 
+# Firebase — service-account keys & client config (never commit)
+*firebase-adminsdk*.json
+**/google-services.json
+**/GoogleService-Info.plist
+
 # Terraform — state holds generated secrets in plaintext; tfvars holds tokens
 **/.terraform/
 *.tfstate
