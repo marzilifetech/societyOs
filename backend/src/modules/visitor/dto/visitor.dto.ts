@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsDateString, IsBoolean, IsArray } from 'class-validator';
+import { IsString, IsOptional, IsDateString, IsBoolean, IsArray, IsIn } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateVisitorDto {
@@ -62,4 +62,10 @@ export class CheckInVisitorDto {
   @ApiProperty()
   @IsString()
   qrToken: string;
+}
+
+export class VisitorDecisionDto {
+  @ApiProperty({ enum: ['APPROVE', 'REJECT'] })
+  @IsIn(['APPROVE', 'REJECT'])
+  action: 'APPROVE' | 'REJECT';
 }
