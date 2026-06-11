@@ -39,7 +39,10 @@ const QUICK_ACTIONS: QuickAction[] = [
   { icon: 'airplane', label: 'Travel', route: '/travel', bg: '#D9F2EA', tint: '#0F9D77' },
   { icon: 'home', label: 'Property', route: '/property', bg: '#FCE4EC', tint: '#C2185B' },
   { icon: 'help-circle', label: 'Staff Help', route: '/help-requests', bg: '#E5EDFB', tint: '#2563EB' },
-  { icon: 'qr-code', label: 'Scan QR', route: '/scan', bg: '#ECECEE', tint: '#1F2937' },
+  { icon: 'construct', label: 'Services', route: '/(tabs)/services', bg: '#FDE7D3', tint: '#EA6E1B' },
+  { icon: 'calendar', label: 'Events', route: '/(tabs)/events', bg: '#EDE7FB', tint: '#7C3AED' },
+  { icon: 'megaphone', label: 'Notices', route: '/(tabs)/notices', bg: '#D9F0F5', tint: '#0E8DA8' },
+  { icon: 'stats-chart', label: 'Polls', route: '/(tabs)/notices?tab=polls', bg: '#FBE7EF', tint: '#B0185C' },
 ];
 
 const SR_STATUS: Record<string, { label: string; tone: RdStatusTone }> = {

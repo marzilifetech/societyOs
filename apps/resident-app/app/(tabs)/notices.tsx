@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
@@ -104,7 +104,11 @@ function todayBirthdays(list: Birthday[]): Birthday[] {
 // ----------------------------------------------------------------------------
 export default function NoticesScreen() {
   const t = useTheme();
-  const [tab, setTab] = useState<Tab>('notices');
+  const { tab: tabParam } = useLocalSearchParams<{ tab?: string }>();
+  const [tab, setTab] = useState<Tab>(tabParam === 'polls' ? 'polls' : 'notices');
+  useEffect(() => {
+    if (tabParam === 'polls' || tabParam === 'notices') setTab(tabParam);
+  }, [tabParam]);
 
   const { data: notices, isLoading: noticesLoading } = useQuery({
     queryKey: ['notices'],
