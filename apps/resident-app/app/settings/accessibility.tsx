@@ -13,7 +13,7 @@ function PreviewCard({
   active,
   onPress,
 }: {
-  label: 'Standard' | 'Senior';
+  label: 'Standard' | 'Larger Fonts';
   tokens: typeof defaultTokens;
   active: boolean;
   onPress: () => void;
@@ -123,7 +123,7 @@ export default function AccessibilitySettingsScreen() {
             onPress={() => setSeniorMode(false)}
           />
           <PreviewCard
-            label="Senior"
+            label="Larger Fonts"
             tokens={seniorTokens}
             active={seniorMode}
             onPress={() => setSeniorMode(true)}
@@ -166,7 +166,7 @@ export default function AccessibilitySettingsScreen() {
             <TouchableOpacity
               onPress={() => setSeniorMode(true)}
               accessibilityRole="button"
-              accessibilityLabel="Use Senior mode"
+              accessibilityLabel="Use larger fonts"
               accessibilityState={{ selected: seniorMode }}
               className={`flex-1 rounded-xl p-3 border ${
                 seniorMode ? 'bg-primary-50 border-primary-500' : 'bg-white border-gray-200'
@@ -177,7 +177,7 @@ export default function AccessibilitySettingsScreen() {
                   seniorMode ? 'text-primary-500' : 'text-gray-400'
                 }`}
               >
-                Senior
+                Larger Fonts
               </Text>
               <Text className="text-3xl font-bold text-gray-900 mb-1">Aa</Text>
               <Text className="text-gray-800 text-lg" style={{ lineHeight: 27 }}>
@@ -232,7 +232,7 @@ export default function AccessibilitySettingsScreen() {
             <View className="flex-1">
               <Text className="text-gray-900 text-base font-semibold mb-1">Tip: Mix and match</Text>
               <Text className="text-gray-500 text-sm leading-5">
-                Senior Mode works alongside your phone's built-in accessibility features. Use both together for the best experience.
+                Larger Fonts works alongside your phone's built-in accessibility features. Use both together for the best experience.
               </Text>
             </View>
           </View>

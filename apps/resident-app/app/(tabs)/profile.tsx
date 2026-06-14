@@ -68,7 +68,7 @@ export default function ProfileScreen() {
             <Text className="font-bold text-gray-900" style={{ fontSize: t.font2xl }}>Profile</Text>
             {seniorMode && (
               <View className="bg-primary-50 border border-primary-500 rounded-full px-3 py-1">
-                <Text className="text-primary-500 font-semibold" style={{ fontSize: t.fontXs }}>Senior Mode</Text>
+                <Text className="text-primary-500 font-semibold" style={{ fontSize: t.fontXs }}>Larger Fonts</Text>
               </View>
             )}
           </View>
@@ -140,7 +140,7 @@ export default function ProfileScreen() {
                 <Ionicons name="eye-outline" size={t.iconSm} color="#821A52" />
               </View>
               <View className="flex-1 mr-3">
-                <Text style={{ fontSize: t.fontBase }} className="text-gray-900 font-semibold">Senior Mode</Text>
+                <Text style={{ fontSize: t.fontBase }} className="text-gray-900 font-semibold">Larger Fonts</Text>
                 <Text style={{ fontSize: t.fontSm, lineHeight: t.fontSm * t.lineHeightBase }} className="text-gray-500 mt-0.5">
                   Larger text, bigger buttons, higher contrast
                 </Text>

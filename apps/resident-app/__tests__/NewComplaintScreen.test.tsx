@@ -86,30 +86,45 @@ describe('NewComplaintScreen (2026 redesign)', () => {
     expect(getByLabelText('Select Other category')).toBeTruthy();
   });
 
-  it('keeps the submit button disabled until required fields are filled', () => {
+  it('keeps the submit button disabled until a category is selected', () => {
     const { getByLabelText } = render(<NewComplaintScreen />);
     const submit = getByLabelText('Submit complaint');
     fireEvent.press(submit);
     expect(mockApiPost).not.toHaveBeenCalled();
   });
 
-  it('enables submit and calls api.post with correct shape when form is valid', async () => {
-    const { getByLabelText, getByPlaceholderText } = render(<NewComplaintScreen />);
+  it('enables submit once a category is selected (description is optional)', async () => {
+    const { getByLabelText } = render(<NewComplaintScreen />);
 
-    // Select a category
+    // Select a category — no description needed
     fireEvent.press(getByLabelText('Select Noise category'));
 
-    // Fill description (min 20 chars)
-    const descInput = getByPlaceholderText('Describe the issue in detail...');
-    fireEvent.changeText(descInput, 'Loud music from Flat 3C after midnight every day');
-
-    // Submit
+    // Submit without filling description
     const submit = getByLabelText('Submit complaint');
     fireEvent.press(submit);
 
     await waitFor(() => {
       expect(mockApiPost).toHaveBeenCalledWith('/complaints', expect.objectContaining({
-        category: 'Noise',
+        category: 'NOISE',
+        isAnonymous: false,
+      }));
+    });
+  });
+
+  it('sends enum value and user description when both are provided', async () => {
+    const { getByLabelText, getByPlaceholderText } = render(<NewComplaintScreen />);
+
+    fireEvent.press(getByLabelText('Select Noise category'));
+
+    const descInput = getByPlaceholderText('Describe the issue in detail...');
+    fireEvent.changeText(descInput, 'Loud music from Flat 3C after midnight every day');
+
+    const submit = getByLabelText('Submit complaint');
+    fireEvent.press(submit);
+
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledWith('/complaints', expect.objectContaining({
+        category: 'NOISE',
         description: 'Loud music from Flat 3C after midnight every day',
         isAnonymous: false,
       }));
