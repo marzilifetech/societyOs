@@ -41,6 +41,9 @@ const CATEGORY_COLORS: Record<EventCategory, string> = {
   EDUCATIONAL: 'bg-blue-100 text-blue-700',
   SOCIAL: 'bg-amber-100 text-amber-700',
   RELIGIOUS: 'bg-red-100 text-red-700',
+  MEETING: 'bg-indigo-100 text-indigo-700',
+  WORKSHOP: 'bg-teal-100 text-teal-700',
+  FESTIVAL: 'bg-pink-100 text-pink-700',
   OTHER: 'bg-gray-100 text-gray-600',
 };
 
@@ -162,7 +165,7 @@ export default function EventsPage() {
     !form.venue.trim();
   const isSubmitting = createMutation.isPending || updateMutation.isPending;
 
-  const CATEGORIES: EventCategory[] = ['SPORTS', 'CULTURAL', 'EDUCATIONAL', 'SOCIAL', 'RELIGIOUS', 'OTHER'];
+  const CATEGORIES: EventCategory[] = ['SPORTS', 'CULTURAL', 'EDUCATIONAL', 'SOCIAL', 'RELIGIOUS', 'MEETING', 'WORKSHOP', 'FESTIVAL', 'OTHER'];
 
   return (
     <div className="p-6 lg:p-8">

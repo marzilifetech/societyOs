@@ -167,7 +167,7 @@ export interface Notice {
 }
 
 // Event
-export type EventCategory = 'SPORTS' | 'CULTURAL' | 'EDUCATIONAL' | 'SOCIAL' | 'RELIGIOUS' | 'OTHER';
+export type EventCategory = 'SPORTS' | 'CULTURAL' | 'EDUCATIONAL' | 'SOCIAL' | 'RELIGIOUS' | 'MEETING' | 'WORKSHOP' | 'FESTIVAL' | 'OTHER';
 
 export interface Society_Event {
   id: string;
