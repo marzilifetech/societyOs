@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Patch, Delete, Body, Param, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { EventService } from './event.service';
-import { CreateEventDto } from './dto/event.dto';
+import { CreateEventDto, UpdateEventDto } from './dto/event.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
@@ -58,6 +58,18 @@ export class EventController {
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   cancel(@Param('id') id: string) {
     return this.eventService.cancelEvent(id);
+  }
+
+  @Patch('admin/:id')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  update(@Param('id') id: string, @Body() dto: UpdateEventDto) {
+    return this.eventService.update(id, dto);
+  }
+
+  @Delete('admin/:id')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  remove(@Param('id') id: string) {
+    return this.eventService.remove(id);
   }
 
   @Post(':id/feedback')

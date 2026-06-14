@@ -14,9 +14,8 @@ interface EventForm {
   description: string;
   category: EventCategory;
   startAt: string;
-  endAt: string;
   venue: string;
-  maxAttendees: string;
+  capacity: string;
 }
 
 const EMPTY_FORM: EventForm = {
@@ -24,9 +23,8 @@ const EMPTY_FORM: EventForm = {
   description: '',
   category: 'OTHER' as EventCategory,
   startAt: '',
-  endAt: '',
   venue: '',
-  maxAttendees: '',
+  capacity: '',
 };
 
 function toLocalInputValue(iso: string | null | undefined): string {
@@ -40,9 +38,9 @@ function toLocalInputValue(iso: string | null | undefined): string {
 const CATEGORY_COLORS: Record<EventCategory, string> = {
   SPORTS: 'bg-green-100 text-green-700',
   CULTURAL: 'bg-purple-100 text-purple-700',
-  MEETING: 'bg-blue-100 text-blue-700',
-  WORKSHOP: 'bg-amber-100 text-amber-700',
-  FESTIVAL: 'bg-red-100 text-red-700',
+  EDUCATIONAL: 'bg-blue-100 text-blue-700',
+  SOCIAL: 'bg-amber-100 text-amber-700',
+  RELIGIOUS: 'bg-red-100 text-red-700',
   OTHER: 'bg-gray-100 text-gray-600',
 };
 
@@ -77,17 +75,13 @@ export default function EventsPage() {
     title: form.title.trim(),
     description: form.description.trim(),
     category: form.category,
-    startAt: form.startAt,
-    endAt: form.endAt,
+    date: form.startAt ? new Date(form.startAt).toISOString() : '',
     venue: form.venue.trim(),
+    capacity: form.capacity ? Number(form.capacity) : undefined,
   });
 
   const createMutation = useMutation({
-    mutationFn: () =>
-      api.post('/events', {
-        ...trimmedPayload(),
-        maxAttendees: form.maxAttendees ? Number(form.maxAttendees) : undefined,
-      }),
+    mutationFn: () => api.post('/events', trimmedPayload()),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin-events'] });
       resetForm();
@@ -97,11 +91,7 @@ export default function EventsPage() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: () =>
-      api.patch(`/admin/events/${editingId}`, {
-        ...trimmedPayload(),
-        maxAttendees: form.maxAttendees ? Number(form.maxAttendees) : null,
-      }),
+    mutationFn: () => api.patch(`/events/admin/${editingId}`, trimmedPayload()),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin-events'] });
       resetForm();
@@ -124,7 +114,7 @@ export default function EventsPage() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.delete(`/admin/events/${id}`),
+    mutationFn: (id: string) => api.delete(`/events/admin/${id}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin-events'] });
       setConfirmDeleteId(null);
@@ -153,10 +143,9 @@ export default function EventsPage() {
       title: event.title ?? '',
       description: event.description ?? '',
       category: (event.category ?? 'OTHER') as EventCategory,
-      startAt: toLocalInputValue(event.startAt),
-      endAt: toLocalInputValue(event.endAt),
+      startAt: toLocalInputValue(event.date),
       venue: event.venue ?? '',
-      maxAttendees: event.maxAttendees != null ? String(event.maxAttendees) : '',
+      capacity: event.capacity != null ? String(event.capacity) : '',
     });
     setShowForm(true);
   };
@@ -170,12 +159,10 @@ export default function EventsPage() {
     !form.title.trim() ||
     !form.description.trim() ||
     !form.startAt ||
-    !form.endAt ||
-    !form.venue.trim() ||
-    new Date(form.endAt).getTime() <= new Date(form.startAt).getTime();
+    !form.venue.trim();
   const isSubmitting = createMutation.isPending || updateMutation.isPending;
 
-  const CATEGORIES: EventCategory[] = ['SPORTS', 'CULTURAL', 'MEETING', 'WORKSHOP', 'FESTIVAL', 'OTHER'];
+  const CATEGORIES: EventCategory[] = ['SPORTS', 'CULTURAL', 'EDUCATIONAL', 'SOCIAL', 'RELIGIOUS', 'OTHER'];
 
   return (
     <div className="p-6 lg:p-8">
@@ -220,32 +207,21 @@ export default function EventsPage() {
                 onChange={(e) => setForm((f) => ({ ...f, venue: e.target.value }))}
               />
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs text-gray-500 mb-1 block">Start date & time *</label>
-                <input
-                  type="datetime-local"
-                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none"
-                  value={form.startAt}
-                  onChange={(e) => setForm((f) => ({ ...f, startAt: e.target.value }))}
-                />
-              </div>
-              <div>
-                <label className="text-xs text-gray-500 mb-1 block">End date & time *</label>
-                <input
-                  type="datetime-local"
-                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none"
-                  value={form.endAt}
-                  onChange={(e) => setForm((f) => ({ ...f, endAt: e.target.value }))}
-                />
-              </div>
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">Date & time *</label>
+              <input
+                type="datetime-local"
+                className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none"
+                value={form.startAt}
+                onChange={(e) => setForm((f) => ({ ...f, startAt: e.target.value }))}
+              />
             </div>
             <input
               type="number"
               className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-primary-400"
-              placeholder="Max attendees (optional)"
-              value={form.maxAttendees}
-              onChange={(e) => setForm((f) => ({ ...f, maxAttendees: e.target.value }))}
+              placeholder="Capacity (optional)"
+              value={form.capacity}
+              onChange={(e) => setForm((f) => ({ ...f, capacity: e.target.value }))}
             />
             <div className="flex items-center gap-3">
               <button
@@ -255,9 +231,6 @@ export default function EventsPage() {
               >
                 {isSubmitting ? (editingId ? 'Saving…' : 'Creating…') : editingId ? 'Save Changes' : 'Create Event'}
               </button>
-              {form.startAt && form.endAt && new Date(form.endAt).getTime() <= new Date(form.startAt).getTime() && (
-                <p className="text-xs text-red-600">End must be after start.</p>
-              )}
             </div>
           </div>
         </div>
@@ -283,11 +256,11 @@ export default function EventsPage() {
         ) : (
           events.map((event) => {
             const catColor = CATEGORY_COLORS[event.category] ?? 'bg-gray-100 text-gray-600';
-            const isFull = event.maxAttendees != null && event.registeredCount >= event.maxAttendees;
-            const capacityPct = event.maxAttendees
-              ? Math.min(100, Math.round((event.registeredCount / event.maxAttendees) * 100))
+            const isFull = event.capacity != null && event.registrationCount >= event.capacity;
+            const capacityPct = event.capacity
+              ? Math.min(100, Math.round((event.registrationCount / event.capacity) * 100))
               : null;
-            const isPast = new Date(event.endAt) < new Date();
+            const isPast = new Date(event.date) < new Date();
             const eventStatus: string = (event as any).status ?? (isPast ? 'COMPLETED' : 'PUBLISHED');
             const isPublished = eventStatus === 'PUBLISHED';
 
@@ -318,7 +291,7 @@ export default function EventsPage() {
                       className="text-xs text-primary-600 border border-primary-200 px-3 py-1.5 rounded-lg hover:bg-primary-50 transition-colors inline-flex items-center gap-1.5"
                     >
                       <Users className="w-4 h-4" />
-                      {event.registeredCount} attending
+                      {event.registrationCount} attending
                     </a>
                     <button
                       className="text-xs text-gray-700 hover:text-gray-900 border border-gray-200 hover:border-gray-300 px-3 py-1.5 rounded-lg transition-colors"
@@ -326,12 +299,12 @@ export default function EventsPage() {
                     >
                       Edit
                     </button>
-                    {event.registeredCount > 0 && (
+                    {event.registrationCount > 0 && (
                       <button
                         className="text-xs text-primary-600 hover:text-primary-700 border border-primary-200 hover:border-primary-300 px-3 py-1.5 rounded-lg transition-colors"
                         onClick={() => {
                           setNotifyEventId(event.id);
-                          setNotifyMsg(`Reminder: ${event.title} is happening on ${new Date(event.startAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}`);
+                          setNotifyMsg(`Reminder: ${event.title} is happening on ${new Date(event.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}`);
                         }}
                       >
                         Notify
@@ -355,26 +328,22 @@ export default function EventsPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-4 text-xs text-gray-500 mb-3">
+                <div className="grid grid-cols-2 gap-4 text-xs text-gray-500 mb-3">
                   <div>
                     <span className="text-gray-400 block">Venue</span>
                     {event.venue}
                   </div>
                   <div>
-                    <span className="text-gray-400 block">Start</span>
-                    {new Date(event.startAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                  </div>
-                  <div>
-                    <span className="text-gray-400 block">End</span>
-                    {new Date(event.endAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                    <span className="text-gray-400 block">Date</span>
+                    {new Date(event.date).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
                   </div>
                 </div>
 
-                {event.maxAttendees != null && capacityPct !== null && (
+                {event.capacity != null && capacityPct !== null && (
                   <div>
                     <div className="flex justify-between text-xs text-gray-500 mb-1">
-                      <span>{event.registeredCount} registered</span>
-                      <span>{event.maxAttendees} capacity</span>
+                      <span>{event.registrationCount} registered</span>
+                      <span>{event.capacity} capacity</span>
                     </div>
                     <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
                       <div
