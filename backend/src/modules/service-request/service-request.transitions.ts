@@ -22,4 +22,6 @@ export const SERVICE_REQUEST_TRANSITIONS: Record<ServiceRequestStatus, ServiceRe
   [ServiceRequestStatus.COMPLETED]: [ServiceRequestStatus.CLOSED, ServiceRequestStatus.IN_PROGRESS],
   [ServiceRequestStatus.REJECTED]: [ServiceRequestStatus.PENDING],
   [ServiceRequestStatus.CLOSED]: [],
+  // Resident-initiated cancellation is terminal (set directly, bypasses this map).
+  [ServiceRequestStatus.CANCELLED]: [],
 };

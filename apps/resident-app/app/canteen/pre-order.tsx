@@ -1,19 +1,36 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
-  View, Text, TouchableOpacity, ScrollView, TextInput,
-  Alert, ActivityIndicator, RefreshControl,
+  View,
+  Text,
+  TouchableOpacity,
+  ScrollView,
+  TextInput,
+  Alert,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
+
 import { api } from '../../src/lib/api';
 import { STATUS_CONFIG } from '../../src/lib/canteenConfig';
 import { useCanteenMenu } from '../../src/hooks/useCanteenMenu';
-import { StatusBadge } from '../../src/components/common/StatusBadge';
 import { DateField } from '../../src/components/common/DateField';
+import { useTheme } from '../../src/hooks/useTheme';
+import {
+  ScreenHeader,
+  Display,
+  RoundCard,
+  PillButton,
+  SegmentedTabs,
+  StatusPill,
+  IconCircle,
+  rd,
+} from '../../src/components/ui';
 
-// ── Types ──────────────────────────────────────────────────────────────────────
+// ── Types (unchanged from original) ──────────────────────────────────────────
 
 type Dish = {
   id: string;
@@ -32,7 +49,6 @@ type Menu = {
 };
 
 type CartItem = { dishId: string; quantity: number; name: string; price: number };
-
 type PreOrderItem = { dishId: string; quantity: number };
 
 type PreOrder = {
@@ -68,10 +84,31 @@ function formatPickupTime(iso: string) {
   }
 }
 
-// ── Main Screen ────────────────────────────────────────────────────────────────
+// ── Order status pill tone ────────────────────────────────────────────────────
+
+type RdTone = 'active' | 'resolved' | 'cancelled' | 'pending' | 'neutral';
+
+function orderStatusTone(status: PreOrder['status']): RdTone {
+  switch (status) {
+    case 'PENDING': return 'pending';
+    case 'CONFIRMED': return 'active';
+    case 'READY': return 'resolved';
+    case 'COLLECTED': return 'resolved';
+    case 'CANCELLED': return 'cancelled';
+    default: return 'neutral';
+  }
+}
+
+function orderStatusLabel(status: PreOrder['status']): string {
+  return STATUS_CONFIG[status]?.label ?? status;
+}
+
+// ── Main screen ───────────────────────────────────────────────────────────────
 
 export default function PreOrderScreen() {
+  const t = useTheme();
   const qc = useQueryClient();
+  const { dishId: preselectedDishId } = useLocalSearchParams<{ dishId?: string }>();
   const [tab, setTab] = useState<'new' | 'orders'>('new');
   const [step, setStep] = useState<1 | 2>(1);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -85,6 +122,17 @@ export default function PreOrderScreen() {
   } = useCanteenMenu(tab === 'orders');
 
   const dishes = menus ? allDishesFromMenus(menus) : [];
+
+  // Pre-add the dish passed via params (from dish detail screen)
+  useEffect(() => {
+    if (!preselectedDishId || dishes.length === 0) return;
+    const dish = dishes.find((d) => d.id === preselectedDishId);
+    if (!dish) return;
+    setCart((prev) => {
+      if (prev.some((c) => c.dishId === dish.id)) return prev;
+      return [...prev, { dishId: dish.id, quantity: 1, name: dish.name, price: dish.price }];
+    });
+  }, [preselectedDishId, dishes.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const getQty = (dishId: string) => cart.find((c) => c.dishId === dishId)?.quantity ?? 0;
 
@@ -125,43 +173,20 @@ export default function PreOrderScreen() {
     setRefreshing(false);
   };
 
+  const tabOptions = [
+    { key: 'new' as const, label: 'New Order' },
+    { key: 'orders' as const, label: 'My Orders' },
+  ];
+
   return (
-    <SafeAreaView className="flex-1 bg-white">
-      {/* Header */}
-      <View className="px-6 pt-4 pb-3 flex-row items-center gap-3">
-        <TouchableOpacity
-          onPress={() => router.back()}
-          className="w-10 h-10 items-center justify-center"
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <Ionicons name="chevron-back" size={24} color="#821A52" />
-        </TouchableOpacity>
-        <View>
-          <Text className="text-2xl font-bold text-gray-900">Pre-Order</Text>
-          <Text className="text-sm text-gray-500">Order ahead for pickup</Text>
-        </View>
-      </View>
+    <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+      <ScreenHeader title="Pre-Order" />
 
       {/* Tabs */}
-      <View className="flex-row mx-6 mb-4 bg-gray-100 rounded-2xl p-1">
-        {(['new', 'orders'] as const).map((tabKey) => {
-          const isActive = tab === tabKey;
-          return (
-            <TouchableOpacity
-              key={tabKey}
-              onPress={() => setTab(tabKey)}
-              className={`flex-1 rounded-xl items-center justify-center min-h-[40px] ${isActive ? 'bg-white' : ''}`}
-              style={isActive ? { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2, elevation: 1 } : undefined}
-              accessibilityRole="button"
-              accessibilityLabel={tabKey === 'new' ? 'New Order tab' : 'My Orders tab'}
-            >
-              <Text className={`font-semibold text-sm ${isActive ? 'text-primary-500' : 'text-gray-500'}`}>
-                {tabKey === 'new' ? 'New Order' : 'My Orders'}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
+      <View style={{ paddingHorizontal: t.screenPadding, paddingTop: 4, paddingBottom: 14 }}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -t.screenPadding, paddingHorizontal: t.screenPadding }}>
+          <SegmentedTabs options={tabOptions} value={tab} onChange={setTab} />
+        </ScrollView>
       </View>
 
       {tab === 'new' ? (
@@ -197,7 +222,7 @@ export default function PreOrderScreen() {
           refetch={refetchOrders}
         />
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -232,210 +257,283 @@ function NewOrderView({
   onRefresh: () => void;
   refetchMenus: () => void;
 }) {
+  const t = useTheme();
   const canContinue = cartItemCount > 0;
   const canSubmit = pickupAt.trim().length > 0 && !submitting;
 
+  // Step 2: Review + schedule
   if (step === 2) {
     return (
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 40 }}
+        contentContainerStyle={{ paddingHorizontal: t.screenPadding, paddingBottom: 40 }}
       >
-        <Text className="text-lg font-semibold text-gray-900 mb-3">Your Order</Text>
-        {cart.map((item) => (
-          <View key={item.dishId} className="flex-row justify-between py-2 border-b border-gray-200">
-            <Text className="text-base text-gray-700 flex-1">{item.name} × {item.quantity}</Text>
-            <Text className="text-base font-bold text-primary-500">₹{item.price * item.quantity}</Text>
+        <Display size="sm" style={{ marginBottom: 14 }}>Your Order</Display>
+
+        <RoundCard tone="white" padding={t.cardPaddingLg} style={{ marginBottom: 20 }}>
+          {cart.map((item, idx) => (
+            <View
+              key={item.dishId}
+              style={{
+                flexDirection: 'row',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                paddingVertical: 10,
+                borderTopWidth: idx === 0 ? 0 : 1,
+                borderTopColor: rd.cardBorder,
+              }}
+            >
+              <Text style={{ flex: 1, fontSize: t.fontBase, color: t.textPrimary, marginRight: 8 }}>
+                {item.name} × {item.quantity}
+              </Text>
+              <Text style={{ fontSize: t.fontBase, fontWeight: '700', color: t.textPrimary }}>
+                ₹{item.price * item.quantity}
+              </Text>
+            </View>
+          ))}
+
+          <View
+            style={{
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginTop: 12,
+              paddingTop: 12,
+              borderTopWidth: 1,
+              borderTopColor: rd.cardBorder,
+            }}
+          >
+            <Text style={{ fontSize: t.fontBase, fontWeight: '700', color: t.textPrimary }}>Total</Text>
+            <Text style={{ fontSize: t.fontLg, fontWeight: '700', color: t.textPrimary }}>₹{cartTotal}</Text>
           </View>
-        ))}
-        <View className="flex-row justify-between mt-3 mb-6">
-          <Text className="text-base font-bold text-gray-900">Total</Text>
-          <Text className="text-base font-bold text-primary-500">₹{cartTotal}</Text>
-        </View>
+        </RoundCard>
 
         {/* Pickup time */}
-        <View className="flex-row items-center gap-1.5 mb-1.5">
-          <Ionicons name="time" size={16} color="#374151" />
-          <Text className="font-semibold text-sm text-gray-900">Pickup Time *</Text>
-        </View>
-        <View className="mb-5">
+        <Text style={{ fontSize: t.fontBase, fontWeight: '700', color: t.textPrimary, marginBottom: 8 }}>
+          Pickup Time <Text style={{ color: rd.crimson }}>*</Text>
+        </Text>
+        <View style={{ marginBottom: 20 }}>
           <DateField value={pickupAt} onChange={setPickupAt} mode="datetime" minimumDate={new Date()} placeholder="Pick pickup time" />
         </View>
 
         {/* Notes */}
-        <View className="flex-row items-center gap-1.5 mb-1.5">
-          <Ionicons name="create-outline" size={16} color="#374151" />
-          <Text className="font-semibold text-sm text-gray-900">Notes (Optional)</Text>
-        </View>
+        <Text style={{ fontSize: t.fontBase, fontWeight: '700', color: t.textPrimary, marginBottom: 8 }}>
+          Notes <Text style={{ fontSize: t.fontSm, fontWeight: '400', color: t.textMuted }}>(optional)</Text>
+        </Text>
         <TextInput
-          className="bg-gray-100 rounded-2xl px-4 py-3 text-base text-gray-900 mb-7"
-          style={{ minHeight: 100, textAlignVertical: 'top' }}
-          placeholder="Any special requests or allergies..."
-          placeholderTextColor="#9CA3AF"
           value={notes}
           onChangeText={setNotes}
+          placeholder="Any special requests or allergies..."
+          placeholderTextColor={t.textMuted}
           multiline
+          textAlignVertical="top"
+          maxLength={500}
+          style={{
+            minHeight: 100,
+            borderRadius: rd.radiusInput,
+            borderWidth: 1,
+            borderColor: rd.cardBorder,
+            backgroundColor: '#FFFFFF',
+            paddingHorizontal: 16,
+            paddingVertical: 14,
+            fontSize: t.fontBase,
+            color: t.textPrimary,
+            marginBottom: 28,
+          }}
         />
 
-        <View className="flex-row gap-3">
-          <TouchableOpacity
-            onPress={onBack}
-            className="flex-1 border border-gray-200 bg-gray-50 rounded-2xl items-center justify-center"
-            style={{ minHeight: 48 }}
-            accessibilityRole="button"
-            accessibilityLabel="Back to menu"
-          >
-            <Text className="text-gray-700 font-semibold text-base">Back</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={onSubmit}
-            disabled={!canSubmit}
-            className={`rounded-2xl items-center justify-center ${canSubmit ? 'bg-primary-500' : 'bg-gray-200'}`}
-            style={{ flex: 2, minHeight: 48 }}
-            accessibilityRole="button"
-            accessibilityLabel="Place pre-order"
-          >
-            {submitting ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text className={`font-semibold text-base ${canSubmit ? 'text-white' : 'text-gray-400'}`}>
-                Place Order
-              </Text>
-            )}
-          </TouchableOpacity>
+        <View style={{ gap: 10 }}>
+          <PillButton label="Place Order" tone="dark" onPress={onSubmit} disabled={!canSubmit} loading={submitting} />
+          <PillButton label="Back to Menu" tone="ghost" onPress={onBack} />
         </View>
       </ScrollView>
     );
   }
 
-  // Step 1 — Menu
+  // Step 1: Menu
+  if (menusLoading) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator color={t.accentPrimary} size="large" />
+      </View>
+    );
+  }
+
+  if (menusError) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40 }}>
+        <IconCircle icon="alert-circle-outline" size={64} bg={rd.crimsonSoft} color={rd.crimson} style={{ marginBottom: 16 }} />
+        <Display size="sm" align="center">Failed to load menu</Display>
+        <Text style={{ color: t.textMuted, fontSize: t.fontSm, marginTop: 8, marginBottom: 20, textAlign: 'center' }}>
+          Check your connection and try again.
+        </Text>
+        <PillButton label="Retry" tone="dark" fullWidth={false} onPress={() => refetchMenus()} style={{ paddingHorizontal: 32 }} />
+      </View>
+    );
+  }
+
+  if (dishes.length === 0) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40 }}>
+        <IconCircle icon="restaurant-outline" size={72} bg={rd.inkSoft} color="rgba(0,0,0,0.3)" style={{ marginBottom: 16 }} />
+        <Display size="sm" align="center">No dishes available</Display>
+        <Text style={{ color: t.textMuted, fontSize: t.fontSm, marginTop: 8, textAlign: 'center' }}>
+          The canteen menu hasn't been set up yet.
+        </Text>
+      </View>
+    );
+  }
+
   return (
-    <ScrollView
-      showsVerticalScrollIndicator={false}
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#821A52" />
-      }
-      contentContainerStyle={{ paddingBottom: 120 }}
-    >
-      {menusLoading ? (
-        <View className="items-center justify-center py-20">
-          <ActivityIndicator color="#821A52" size="large" />
-        </View>
-      ) : menusError ? (
-        <View className="items-center py-20 px-8">
-          <View className="w-16 h-16 rounded-full bg-red-50 items-center justify-center mb-3">
-            <Ionicons name="alert-circle" size={32} color="#DC2626" />
-          </View>
-          <Text className="text-lg font-semibold text-gray-900 mb-2">Failed to load menu</Text>
-          <TouchableOpacity
-            onPress={() => refetchMenus()}
-            className="bg-primary-500 rounded-2xl px-6 py-3 mt-2"
-            accessibilityRole="button"
-            accessibilityLabel="Retry loading menu"
-          >
-            <Text className="text-white font-semibold text-base">Retry</Text>
-          </TouchableOpacity>
-        </View>
-      ) : dishes.length === 0 ? (
-        <View className="items-center py-20 px-8">
-          <View className="w-20 h-20 rounded-full bg-primary-50 items-center justify-center mb-4">
-            <Ionicons name="restaurant-outline" size={40} color="#821A52" />
-          </View>
-          <Text className="text-lg font-semibold text-gray-900 mb-1">No dishes available</Text>
-          <Text className="text-sm text-gray-500 text-center">The canteen menu hasn't been set up yet.</Text>
-        </View>
-      ) : (
-        <View className="px-6 gap-3">
+    <>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={t.accentPrimary} />
+        }
+        contentContainerStyle={{ paddingHorizontal: t.screenPadding, paddingBottom: cartItemCount > 0 ? 140 : 40 }}
+      >
+        <View style={{ gap: 10 }}>
           {dishes.map((dish) => {
             const qty = getQty(dish.id);
             return (
-              <View
-                key={dish.id}
-                className="bg-gray-50 border border-gray-200 rounded-2xl p-4 flex-row items-center"
-              >
-                <View
-                  className={`w-6 h-6 rounded items-center justify-center mr-3 ${dish.isVeg ? 'bg-green-100' : 'bg-red-100'}`}
-                >
-                  <Ionicons
-                    name={dish.isVeg ? 'leaf' : 'flame'}
-                    size={14}
-                    color={dish.isVeg ? '#16A34A' : '#DC2626'}
-                  />
-                </View>
-                <View className="flex-1 mr-3">
-                  <Text className="text-base font-semibold text-gray-900">{dish.name}</Text>
-                  {dish.category ? (
-                    <Text className="text-xs text-gray-400 mt-0.5">{dish.category}</Text>
-                  ) : null}
-                  <Text className="text-sm font-bold text-primary-500 mt-0.5">₹{dish.price}</Text>
-                </View>
-                {qty === 0 ? (
-                  <TouchableOpacity
-                    onPress={() => adjustCart(dish, 1)}
-                    className="bg-primary-500 rounded-xl px-4 flex-row items-center justify-center gap-1"
-                    style={{ minWidth: 44, minHeight: 40 }}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Add ${dish.name} to cart`}
-                  >
-                    <Ionicons name="add" size={18} color="#FFFFFF" />
-                    <Text className="text-white font-bold text-sm">Add</Text>
-                  </TouchableOpacity>
-                ) : (
-                  <View className="flex-row items-center gap-1.5">
-                    <TouchableOpacity
-                      onPress={() => adjustCart(dish, -1)}
-                      className="bg-gray-100 border border-gray-200 rounded-xl items-center justify-center"
-                      style={{ width: 36, height: 36 }}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Remove one ${dish.name}`}
-                    >
-                      <Ionicons name="remove" size={18} color="#374151" />
-                    </TouchableOpacity>
-                    <Text className="text-base font-bold text-gray-900 text-center" style={{ minWidth: 24 }}>{qty}</Text>
-                    <TouchableOpacity
-                      onPress={() => adjustCart(dish, 1)}
-                      className="bg-primary-500 rounded-xl items-center justify-center"
-                      style={{ width: 36, height: 36 }}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Add another ${dish.name}`}
-                    >
-                      <Ionicons name="add" size={18} color="#FFFFFF" />
-                    </TouchableOpacity>
-                  </View>
-                )}
-              </View>
+              <DishPickerRow key={dish.id} dish={dish} qty={qty} adjustCart={adjustCart} />
             );
           })}
         </View>
-      )}
+      </ScrollView>
 
       {/* Cart footer */}
       {cartItemCount > 0 && (
-        <View className="mx-6 mt-5">
-          <View className="bg-primary-50 border border-primary-500/30 rounded-2xl p-4 flex-row items-center justify-between mb-3">
-            <View className="flex-row items-center gap-2">
-              <Ionicons name="bag-handle" size={20} color="#821A52" />
-              <View>
-                <Text className="font-bold text-base text-gray-900">{cartItemCount} item{cartItemCount > 1 ? 's' : ''}</Text>
-                <Text className="text-sm text-gray-500">in your cart</Text>
+        <SafeAreaView
+          edges={['bottom']}
+          style={{ backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: rd.cardBorder }}
+        >
+          <View style={{ paddingHorizontal: t.screenPadding, paddingTop: 12, paddingBottom: 6 }}>
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: 10,
+              }}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <IconCircle icon="bag-handle-outline" size={36} bg={rd.crimsonSoft} color={t.accentPrimary} />
+                <View>
+                  <Text style={{ fontSize: t.fontBase, fontWeight: '700', color: t.textPrimary }}>
+                    {cartItemCount} item{cartItemCount > 1 ? 's' : ''}
+                  </Text>
+                  <Text style={{ fontSize: t.fontXs, color: t.textMuted }}>in cart</Text>
+                </View>
               </View>
+              <Text style={{ fontSize: t.fontLg, fontWeight: '700', color: t.textPrimary }}>₹{cartTotal}</Text>
             </View>
-            <Text className="text-lg font-bold text-primary-500">₹{cartTotal}</Text>
+            <PillButton label="Continue to Schedule" tone="dark" icon="chevron-forward" onPress={onContinue} disabled={!canContinue} />
           </View>
-          <TouchableOpacity
-            onPress={onContinue}
-            disabled={!canContinue}
-            className="bg-primary-500 rounded-2xl items-center justify-center flex-row gap-2"
-            style={{ minHeight: 48 }}
-            accessibilityRole="button"
-            accessibilityLabel="Continue to schedule pickup"
-          >
-            <Text className="text-white font-semibold text-base">Continue to Schedule</Text>
-            <Ionicons name="chevron-forward" size={18} color="#FFFFFF" />
-          </TouchableOpacity>
-        </View>
+        </SafeAreaView>
       )}
-    </ScrollView>
+    </>
+  );
+}
+
+// ── Dish picker row ────────────────────────────────────────────────────────────
+
+function DishPickerRow({
+  dish,
+  qty,
+  adjustCart,
+}: {
+  dish: Dish;
+  qty: number;
+  adjustCart: (d: Dish, delta: number) => void;
+}) {
+  const t = useTheme();
+  return (
+    <RoundCard tone="white" padding={14}>
+      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        {/* Veg/non-veg dot */}
+        <View
+          style={{
+            width: 10,
+            height: 10,
+            borderRadius: 5,
+            backgroundColor: dish.isVeg ? rd.green : rd.crimson,
+            marginRight: 12,
+          }}
+        />
+
+        <View style={{ flex: 1, marginRight: 12 }}>
+          <Text style={{ fontSize: t.fontBase, fontWeight: '600', color: t.textPrimary }}>{dish.name}</Text>
+          {dish.category ? (
+            <Text style={{ fontSize: t.fontXs, color: t.textMuted, marginTop: 2 }}>{dish.category}</Text>
+          ) : null}
+          <Text style={{ fontSize: t.fontSm, fontWeight: '700', color: t.textPrimary, marginTop: 4 }}>
+            ₹{dish.price}
+          </Text>
+        </View>
+
+        {/* Quantity controls */}
+        {qty === 0 ? (
+          <TouchableOpacity
+            onPress={() => adjustCart(dish, 1)}
+            activeOpacity={0.82}
+            accessibilityRole="button"
+            accessibilityLabel={`Add ${dish.name}`}
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: 18,
+              backgroundColor: rd.ink,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Ionicons name="add" size={22} color="#FFFFFF" />
+          </TouchableOpacity>
+        ) : (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <TouchableOpacity
+              onPress={() => adjustCart(dish, -1)}
+              activeOpacity={0.82}
+              accessibilityRole="button"
+              accessibilityLabel={`Remove one ${dish.name}`}
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: 16,
+                borderWidth: 1,
+                borderColor: rd.cardBorder,
+                backgroundColor: rd.inkSoft,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Ionicons name="remove" size={18} color={t.textPrimary} />
+            </TouchableOpacity>
+            <Text style={{ fontSize: t.fontBase, fontWeight: '700', color: t.textPrimary, minWidth: 20, textAlign: 'center' }}>
+              {qty}
+            </Text>
+            <TouchableOpacity
+              onPress={() => adjustCart(dish, 1)}
+              activeOpacity={0.82}
+              accessibilityRole="button"
+              accessibilityLabel={`Add another ${dish.name}`}
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: 16,
+                backgroundColor: rd.ink,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Ionicons name="add" size={18} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+    </RoundCard>
   );
 }
 
@@ -451,29 +549,37 @@ function MyOrdersView({
   onRefresh: () => void;
   refetch: () => void;
 }) {
+  const t = useTheme();
+
   if (isLoading) {
     return (
-      <View className="flex-1 items-center justify-center">
-        <ActivityIndicator color="#821A52" size="large" />
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator color={t.accentPrimary} size="large" />
       </View>
     );
   }
 
   if (isError) {
     return (
-      <View className="flex-1 items-center justify-center px-8">
-        <View className="w-16 h-16 rounded-full bg-red-50 items-center justify-center mb-3">
-          <Ionicons name="alert-circle" size={32} color="#DC2626" />
-        </View>
-        <Text className="text-lg font-semibold text-gray-900 mb-2">Failed to load orders</Text>
-        <TouchableOpacity
-          onPress={() => refetch()}
-          className="bg-primary-500 rounded-2xl px-6 py-3 mt-2"
-          accessibilityRole="button"
-          accessibilityLabel="Retry loading orders"
-        >
-          <Text className="text-white font-semibold text-base">Retry</Text>
-        </TouchableOpacity>
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40 }}>
+        <IconCircle icon="alert-circle-outline" size={64} bg={rd.crimsonSoft} color={rd.crimson} style={{ marginBottom: 16 }} />
+        <Display size="sm" align="center">Failed to load orders</Display>
+        <Text style={{ color: t.textMuted, fontSize: t.fontSm, marginTop: 8, marginBottom: 20, textAlign: 'center' }}>
+          Could not fetch your orders.
+        </Text>
+        <PillButton label="Retry" tone="dark" fullWidth={false} onPress={() => refetch()} style={{ paddingHorizontal: 32 }} />
+      </View>
+    );
+  }
+
+  if (!orders || orders.length === 0) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40 }}>
+        <IconCircle icon="bag-handle-outline" size={72} bg={rd.inkSoft} color="rgba(0,0,0,0.3)" style={{ marginBottom: 16 }} />
+        <Display size="sm" align="center">No orders yet</Display>
+        <Text style={{ color: t.textMuted, fontSize: t.fontSm, marginTop: 8, textAlign: 'center' }}>
+          Place your first pre-order from the New Order tab.
+        </Text>
       </View>
     );
   }
@@ -482,66 +588,63 @@ function MyOrdersView({
     <ScrollView
       showsVerticalScrollIndicator={false}
       refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#821A52" />
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={t.accentPrimary} />
       }
-      contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 40 }}
+      contentContainerStyle={{ paddingHorizontal: t.screenPadding, paddingBottom: 40 }}
     >
-      {!orders || orders.length === 0 ? (
-        <View className="items-center py-20">
-          <View className="w-20 h-20 rounded-full bg-primary-50 items-center justify-center mb-4">
-            <Ionicons name="bag-handle-outline" size={40} color="#821A52" />
-          </View>
-          <Text className="text-lg font-semibold text-gray-900 mb-1">No orders yet</Text>
-          <Text className="text-sm text-gray-500 text-center">Place your first pre-order from the New Order tab.</Text>
-        </View>
-      ) : (
-        <View className="gap-3 mt-1">
-          {orders.map((order) => {
-            const itemCount = order.items.reduce((s, i) => s + i.quantity, 0);
-            const total = order.totalAmount ?? order.items.reduce((s, i) => s + (i.dish?.price ?? 0) * i.quantity, 0);
-            return (
-              <View
-                key={order.id}
-                className="bg-gray-50 border border-gray-200 rounded-2xl p-4"
-              >
-                <View className="flex-row justify-between items-start mb-2">
-                  <View className="flex-1 mr-3">
-                    <Text className="font-semibold text-base text-gray-900">
-                      {itemCount} item{itemCount !== 1 ? 's' : ''}
-                    </Text>
-                    <View className="flex-row items-center gap-1 mt-0.5">
-                      <Ionicons name="time-outline" size={12} color="#6B7280" />
-                      <Text className="text-sm text-gray-500">
-                        Pickup: {formatPickupTime(order.pickupAt)}
-                      </Text>
-                    </View>
-                  </View>
-                  <StatusBadge status={order.status} config={STATUS_CONFIG} />
-                </View>
-
-                {order.items.slice(0, 3).map((item, idx) => (
-                  <Text key={idx} className="text-sm text-gray-700 mb-0.5">
-                    {item.dish?.name ?? 'Dish'} × {item.quantity}
+      <View style={{ gap: 12, marginTop: 4 }}>
+        {orders.map((order) => {
+          const itemCount = order.items.reduce((s, i) => s + i.quantity, 0);
+          const total = order.totalAmount ?? order.items.reduce((s, i) => s + (i.dish?.price ?? 0) * i.quantity, 0);
+          return (
+            <RoundCard key={order.id} tone="white" padding={t.cardPaddingLg}>
+              <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 10 }}>
+                <View style={{ flex: 1, marginRight: 12 }}>
+                  <Text style={{ fontSize: t.fontBase, fontWeight: '700', color: t.textPrimary }}>
+                    {itemCount} item{itemCount !== 1 ? 's' : ''}
                   </Text>
-                ))}
-                {order.items.length > 3 ? (
-                  <Text className="text-sm text-gray-400">+{order.items.length - 3} more</Text>
-                ) : null}
-
-                <View className="flex-row justify-between mt-2.5 pt-2.5 border-t border-gray-200">
-                  <View className="flex-row items-center gap-1">
-                    <Ionicons name="calendar-outline" size={12} color="#9CA3AF" />
-                    <Text className="text-xs text-gray-400">
-                      {new Date(order.createdAt).toLocaleDateString('en-IN')}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                    <Ionicons name="time-outline" size={13} color={t.textMuted} />
+                    <Text style={{ fontSize: t.fontSm, color: t.textMuted }}>
+                      Pickup: {formatPickupTime(order.pickupAt)}
                     </Text>
                   </View>
-                  <Text className="font-bold text-base text-primary-500">₹{total}</Text>
                 </View>
+                <StatusPill label={orderStatusLabel(order.status)} tone={orderStatusTone(order.status)} />
               </View>
-            );
-          })}
-        </View>
-      )}
+
+              {order.items.slice(0, 3).map((item, idx) => (
+                <Text key={item.dish?.id ?? idx} style={{ fontSize: t.fontSm, color: t.textSecondary, marginBottom: 2 }}>
+                  {item.dish?.name ?? 'Dish'} × {item.quantity}
+                </Text>
+              ))}
+              {order.items.length > 3 ? (
+                <Text style={{ fontSize: t.fontXs, color: t.textMuted }}>+{order.items.length - 3} more</Text>
+              ) : null}
+
+              <View
+                style={{
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginTop: 12,
+                  paddingTop: 12,
+                  borderTopWidth: 1,
+                  borderTopColor: rd.cardBorder,
+                }}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <Ionicons name="calendar-outline" size={12} color={t.textMuted} />
+                  <Text style={{ fontSize: t.fontXs, color: t.textMuted }}>
+                    {new Date(order.createdAt).toLocaleDateString('en-IN')}
+                  </Text>
+                </View>
+                <Text style={{ fontSize: t.fontBase, fontWeight: '700', color: t.textPrimary }}>₹{total}</Text>
+              </View>
+            </RoundCard>
+          );
+        })}
+      </View>
     </ScrollView>
   );
 }

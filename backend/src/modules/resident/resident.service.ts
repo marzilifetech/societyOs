@@ -17,6 +17,20 @@ export class ResidentService {
     return resident;
   }
 
+  /** Society residents with a date of birth (frontend groups Today / This Week / Next Week). */
+  async getBirthdays(societyId: string) {
+    const residents = await this.prisma.resident.findMany({
+      where: { flat: { societyId }, dateOfBirth: { not: null } },
+      include: { user: { select: { name: true } }, flat: { select: { block: true, number: true } } },
+    });
+    return residents.map((r) => ({
+      id: r.id,
+      name: r.user?.name ?? 'Resident',
+      flat: `${r.flat.block}-${r.flat.number}`,
+      date: r.dateOfBirth,
+    }));
+  }
+
   async updateProfile(
     userId: string,
     data: { name?: string; email?: string; emergencyContactName?: string; emergencyContactPhone?: string },

@@ -18,6 +18,11 @@ import {
   Montserrat_700Bold,
 } from '@expo-google-fonts/montserrat';
 import { Lato_400Regular, Lato_700Bold } from '@expo-google-fonts/lato';
+import {
+  PlayfairDisplay_500Medium,
+  PlayfairDisplay_600SemiBold,
+  PlayfairDisplay_700Bold,
+} from '@expo-google-fonts/playfair-display';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -55,6 +60,9 @@ export default function RootLayout() {
     Montserrat_700Bold,
     Lato_400Regular,
     Lato_700Bold,
+    PlayfairDisplay_500Medium,
+    PlayfairDisplay_600SemiBold,
+    PlayfairDisplay_700Bold,
   });
 
   useEffect(() => {

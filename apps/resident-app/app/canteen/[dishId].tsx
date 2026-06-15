@@ -1,11 +1,30 @@
-import { ScrollView, View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { ScrollView, View, Text, TouchableOpacity, ActivityIndicator, Image } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
-import { api } from '../../src/lib/api';
 
-type Review = { id: string; rating: number; comment?: string; residentName: string; createdAt: string };
+import { api } from '../../src/lib/api';
+import { useTheme } from '../../src/hooks/useTheme';
+import {
+  ScreenHeader,
+  Display,
+  RoundCard,
+  PillButton,
+  IconCircle,
+  rd,
+} from '../../src/components/ui';
+
+// ── Types ──────────────────────────────────────────────────────────────────────
+
+type Review = {
+  id: string;
+  rating: number;
+  comment?: string;
+  residentName: string;
+  createdAt: string;
+};
+
 type DishDetail = {
   id: string;
   name: string;
@@ -17,24 +36,83 @@ type DishDetail = {
   avgRating?: number;
   ratingCount?: number;
   reviews?: Review[];
+  // Figma V2 fields — may not exist yet in API
+  dietType?: 'VEG' | 'NON_VEG' | 'EGG';
+  imageUrl?: string;
 };
 
-function Stars({ rating, size = 16 }: { rating: number; size?: number }) {
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+type DietKind = 'VEG' | 'NON_VEG' | 'EGG';
+
+function resolveDiet(dish: DishDetail): DietKind {
+  if (dish.dietType) return dish.dietType;
+  return dish.isVeg ? 'VEG' : 'NON_VEG';
+}
+
+const DIET_CONFIG: Record<DietKind, { label: string; bg: string; fg: string; icon: string }> = {
+  VEG: { label: 'Veg', bg: rd.greenSoft, fg: rd.green, icon: '●' },
+  EGG: { label: 'Egg', bg: rd.amberSoft, fg: rd.amberInk, icon: '●' },
+  NON_VEG: { label: 'Non Veg', bg: rd.crimsonSoft, fg: rd.crimson, icon: '▲' },
+};
+
+function DietTag({ dish }: { dish: DishDetail }) {
+  const t = useTheme();
+  const kind = resolveDiet(dish);
+  const cfg = DIET_CONFIG[kind];
   return (
-    <View className="flex-row">
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        backgroundColor: cfg.bg,
+        borderRadius: rd.radiusPill,
+        paddingHorizontal: 12,
+        paddingVertical: 5,
+      }}
+    >
+      <Text style={{ fontSize: 8, color: cfg.fg }}>{cfg.icon}</Text>
+      <Text style={{ fontSize: t.fontSm, fontWeight: '700', color: cfg.fg }}>{cfg.label}</Text>
+    </View>
+  );
+}
+
+function AllergenChip({ label }: { label: string }) {
+  const t = useTheme();
+  return (
+    <View
+      style={{
+        backgroundColor: rd.inkSoft,
+        borderRadius: rd.radiusPill,
+        paddingHorizontal: 12,
+        paddingVertical: 5,
+      }}
+    >
+      <Text style={{ fontSize: t.fontXs, color: t.textSecondary }}>{label}</Text>
+    </View>
+  );
+}
+
+function StarRow({ rating, size = 16 }: { rating: number; size?: number }) {
+  return (
+    <View style={{ flexDirection: 'row', gap: 2 }}>
       {[1, 2, 3, 4, 5].map((s) => (
         <Ionicons
           key={s}
-          name={s <= rating ? 'star' : 'star-outline'}
+          name={s <= Math.round(rating) ? 'star' : 'star-outline'}
           size={size}
-          color={s <= rating ? '#F59E0B' : '#D1D5DB'}
+          color={s <= Math.round(rating) ? '#F59E0B' : '#D1D5DB'}
         />
       ))}
     </View>
   );
 }
 
+// ── Screen ────────────────────────────────────────────────────────────────────
+
 export default function DishDetailScreen() {
+  const t = useTheme();
   const { dishId } = useLocalSearchParams<{ dishId: string }>();
 
   const { data: dish, isLoading, isError, refetch } = useQuery<DishDetail>({
@@ -43,127 +121,182 @@ export default function DishDetailScreen() {
     enabled: !!dishId,
   });
 
-  const canRate = new Date().getHours() >= 9;
+  const canRate = true;
 
   return (
-    <SafeAreaView className="flex-1 bg-white">
-      <View className="px-6 pt-4 pb-3 flex-row items-center gap-3">
-        <TouchableOpacity
-          onPress={() => router.back()}
-          className="w-10 h-10 items-center justify-center"
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <Ionicons name="chevron-back" size={24} color="#821A52" />
-        </TouchableOpacity>
-        <Text className="text-xl font-bold text-gray-900 flex-1" numberOfLines={1}>{dish?.name ?? 'Dish Detail'}</Text>
-      </View>
+    <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+      <ScreenHeader title={dish?.name ?? 'Dish Detail'} />
 
       {isLoading ? (
-        <View className="flex-1 items-center justify-center">
-          <ActivityIndicator color="#821A52" size="large" />
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator color={t.accentPrimary} size="large" />
         </View>
       ) : isError ? (
-        <View className="flex-1 items-center justify-center px-8">
-          <View className="w-16 h-16 rounded-full bg-red-50 items-center justify-center mb-3">
-            <Ionicons name="alert-circle" size={32} color="#DC2626" />
-          </View>
-          <Text className="text-lg font-semibold text-gray-900 mb-4">Failed to load</Text>
-          <TouchableOpacity onPress={() => refetch()} className="bg-primary-500 rounded-xl px-6 py-3">
-            <Text className="text-white font-semibold">Retry</Text>
-          </TouchableOpacity>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40 }}>
+          <IconCircle icon="alert-circle-outline" size={64} bg={rd.crimsonSoft} color={rd.crimson} style={{ marginBottom: 16 }} />
+          <Display size="sm" align="center">Failed to load</Display>
+          <Text style={{ color: t.textMuted, fontSize: t.fontSm, marginTop: 8, marginBottom: 20, textAlign: 'center' }}>
+            Could not fetch dish details.
+          </Text>
+          <PillButton label="Retry" tone="dark" fullWidth={false} onPress={() => refetch()} style={{ paddingHorizontal: 32 }} />
         </View>
       ) : dish ? (
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
-          {/* Main card */}
-          <View className="bg-gray-50 border border-gray-200 rounded-2xl p-5 mb-4">
-            <View className="flex-row items-center gap-2 mb-3">
+        <>
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ paddingHorizontal: t.screenPadding, paddingTop: 16, paddingBottom: 32 }}
+          >
+            {/* Hero image or placeholder */}
+            {dish.imageUrl ? (
+              <Image
+                source={{ uri: dish.imageUrl }}
+                style={{ width: '100%', height: 220, borderRadius: rd.radiusCard, marginBottom: 20 }}
+                resizeMode="cover"
+              />
+            ) : (
               <View
-                className={`w-7 h-7 rounded items-center justify-center ${dish.isVeg ? 'bg-green-100' : 'bg-red-100'}`}
+                style={{
+                  width: '100%',
+                  height: 160,
+                  borderRadius: rd.radiusCard,
+                  backgroundColor: rd.inkSoft,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  marginBottom: 20,
+                }}
               >
-                <Ionicons
-                  name={dish.isVeg ? 'leaf' : 'flame'}
-                  size={16}
-                  color={dish.isVeg ? '#16A34A' : '#DC2626'}
-                />
+                <Ionicons name="restaurant-outline" size={52} color="rgba(0,0,0,0.18)" />
               </View>
-              <Text className="text-sm text-gray-500">{dish.isVeg ? 'Vegetarian' : 'Non-Vegetarian'}</Text>
-            </View>
-            <Text className="text-2xl font-bold text-gray-900 mb-2">{dish.name}</Text>
-            {dish.description ? (
-              <Text className="text-base leading-6 text-gray-500 mb-4">{dish.description}</Text>
-            ) : null}
-            <View className="flex-row items-center justify-between">
-              <Text className="text-2xl font-bold text-primary-500">₹{dish.price}</Text>
+            )}
+
+            {/* Dish name + diet tag */}
+            <Display size="md" style={{ marginBottom: 6 }}>{dish.name}</Display>
+
+            {/* Kcal + diet tag row */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}>
               {dish.calories ? (
-                <View className="flex-row items-center gap-1">
-                  <Ionicons name="flame-outline" size={14} color="#6B7280" />
-                  <Text className="text-sm text-gray-500">{dish.calories} kcal</Text>
-                </View>
+                <Text style={{ fontSize: t.fontSm, color: t.textMuted }}>{dish.calories} kcal</Text>
               ) : null}
+              <DietTag dish={dish} />
             </View>
-          </View>
 
-          {dish.allergens?.length ? (
-            <View className="bg-orange-50 border border-orange-200 rounded-2xl p-4 mb-4">
-              <View className="flex-row items-center gap-1.5 mb-1">
-                <Ionicons name="warning" size={16} color="#F97316" />
-                <Text className="font-semibold text-orange-600">Allergens</Text>
+            {/* Description */}
+            {dish.description ? (
+              <Text
+                style={{
+                  fontSize: t.fontBase,
+                  color: t.textSecondary,
+                  lineHeight: t.fontBase * 1.55,
+                  marginBottom: 16,
+                }}
+              >
+                {dish.description}
+              </Text>
+            ) : null}
+
+            {/* Allergen chips */}
+            {dish.allergens?.length ? (
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
+                {dish.allergens.map((a) => (
+                  <AllergenChip key={a} label={`Contains ${a}`} />
+                ))}
               </View>
-              <Text className="text-sm text-orange-600 ml-6">{dish.allergens.join(' · ')}</Text>
-            </View>
-          ) : null}
+            ) : null}
 
-          {/* Rating */}
-          {dish.avgRating !== undefined && (
-            <View className="bg-gray-50 border border-gray-200 rounded-2xl p-5 mb-4">
-              <Text className="text-lg font-semibold text-gray-900 mb-3">Rating</Text>
-              <View className="flex-row items-center gap-3">
-                <View className="bg-amber-100 rounded-2xl px-3 py-2 flex-row items-center gap-1.5">
-                  <Ionicons name="star" size={20} color="#F59E0B" />
-                  <Text className="text-3xl font-bold text-amber-700">{dish.avgRating.toFixed(1)}</Text>
-                </View>
-                <View>
-                  <Stars rating={Math.round(dish.avgRating)} size={18} />
-                  <Text className="text-xs text-gray-400 mt-1">{dish.ratingCount ?? 0} ratings</Text>
-                </View>
+            {/* Price */}
+            <RoundCard tone="gray" padding={t.cardPaddingLg} style={{ marginBottom: 16 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: t.fontBase, color: t.textSecondary }}>Price</Text>
+                <Text style={{ fontSize: t.fontLg, fontWeight: '700', color: t.textPrimary }}>
+                  ₹{dish.price}
+                </Text>
               </View>
-            </View>
-          )}
+            </RoundCard>
 
-          {/* Reviews */}
-          {dish.reviews?.length ? (
-            <View className="mb-6">
-              <Text className="text-xl font-semibold text-gray-900 mb-3">Recent Reviews</Text>
-              {dish.reviews.map((r) => (
-                <View key={r.id} className="bg-gray-50 border border-gray-200 rounded-2xl p-4 mb-3">
-                  <View className="flex-row items-center justify-between mb-2">
-                    <Text className="font-semibold text-gray-900">{r.residentName}</Text>
-                    <Stars rating={r.rating} />
+            {/* Rating */}
+            {dish.avgRating != null ? (
+              <RoundCard tone="white" padding={t.cardPaddingLg} style={{ marginBottom: 16 }}>
+                <Text style={{ fontSize: t.fontBase, fontWeight: '700', color: t.textPrimary, marginBottom: 12 }}>
+                  Rating
+                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+                  <View
+                    style={{
+                      backgroundColor: rd.amberSoft,
+                      borderRadius: rd.radiusCard,
+                      paddingHorizontal: 14,
+                      paddingVertical: 10,
+                      alignItems: 'center',
+                    }}
+                  >
+                    <Text style={{ fontSize: t.font3xl, fontWeight: '700', color: rd.amberInk }}>
+                      {dish.avgRating.toFixed(1)}
+                    </Text>
                   </View>
-                  {r.comment ? <Text className="text-sm leading-5 text-gray-500">{r.comment}</Text> : null}
-                  <View className="flex-row items-center gap-1 mt-2">
-                    <Ionicons name="calendar-outline" size={11} color="#9CA3AF" />
-                    <Text className="text-xs text-gray-400">
-                      {new Date(r.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                  <View>
+                    <StarRow rating={dish.avgRating} size={18} />
+                    <Text style={{ fontSize: t.fontXs, color: t.textMuted, marginTop: 4 }}>
+                      {dish.ratingCount ?? 0} ratings
                     </Text>
                   </View>
                 </View>
-              ))}
-            </View>
-          ) : null}
+              </RoundCard>
+            ) : null}
 
-          {canRate && (
-            <TouchableOpacity
-              onPress={() => router.push({ pathname: '/canteen/rate', params: { dishId } } as any)}
-              className="bg-primary-500 rounded-2xl py-4 items-center justify-center flex-row gap-2"
-            >
-              <Ionicons name="star" size={20} color="#FFFFFF" />
-              <Text className="text-white font-bold text-base">Rate this Dish</Text>
-            </TouchableOpacity>
-          )}
-        </ScrollView>
+            {/* Reviews */}
+            {dish.reviews?.length ? (
+              <View style={{ marginBottom: 8 }}>
+                <Display size="sm" style={{ marginBottom: 12 }}>Recent Reviews</Display>
+                {dish.reviews.map((r) => (
+                  <RoundCard key={r.id} tone="white" padding={t.cardPadding} style={{ marginBottom: 10 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                      <Text style={{ fontSize: t.fontBase, fontWeight: '700', color: t.textPrimary }}>
+                        {r.residentName}
+                      </Text>
+                      <StarRow rating={r.rating} size={14} />
+                    </View>
+                    {r.comment ? (
+                      <Text style={{ fontSize: t.fontSm, color: t.textSecondary, lineHeight: t.fontSm * 1.5 }}>
+                        {r.comment}
+                      </Text>
+                    ) : null}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8 }}>
+                      <Ionicons name="calendar-outline" size={11} color={t.textMuted} />
+                      <Text style={{ fontSize: t.fontXs, color: t.textMuted }}>
+                        {new Date(r.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                      </Text>
+                    </View>
+                  </RoundCard>
+                ))}
+              </View>
+            ) : null}
+          </ScrollView>
+
+          {/* Footer CTA */}
+          <SafeAreaView
+            edges={['bottom']}
+            style={{ backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: rd.cardBorder }}
+          >
+            <View style={{ paddingHorizontal: t.screenPadding, paddingTop: 12, paddingBottom: 6, gap: 10 }}>
+              <PillButton
+                label="Pre-Order This Dish"
+                tone="dark"
+                icon="bag-handle-outline"
+                onPress={() => router.push({ pathname: '/canteen/pre-order', params: { dishId: dish.id } } as any)}
+              />
+              {canRate ? (
+                <PillButton
+                  label="Rate This Dish"
+                  tone="ghost"
+                  icon="star-outline"
+                  textColor={t.accentPrimary}
+                  onPress={() => router.push({ pathname: '/canteen/rate', params: { dishId } } as any)}
+                />
+              ) : null}
+            </View>
+          </SafeAreaView>
+        </>
       ) : null}
-    </SafeAreaView>
+    </View>
   );
 }

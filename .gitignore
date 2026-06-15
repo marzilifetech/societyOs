@@ -67,3 +67,5 @@ backend.env
 crash.log
 keystores/
 builds/
+figma images/
+mock-data/

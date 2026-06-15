@@ -2,14 +2,21 @@ import { ScrollView, View, Text, TouchableOpacity, ActivityIndicator, RefreshCon
 import { router } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { api } from '../../src/lib/api';
 import { useTheme } from '../../src/hooks/useTheme';
-import { ScreenHeader } from '../../src/components/ui';
+import {
+  ScreenHeader,
+  Display,
+  RoundCard,
+  PillButton,
+  IconCircle,
+  rd,
+} from '../../src/components/ui';
 
-// Public Figma reference (Med Help Desk Appointments frame): node-id=56-6126
-// Behaviour-preserving redesign — same /medical/doctors + /medical/emergency-contacts
-// queries; new ScreenHeader (with SOS trailing affordance) primitive.
+// Public Figma reference (Med Help Desk): node-id=56-6126
+// API: GET /medical/doctors, GET /medical/emergency-contacts
 
 type Doctor = {
   id: string;
@@ -51,13 +58,21 @@ export default function MedicalScreen() {
   const sosButton = (
     <TouchableOpacity
       onPress={() => router.push('/medical/sos' as any)}
-      style={{ minHeight: t.touchTargetSm }}
-      className="bg-red-600 rounded-2xl px-4 py-3 flex-row items-center gap-1.5 justify-center"
+      style={{
+        minHeight: t.touchTargetSm,
+        backgroundColor: rd.crimson,
+        borderRadius: rd.radiusPill,
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+      }}
       accessibilityRole="button"
       accessibilityLabel="Emergency SOS - call for immediate help"
     >
-      <Ionicons name="warning" size={18} color="#FFFFFF" />
-      <Text className="text-white font-semibold text-sm">SOS</Text>
+      <Ionicons name="warning" size={16} color="#FFFFFF" />
+      <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: t.fontSm }}>SOS</Text>
     </TouchableOpacity>
   );
 
@@ -67,133 +82,157 @@ export default function MedicalScreen() {
 
       <ScrollView
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#821A52" />}
-        contentContainerStyle={{ paddingBottom: 32 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={t.accentPrimary} />}
+        contentContainerStyle={{ paddingHorizontal: t.screenPadding, paddingTop: 16, paddingBottom: 32 }}
       >
-        {/* My Appointments */}
-        <TouchableOpacity
-          onPress={() => router.push('/medical/appointments' as any)}
-          style={{ minHeight: t.touchTarget }}
-          className="mx-6 mb-6 bg-gray-50 border border-gray-200 rounded-2xl px-5 py-4 flex-row items-center justify-between"
-          accessibilityRole="button"
-          accessibilityLabel="My Appointments - view upcoming and past bookings"
+        {/* Book appointment CTA */}
+        <RoundCard
+          tone="white"
+          padding={t.cardPaddingLg}
+          onPress={() => router.push('/medical/book' as any)}
+          style={{ marginBottom: 14 }}
         >
-          <View className="flex-row items-center gap-3 flex-1">
-            <View className="w-11 h-11 rounded-xl bg-primary-50 items-center justify-center">
-              <Ionicons name="calendar" size={22} color="#821A52" />
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+            <IconCircle size={52} bg={rd.crimsonSoft}>
+              <MaterialCommunityIcons name="stethoscope" size={26} color={t.accentPrimary} />
+            </IconCircle>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: t.fontBase, fontWeight: '700', color: t.textPrimary }}>Book Appointment</Text>
+              <Text style={{ fontSize: t.fontSm, color: t.textMuted, marginTop: 2 }}>Schedule a doctor visit</Text>
             </View>
-            <View className="flex-1">
-              <Text className="text-primary-500 font-semibold text-base">My Appointments</Text>
-              <Text className="text-gray-500 text-sm mt-0.5">View upcoming and past bookings</Text>
-            </View>
+            <Ionicons name="chevron-forward" size={20} color={t.textMuted} />
           </View>
-          <Ionicons name="chevron-forward" size={20} color="#821A52" />
-        </TouchableOpacity>
+        </RoundCard>
 
-        <Text className="text-xl font-semibold text-gray-900 px-6 mb-4">Available Doctors</Text>
+        {/* My Appointments */}
+        <RoundCard
+          tone="white"
+          padding={t.cardPaddingLg}
+          onPress={() => router.push('/medical/appointments' as any)}
+          style={{ marginBottom: 24 }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+            <IconCircle size={52} bg={rd.greenSoft}>
+              <Ionicons name="calendar-outline" size={24} color={rd.green} />
+            </IconCircle>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: t.fontBase, fontWeight: '700', color: t.textPrimary }}>My Appointments</Text>
+              <Text style={{ fontSize: t.fontSm, color: t.textMuted, marginTop: 2 }}>View upcoming and past bookings</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={t.textMuted} />
+          </View>
+        </RoundCard>
+
+        <Display size="sm" style={{ marginBottom: 14 }}>Available Doctors</Display>
 
         {isLoading ? (
-          <View className="items-center py-20">
-            <ActivityIndicator color="#821A52" size="large" />
+          <View style={{ alignItems: 'center', paddingVertical: 48 }}>
+            <ActivityIndicator color={t.accentPrimary} size="large" />
           </View>
         ) : isError ? (
-          <View className="items-center py-20 px-8">
-            <View className="w-16 h-16 rounded-2xl bg-red-50 items-center justify-center mb-4">
-              <Ionicons name="alert-circle" size={32} color="#DC2626" />
-            </View>
-            <Text className="text-gray-900 text-lg font-semibold mb-4">Failed to load doctors</Text>
-            <TouchableOpacity
-              onPress={() => refetchDoctors()}
-              style={{ minHeight: t.touchTarget }}
-              className="bg-primary-500 rounded-xl px-6 py-3 items-center justify-center"
-              accessibilityRole="button"
-              accessibilityLabel="Retry loading doctors"
-            >
-              <Text className="text-white font-semibold text-base">Retry</Text>
-            </TouchableOpacity>
+          <View style={{ alignItems: 'center', paddingVertical: 48, paddingHorizontal: 24 }}>
+            <IconCircle size={64} bg={rd.crimsonSoft}>
+              <Ionicons name="alert-circle" size={32} color={rd.crimson} />
+            </IconCircle>
+            <Text style={{ color: t.textPrimary, fontSize: t.fontLg, fontWeight: '700', marginTop: 16, marginBottom: 16 }}>
+              Failed to load doctors
+            </Text>
+            <PillButton label="Retry" tone="dark" onPress={() => refetchDoctors()} fullWidth={false} />
           </View>
         ) : !doctors?.length ? (
-          <View className="items-center py-20 px-8">
-            <View className="w-16 h-16 rounded-2xl bg-primary-50 items-center justify-center mb-4">
-              <Ionicons name="medkit" size={32} color="#821A52" />
-            </View>
-            <Text className="text-gray-900 text-lg font-semibold">No doctors available</Text>
+          <View style={{ alignItems: 'center', paddingVertical: 48, paddingHorizontal: 24 }}>
+            <IconCircle size={64} bg={rd.crimsonSoft}>
+              <MaterialCommunityIcons name="stethoscope" size={32} color={t.accentPrimary} />
+            </IconCircle>
+            <Text style={{ color: t.textPrimary, fontSize: t.fontLg, fontWeight: '700', marginTop: 16 }}>
+              No doctors available
+            </Text>
           </View>
         ) : (
-          <View className="px-6 gap-3">
-            {doctors.map((doc: any) => (
-              <TouchableOpacity
+          <View style={{ gap: 12 }}>
+            {doctors.map((doc) => (
+              <RoundCard
                 key={doc.id}
+                tone="white"
+                padding={t.cardPaddingLg}
                 onPress={() => router.push(`/medical/${doc.id}` as any)}
-                style={{ padding: t.cardPadding }}
-                className="bg-gray-50 border border-gray-200 rounded-2xl"
-                accessibilityRole="button"
-                accessibilityLabel={`Dr. ${doc.name}, ${doc.specialization}`}
               >
-                <View className="flex-row items-center gap-4">
-                  <View className="w-14 h-14 rounded-2xl bg-primary-50 items-center justify-center">
-                    <Ionicons name="medkit" size={28} color="#821A52" />
-                  </View>
-                  <View className="flex-1">
-                    <Text className="text-gray-900 text-base font-semibold">Dr. {doc.name}</Text>
-                    <Text className="text-primary-500 text-sm mt-0.5">{doc.specialization}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+                  <IconCircle size={56} bg={rd.crimsonSoft}>
+                    <MaterialCommunityIcons name="stethoscope" size={28} color={t.accentPrimary} />
+                  </IconCircle>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: t.fontBase, fontWeight: '700', color: t.textPrimary }}>Dr. {doc.name}</Text>
+                    <Text style={{ fontSize: t.fontSm, color: t.accentPrimary, marginTop: 2 }}>{doc.specialization}</Text>
                     {doc.qualifications ? (
-                      <Text className="text-gray-500 text-xs mt-0.5">{doc.qualifications}</Text>
+                      <Text style={{ fontSize: t.fontXs, color: t.textMuted, marginTop: 2 }}>{doc.qualifications}</Text>
                     ) : null}
                     {doc.nextSlot ? (
-                      <View className="flex-row items-center gap-1 mt-1">
-                        <Ionicons name="time" size={12} color="#16A34A" />
-                        <Text className="text-green-600 text-xs">Next: {doc.nextSlot}</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                        <Ionicons name="time-outline" size={12} color={rd.green} />
+                        <Text style={{ fontSize: t.fontXs, color: rd.green }}>Next: {doc.nextSlot}</Text>
                       </View>
                     ) : null}
                   </View>
                   {doc.rating ? (
-                    <View className="flex-row items-center gap-1">
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                       <Ionicons name="star" size={14} color="#F59E0B" />
-                      <Text className="text-amber-600 text-sm font-medium">{doc.rating.toFixed(1)}</Text>
+                      <Text style={{ fontSize: t.fontSm, color: '#B45309', fontWeight: '600' }}>{doc.rating.toFixed(1)}</Text>
                     </View>
                   ) : null}
                 </View>
                 <TouchableOpacity
                   onPress={() => router.push({ pathname: '/medical/book', params: { doctorId: doc.id } } as any)}
-                  style={{ minHeight: t.touchTarget }}
-                  className="bg-primary-500 rounded-xl py-3 mt-3 items-center justify-center"
+                  style={{
+                    marginTop: 12,
+                    minHeight: t.touchTarget,
+                    borderRadius: rd.radiusPill,
+                    backgroundColor: rd.ink,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
                   accessibilityRole="button"
                   accessibilityLabel={`Book appointment with Dr. ${doc.name}`}
                 >
-                  <Text className="text-white font-semibold text-sm">Book Appointment</Text>
+                  <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: t.fontSm }}>Book Appointment</Text>
                 </TouchableOpacity>
-              </TouchableOpacity>
+              </RoundCard>
             ))}
           </View>
         )}
 
         {/* Emergency contacts */}
         {contacts?.length ? (
-          <View className="px-6 mt-8">
-            <Text className="text-gray-900 text-xl font-semibold mb-3">Emergency Contacts</Text>
-            <View className="bg-red-50 border border-red-200 rounded-2xl p-4 gap-3">
-              {contacts.map((c: any) => (
-                <TouchableOpacity
+          <View style={{ marginTop: 28 }}>
+            <Display size="sm" style={{ marginBottom: 14 }}>Emergency Contacts</Display>
+            <RoundCard tone="pink" padding={t.cardPaddingLg}>
+              {contacts.map((c, i) => (
+                <View
                   key={c.id}
-                  className="flex-row items-center justify-between"
-                  style={{ minHeight: t.touchTarget }}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Call ${c.name}, ${c.role}, ${c.phone}`}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    minHeight: t.touchTarget,
+                    marginTop: i === 0 ? 0 : 12,
+                    paddingTop: i === 0 ? 0 : 12,
+                    borderTopWidth: i === 0 ? 0 : 1,
+                    borderTopColor: 'rgba(196,40,71,0.12)',
+                  }}
                 >
-                  <View className="flex-row items-center gap-3 flex-1">
-                    <View className="w-10 h-10 rounded-xl bg-red-100 items-center justify-center">
-                      <Ionicons name="call" size={18} color="#DC2626" />
-                    </View>
-                    <View className="flex-1">
-                      <Text className="text-gray-900 font-semibold text-base">{c.name}</Text>
-                      <Text className="text-gray-500 text-xs">{c.role}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
+                    <IconCircle size={44} bg={rd.crimson}>
+                      <Ionicons name="call" size={20} color="#FFFFFF" />
+                    </IconCircle>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: t.fontBase, fontWeight: '700', color: t.textPrimary }}>{c.name}</Text>
+                      <Text style={{ fontSize: t.fontXs, color: t.textMuted, marginTop: 2 }}>{c.role}</Text>
                     </View>
                   </View>
-                  <Text className="text-red-600 font-bold text-base">{c.phone}</Text>
-                </TouchableOpacity>
+                  <Text style={{ fontSize: t.fontBase, fontWeight: '700', color: rd.crimson }}>{c.phone}</Text>
+                </View>
               ))}
-            </View>
+            </RoundCard>
           </View>
         ) : null}
       </ScrollView>

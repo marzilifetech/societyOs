@@ -11,11 +11,10 @@ interface AccessibilityState {
 export const useAccessibilityStore = create<AccessibilityState>()(
   persist(
     (set) => ({
-      // Default ON: this is the Marzi Senior Community app — elders are the
-      // primary audience, so the larger/higher-contrast token set is the
-      // baseline experience. Users who want a denser UI can toggle it off
-      // in Settings → Accessibility.
-      seniorMode: true,
+      // Default OFF: the 2026 redesign baseline matches the Figma (default
+      // scale). Senior Mode (larger/higher-contrast tokens) remains an opt-in
+      // toggle in Settings → Accessibility for elders who want a bigger UI.
+      seniorMode: false,
       toggleSeniorMode: () => set((s) => ({ seniorMode: !s.seniorMode })),
       setSeniorMode: (val) => set({ seniorMode: val }),
     }),

@@ -50,6 +50,7 @@ enum ServiceRequestStatus {
   COMPLETED
   REJECTED
   CLOSED
+  CANCELLED
 }
 
 enum ServicePhase {

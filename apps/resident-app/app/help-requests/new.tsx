@@ -1,140 +1,439 @@
-import { ScrollView, View, Text, TouchableOpacity, TextInput, Alert } from 'react-native';
-import { router } from 'expo-router';
+import {
+  ScrollView,
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  KeyboardAvoidingView,
+  Platform,
+  Modal,
+} from 'react-native';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
+
 import { api } from '../../src/lib/api';
+import { unwrapApiEnvelope } from '@societyos/api-client';
 import { useTheme } from '../../src/hooks/useTheme';
 import {
   ScreenHeader,
-  BottomActionBar,
-  RadioCard,
+  Display,
+  RoundCard,
+  PillButton,
+  IconCircle,
+  rd,
 } from '../../src/components/ui';
 
-// Public Figma reference (Staff Help Requests frame): node-id=101-22188
-// Behaviour-preserving redesign — same /help-requests POST, same validation;
-// new ScreenHeader / RadioCard / BottomActionBar primitives.
+// Staff Help Request — "Request Help" screen + success bottom-sheet modal.
+// Figma frames: Staff Help Request-1.jpg .. -13.jpg
+// API: POST /help-requests { category, description, preferredTime? }
+// On success → bottom-sheet with "Track Request" + "Go Back"
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
 
-const CATEGORIES: { value: string; label: string; icon: IoniconName; subtitle: string }[] = [
-  { value: 'Plumbing', label: 'Plumbing', icon: 'water', subtitle: 'Leaks, drainage, taps' },
-  { value: 'Electrical', label: 'Electrical', icon: 'flash', subtitle: 'Wiring, outlets, lights' },
-  { value: 'Carpentry', label: 'Carpentry', icon: 'hammer', subtitle: 'Doors, locks, fittings' },
-  { value: 'Cleaning', label: 'Cleaning', icon: 'sparkles', subtitle: 'Common-area cleanup' },
-  { value: 'Other', label: 'Other', icon: 'help-circle', subtitle: 'Anything not above' },
+const CATEGORIES: {
+  value: string;
+  label: string;
+  icon: IoniconName;
+  subtitle: string;
+  iconBg: string;
+  iconColor: string;
+}[] = [
+  {
+    value: 'Package Pickup',
+    label: 'Package Pickup',
+    icon: 'cube-outline',
+    subtitle: 'Collect a parcel or package',
+    iconBg: '#E8F5E9',
+    iconColor: '#2E7D32',
+  },
+  {
+    value: 'Heavy Lifting',
+    label: 'Heavy Lifting',
+    icon: 'barbell-outline',
+    subtitle: 'Move furniture or appliances',
+    iconBg: '#FFF8E1',
+    iconColor: '#F57F17',
+  },
+  {
+    value: 'Document Collect',
+    label: 'Document Collect',
+    icon: 'document-text-outline',
+    subtitle: 'Pick up letters or documents',
+    iconBg: '#E3F2FD',
+    iconColor: '#1565C0',
+  },
+  {
+    value: 'Elderly Assist',
+    label: 'Elderly Assist',
+    icon: 'accessibility-outline',
+    subtitle: 'Help getting around',
+    iconBg: '#FFF3E0',
+    iconColor: '#E65100',
+  },
+  {
+    value: 'Minor Fix',
+    label: 'Minor Fix',
+    icon: 'construct-outline',
+    subtitle: 'Small repairs in the flat',
+    iconBg: '#F5F5F5',
+    iconColor: '#616161',
+  },
+  {
+    value: 'Other Help',
+    label: 'Other Help',
+    icon: 'help-circle-outline',
+    subtitle: 'Any other help needed',
+    iconBg: '#E8EAF6',
+    iconColor: '#283593',
+  },
 ];
 
-type Urgency = 'LOW' | 'MEDIUM' | 'HIGH';
-const URGENCIES: { value: Urgency; label: string; activeBg: string; activeText: string; activeBorder: string }[] = [
-  { value: 'LOW', label: 'Low', activeBg: 'bg-gray-100', activeText: 'text-gray-700', activeBorder: 'border-gray-300' },
-  { value: 'MEDIUM', label: 'Medium', activeBg: 'bg-orange-100', activeText: 'text-orange-700', activeBorder: 'border-orange-300' },
-  { value: 'HIGH', label: 'High', activeBg: 'bg-red-100', activeText: 'text-red-700', activeBorder: 'border-red-300' },
+const PREFERRED_TIMES = [
+  'As soon as possible',
+  'Within 30 mins',
+  'Within 1 hour',
+  'Within 2 hours',
+  'Today',
+  'Tomorrow',
 ];
+
+function fmtNow(): string {
+  const d = new Date();
+  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'long' }) +
+    ', ' +
+    d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+}
 
 export default function NewHelpRequestScreen() {
   const t = useTheme();
   const qc = useQueryClient();
-  const [category, setCategory] = useState('');
-  const [urgency, setUrgency] = useState<Urgency>('LOW');
+  const params = useLocalSearchParams<{ category?: string }>();
+
+  const [category, setCategory] = useState<string>(params.category ?? '');
   const [description, setDescription] = useState('');
+  const [preferredTime, setPreferredTime] = useState('');
+  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [successSheet, setSuccessSheet] = useState(false);
+  const [createdId, setCreatedId] = useState<string | null>(null);
+  const [createdAt, setCreatedAt] = useState('');
 
   const mutation = useMutation({
     mutationFn: (body: object) => api.post('/help-requests', body),
-    onSuccess: () => {
+    onSuccess: (raw: any) => {
       qc.invalidateQueries({ queryKey: ['help-requests'] });
-      Alert.alert('Request Submitted', 'Staff have been notified of your request.', [
-        { text: 'OK', onPress: () => router.back() },
-      ]);
-    },
-    onError: (err: Error) => {
-      Alert.alert('Error', err.message ?? 'Could not submit request. Please try again.');
+      const unwrapped = unwrapApiEnvelope<{ id: string }>(raw);
+      const id = unwrapped?.id ?? null;
+      setCreatedId(id ? String(id) : null);
+      setCreatedAt(fmtNow());
+      setSuccessSheet(true);
     },
   });
 
+  const selectedCat = CATEGORIES.find((c) => c.value === category);
+  const isValid = category.length > 0;
+
   const handleSubmit = () => {
-    if (!category) { Alert.alert('Required', 'Please select a category.'); return; }
-    if (!description.trim()) { Alert.alert('Required', 'Please describe your issue.'); return; }
-    mutation.mutate({ category, urgency, description: description.trim() });
+    if (!isValid || mutation.isPending) return;
+    mutation.mutate({
+      category,
+      description: description.trim() || category,
+      ...(preferredTime ? { preferredTime } : {}),
+    });
   };
 
-  const isValid = category.length > 0 && description.trim().length > 0;
+  const handleTrack = () => {
+    setSuccessSheet(false);
+    if (createdId) {
+      router.replace(`/help-requests/${createdId}` as any);
+    } else {
+      router.replace('/help-requests' as any);
+    }
+  };
+
+  const handleGoBack = () => {
+    setSuccessSheet(false);
+    router.replace('/help-requests' as any);
+  };
 
   return (
     <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
-      <ScreenHeader title="New Help Request" subtitle="Tell us what needs attention" />
+      <ScreenHeader title="Request Help" />
 
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-        contentContainerStyle={{ paddingHorizontal: t.screenPadding, paddingBottom: 24, paddingTop: 8 }}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
       >
-        <Text className="text-gray-500 font-semibold mb-3" style={{ fontSize: t.fontXs, letterSpacing: 0.5 }}>
-          CATEGORY *
-        </Text>
-        <View style={{ gap: 10, marginBottom: 24 }}>
-          {CATEGORIES.map((c) => (
-            <RadioCard
-              key={c.value}
-              title={c.label}
-              subtitle={c.subtitle}
-              icon={c.icon}
-              selected={category === c.value}
-              onPress={() => setCategory(c.value)}
-              accessibilityHint={`Select ${c.label} category`}
-            />
-          ))}
-        </View>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{ paddingHorizontal: t.screenPadding, paddingTop: 16, paddingBottom: 24 }}
+        >
+          {/* Selected category banner */}
+          {selectedCat ? (
+            <RoundCard tone="gray" padding={t.cardPadding} style={{ marginBottom: 24 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+                <IconCircle size={48} bg={selectedCat.iconBg}>
+                  <Ionicons name={selectedCat.icon} size={24} color={selectedCat.iconColor} />
+                </IconCircle>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: t.fontBase, fontWeight: '700', color: t.textPrimary }}>
+                    {selectedCat.label}
+                  </Text>
+                  <Text style={{ fontSize: t.fontSm, color: t.textMuted, marginTop: 2 }}>
+                    {selectedCat.subtitle}
+                  </Text>
+                </View>
+              </View>
+            </RoundCard>
+          ) : (
+            /* Category picker (no pre-selection) */
+            <View style={{ marginBottom: 24 }}>
+              <Text style={{ fontSize: t.fontSm, fontWeight: '700', color: t.textPrimary, marginBottom: 12 }}>
+                Select Category
+              </Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+                {CATEGORIES.map((cat) => {
+                  const active = category === cat.value;
+                  return (
+                    <TouchableOpacity
+                      key={cat.value}
+                      onPress={() => setCategory(cat.value)}
+                      activeOpacity={0.85}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: active }}
+                      style={{
+                        width: '47%',
+                        borderRadius: rd.radiusCard,
+                        padding: t.cardPadding,
+                        backgroundColor: active ? rd.inkSoft : '#F7F7F8',
+                        borderWidth: active ? 1.5 : 1,
+                        borderColor: active ? rd.ink : rd.cardBorder,
+                        alignItems: 'center',
+                      }}
+                    >
+                      <IconCircle size={44} bg={cat.iconBg}>
+                        <Ionicons name={cat.icon} size={22} color={cat.iconColor} />
+                      </IconCircle>
+                      <Text
+                        style={{
+                          marginTop: 8,
+                          fontSize: t.fontSm,
+                          fontWeight: '600',
+                          color: t.textPrimary,
+                          textAlign: 'center',
+                        }}
+                      >
+                        {cat.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          )}
 
-        <Text className="text-gray-500 font-semibold mb-3" style={{ fontSize: t.fontXs, letterSpacing: 0.5 }}>
-          URGENCY
-        </Text>
-        <View className="flex-row gap-2.5 mb-6">
-          {URGENCIES.map((u) => {
-            const isActive = urgency === u.value;
-            return (
+          {/* Description */}
+          <Text style={{ fontSize: t.fontBase, fontWeight: '700', color: t.textPrimary, marginBottom: 8 }}>
+            Describe what you need{' '}
+            <Text style={{ fontWeight: '400', color: t.textMuted }}>(optional)</Text>
+          </Text>
+          <TextInput
+            value={description}
+            onChangeText={setDescription}
+            placeholder="Any details the staff member should know..."
+            placeholderTextColor={t.textMuted}
+            multiline
+            textAlignVertical="top"
+            maxLength={2000}
+            style={{
+              minHeight: 120,
+              borderRadius: rd.radiusInput,
+              borderWidth: 1,
+              borderColor: rd.cardBorder,
+              backgroundColor: '#FFFFFF',
+              paddingHorizontal: 16,
+              paddingVertical: 14,
+              fontSize: t.fontBase,
+              color: t.textPrimary,
+              marginBottom: 24,
+            }}
+          />
+
+          {/* Preferred Time */}
+          <Text style={{ fontSize: t.fontBase, fontWeight: '700', color: t.textPrimary, marginBottom: 8 }}>
+            Preferred Time{' '}
+            <Text style={{ fontWeight: '400', color: t.textMuted }}>(Optional)</Text>
+          </Text>
+          <TouchableOpacity
+            onPress={() => setShowTimePicker(true)}
+            activeOpacity={0.85}
+            style={{
+              minHeight: t.touchTarget,
+              borderRadius: rd.radiusInput,
+              borderWidth: 1,
+              borderColor: rd.cardBorder,
+              backgroundColor: '#FFFFFF',
+              paddingHorizontal: 16,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}
+          >
+            <Text
+              style={{
+                fontSize: t.fontBase,
+                color: preferredTime ? t.textPrimary : t.textMuted,
+              }}
+            >
+              {preferredTime || 'Select time'}
+            </Text>
+            <Ionicons name="chevron-down" size={18} color={t.textMuted} />
+          </TouchableOpacity>
+        </ScrollView>
+      </KeyboardAvoidingView>
+
+      {/* Footer */}
+      <SafeAreaView
+        edges={['bottom']}
+        style={{ backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: rd.cardBorder }}
+      >
+        <View style={{ paddingHorizontal: t.screenPadding, paddingTop: 12, paddingBottom: 6 }}>
+          <PillButton
+            label={mutation.isPending ? 'Submitting…' : 'Submit Request'}
+            tone="dark"
+            onPress={handleSubmit}
+            loading={mutation.isPending}
+            disabled={!isValid || mutation.isPending}
+          />
+        </View>
+      </SafeAreaView>
+
+      {/* Time picker bottom-sheet */}
+      <Modal visible={showTimePicker} transparent animationType="slide" onRequestClose={() => setShowTimePicker(false)}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' }}>
+          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setShowTimePicker(false)} />
+          <SafeAreaView
+            edges={['bottom']}
+            style={{ backgroundColor: '#FFFFFF', borderTopLeftRadius: 24, borderTopRightRadius: 24 }}
+          >
+            <View style={{ paddingHorizontal: t.screenPadding, paddingTop: 24, paddingBottom: 8 }}>
+              <Display size="sm" style={{ marginBottom: 16 }}>
+                Select Preferred Time
+              </Display>
+              <View style={{ gap: 8 }}>
+                {PREFERRED_TIMES.map((time) => {
+                  const selected = preferredTime === time;
+                  return (
+                    <TouchableOpacity
+                      key={time}
+                      onPress={() => { setPreferredTime(time); setShowTimePicker(false); }}
+                      activeOpacity={0.85}
+                      style={{
+                        minHeight: t.touchTarget,
+                        borderRadius: rd.radiusPill,
+                        paddingHorizontal: 18,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        backgroundColor: selected ? rd.inkSoft : '#F7F7F8',
+                        borderWidth: selected ? 1.5 : 0,
+                        borderColor: rd.ink,
+                      }}
+                    >
+                      <Text style={{ fontSize: t.fontBase, color: t.textPrimary, fontWeight: selected ? '700' : '400' }}>
+                        {time}
+                      </Text>
+                      {selected ? <Ionicons name="checkmark" size={20} color={t.textPrimary} /> : null}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          </SafeAreaView>
+        </View>
+      </Modal>
+
+      {/* Success bottom-sheet */}
+      <Modal visible={successSheet} transparent animationType="slide" onRequestClose={handleGoBack}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' }}>
+          <SafeAreaView
+            edges={['bottom']}
+            style={{ backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, overflow: 'hidden' }}
+          >
+            {/* Green gradient header */}
+            <LinearGradient
+              colors={['#C8E6C9', '#A5D6A7', '#81C784']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={{
+                alignItems: 'center',
+                justifyContent: 'center',
+                paddingVertical: 32,
+                position: 'relative',
+              }}
+            >
               <TouchableOpacity
-                key={u.value}
-                onPress={() => setUrgency(u.value)}
-                className={`flex-1 rounded-xl py-3 justify-center items-center border ${isActive ? `${u.activeBg} ${u.activeBorder}` : 'bg-gray-100 border-gray-200'}`}
-                style={{ minHeight: t.touchTarget }}
-                accessibilityRole="button"
-                accessibilityLabel={`Set urgency to ${u.label}`}
-                accessibilityState={{ selected: isActive }}
+                onPress={handleGoBack}
+                style={{
+                  position: 'absolute',
+                  top: 16,
+                  right: 16,
+                  width: 32,
+                  height: 32,
+                  borderRadius: 16,
+                  backgroundColor: 'rgba(255,255,255,0.6)',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
               >
-                <Text className={`font-bold ${isActive ? u.activeText : 'text-gray-500'}`} style={{ fontSize: t.fontSm }}>
-                  {u.label}
-                </Text>
+                <Ionicons name="close" size={18} color={t.textPrimary} />
               </TouchableOpacity>
-            );
-          })}
+              {/* Scalloped badge */}
+              <View
+                style={{
+                  width: 80,
+                  height: 80,
+                  borderRadius: 40,
+                  backgroundColor: 'rgba(255,255,255,0.45)',
+                  borderWidth: 4,
+                  borderColor: 'rgba(255,255,255,0.7)',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Ionicons name="checkmark" size={44} color={rd.green} />
+              </View>
+            </LinearGradient>
+
+            <View style={{ paddingHorizontal: t.screenPadding, paddingTop: 20, paddingBottom: 8 }}>
+              <Display size="md" style={{ marginBottom: 12 }}>
+                Staff Help Request{'\n'}Submitted!
+              </Display>
+
+              {createdAt ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 20 }}>
+                  <Ionicons name="calendar-outline" size={16} color={t.textMuted} />
+                  <Text style={{ fontSize: t.fontSm, color: t.textMuted }}>{createdAt}</Text>
+                </View>
+              ) : null}
+
+              <View
+                style={{ height: 1, backgroundColor: rd.cardBorder, marginBottom: 20 }}
+              />
+
+              <View style={{ gap: 10 }}>
+                <PillButton label="Track Request" tone="dark" onPress={handleTrack} />
+                <PillButton label="Go Back" tone="light" onPress={handleGoBack} />
+              </View>
+            </View>
+          </SafeAreaView>
         </View>
-
-        <Text className="text-gray-500 font-semibold mb-2" style={{ fontSize: t.fontXs, letterSpacing: 0.5 }}>
-          DESCRIPTION *
-        </Text>
-        <TextInput
-          value={description}
-          onChangeText={setDescription}
-          placeholder="Describe the issue in detail…"
-          placeholderTextColor="#9CA3AF"
-          multiline
-          numberOfLines={5}
-          accessibilityLabel="Help request description"
-          className="bg-gray-100 rounded-2xl border border-gray-200 text-gray-900 p-4 min-h-[140px]"
-          style={{ textAlignVertical: 'top', fontSize: t.fontBase }}
-        />
-      </ScrollView>
-
-      <BottomActionBar
-        primary={{
-          label: mutation.isPending ? 'Submitting…' : 'Submit Request',
-          onPress: handleSubmit,
-          loading: mutation.isPending,
-          disabled: mutation.isPending || !isValid,
-          accessibilityLabel: 'Submit help request',
-        }}
-      />
+      </Modal>
     </View>
   );
 }

@@ -1,9 +1,7 @@
 /**
- * Behaviour test for the redesigned Medical SOS screen.
- * Validates the confirm-phase rendering + a11y contract and the cancel path.
- *
- * Async send-SOS / socket-ack flow is left for an integration suite — these
- * tests focus on what regressed during the redesign: layout, labels, navigation.
+ * Behaviour test for the redesigned Medical SOS screen (2026 Figma).
+ * Validates the Emergency Alert (form) phase rendering + a11y, that "Send Alert"
+ * enters the 5-second countdown, and that the history affordance navigates.
  */
 
 import { render, fireEvent } from '@testing-library/react-native';
@@ -19,77 +17,85 @@ jest.mock('../src/lib/sentry', () => ({
 }));
 
 const mockBack = jest.fn();
+const mockPush = jest.fn();
+const mockReplace = jest.fn();
 const mockCanGoBack = jest.fn(() => true);
 jest.mock('expo-router', () => ({
   router: {
     back: () => mockBack(),
+    push: (...a: any[]) => mockPush(...a),
+    replace: (...a: any[]) => mockReplace(...a),
     canGoBack: () => mockCanGoBack(),
-    push: jest.fn(),
-    replace: jest.fn(),
   },
-  useRouter: () => ({ push: jest.fn(), replace: jest.fn(), back: () => mockBack() }),
+  useRouter: () => ({ push: mockPush, replace: mockReplace, back: mockBack }),
   useLocalSearchParams: () => ({}),
   Link: ({ children }: any) => children,
 }));
 
 jest.mock('../src/lib/api', () => ({
   api: {
+    get: jest.fn().mockResolvedValue(null),
     post: jest.fn().mockResolvedValue({ id: 'sos-test-id' }),
     patch: jest.fn().mockResolvedValue({}),
   },
 }));
 
 jest.mock('socket.io-client', () => ({
-  io: () => ({
-    auth: {},
-    connect: jest.fn(),
-    disconnect: jest.fn(),
-    on: jest.fn(),
-    off: jest.fn(),
-  }),
+  io: () => ({ auth: {}, connect: jest.fn(), disconnect: jest.fn(), on: jest.fn(), off: jest.fn() }),
 }));
 
 jest.mock('../src/store/auth.store', () => ({
   useAuthStore: Object.assign(() => null, {
-    getState: () => ({ token: 'test-token' }),
+    getState: () => ({ token: 'test-token', user: { name: 'Rajesh Kumar' } }),
   }),
 }));
 
 import SosScreen from '../app/medical/sos';
 
-describe('SosScreen (redesigned)', () => {
+describe('SosScreen (2026 redesign)', () => {
   beforeEach(() => {
     mockBack.mockClear();
-    mockCanGoBack.mockReset();
-    mockCanGoBack.mockReturnValue(true);
+    mockPush.mockClear();
+    mockReplace.mockClear();
   });
 
-  it('renders the confirm phase with title, status chip, SOS button, and bottom actions', () => {
-    const { getByText, getByLabelText, queryByLabelText } = render(<SosScreen />);
+  it('renders the Emergency Alert form phase', () => {
+    const { getByText, getByLabelText, queryByText } = render(<SosScreen />);
 
-    // ScreenHeader title + subtitle
-    expect(getByText('Medical SOS')).toBeTruthy();
-    expect(getByText('Tap to alert security & medical staff')).toBeTruthy();
+    // Header + serif title + subtitle
+    expect(getByText('Emergency SOS')).toBeTruthy();
+    expect(getByText('Emergency Alert')).toBeTruthy();
+    expect(getByText('Send instant alert to nearby responders and medical staff')).toBeTruthy();
 
-    // Status chip (idle phase → "Emergency")
-    expect(getByLabelText('Status: Emergency')).toBeTruthy();
+    // "Alerts will be sent to" responders
+    expect(getByText('Alerts will be sent to')).toBeTruthy();
+    expect(getByText('Medical Desk')).toBeTruthy();
+    expect(getByText('First Responder')).toBeTruthy();
+    expect(getByText('Security Gate')).toBeTruthy();
 
-    // Big SOS circle
-    expect(
-      getByLabelText('Emergency SOS. Sends alert immediately with your location.'),
-    ).toBeTruthy();
+    // Optional details + send action
+    expect(getByText('Additional Details (optional)')).toBeTruthy();
+    expect(getByLabelText('Send Alert')).toBeTruthy();
 
-    // BottomActionBar — primary (send) + secondary (cancel)
-    expect(getByLabelText('Emergency SOS. Sends alert and location now.')).toBeTruthy();
-    expect(getByLabelText('Cancel - go back without sending SOS')).toBeTruthy();
-
-    // The "I'm OK" cancel action only exists in the active phase
-    expect(queryByLabelText("I'm OK - Cancel alert, I am safe")).toBeNull();
+    // Active-phase-only action is absent in the form phase
+    expect(queryByText('Mark As Resolved')).toBeNull();
   });
 
-  it('Cancel routes back via router.back()', () => {
+  it('Send Alert enters the 5-second sending countdown', () => {
+    jest.useFakeTimers();
+    try {
+      const { getByLabelText, getByText } = render(<SosScreen />);
+      fireEvent.press(getByLabelText('Send Alert'));
+      expect(getByText('Sending Alert')).toBeTruthy();
+      expect(getByLabelText('Cancel SOS Alert')).toBeTruthy();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('history affordance navigates to SOS history', () => {
     const { getByLabelText } = render(<SosScreen />);
-    fireEvent.press(getByLabelText('Cancel - go back without sending SOS'));
-    expect(mockBack).toHaveBeenCalledTimes(1);
+    fireEvent.press(getByLabelText('View SOS alert history'));
+    expect(mockPush).toHaveBeenCalledWith('/medical/sos-history');
   });
 });

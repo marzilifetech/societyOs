@@ -1,7 +1,6 @@
 /**
  * Behaviour test for the redesigned Service Request screen.
- * Validates the ScreenHeader title/subtitle, category and time-slot
- * affordances, and submit-button gating.
+ * Validates the ScreenHeader title, date/time slot affordances, and submit-button gating.
  */
 
 import { render, fireEvent } from '@testing-library/react-native';
@@ -21,7 +20,7 @@ jest.mock('expo-router', () => ({
     replace: jest.fn(),
   },
   useRouter: () => ({ push: jest.fn(), replace: jest.fn(), back: () => mockBack() }),
-  useLocalSearchParams: () => ({}),
+  useLocalSearchParams: () => ({ category: 'Plumber' }),
   Link: ({ children }: any) => children,
 }));
 
@@ -45,6 +44,11 @@ jest.mock('@tanstack/react-query', () => ({
   }),
 }));
 
+// expo-linear-gradient stub
+jest.mock('expo-linear-gradient', () => ({
+  LinearGradient: ({ children }: any) => children,
+}));
+
 import NewServiceRequestScreen from '../app/services/new';
 
 describe('NewServiceRequestScreen (redesigned)', () => {
@@ -53,18 +57,36 @@ describe('NewServiceRequestScreen (redesigned)', () => {
     mockApiPost.mockClear();
   });
 
-  it('renders the ScreenHeader title/subtitle and primary submit affordance', () => {
-    const { getByText, getByLabelText } = render(<NewServiceRequestScreen />);
-    expect(getByText('New Service Request')).toBeTruthy();
-    expect(getByText('What needs fixing?')).toBeTruthy();
-    expect(getByLabelText('Submit service request')).toBeTruthy();
-    expect(getByLabelText('Select Plumbing category')).toBeTruthy();
-    expect(getByLabelText('Select Electrical category')).toBeTruthy();
+  it('renders the ScreenHeader title and category name', () => {
+    const { getByText } = render(<NewServiceRequestScreen />);
+    expect(getByText('Plumber')).toBeTruthy();
+    expect(getByText('Choose a Date')).toBeTruthy();
   });
 
-  it('does not POST when required fields are empty', () => {
+  it('renders time slot grid', () => {
+    const { getByLabelText } = render(<NewServiceRequestScreen />);
+    expect(getByLabelText('Select time slot 09:00 AM')).toBeTruthy();
+    expect(getByLabelText('Select time slot 02:00 PM')).toBeTruthy();
+  });
+
+  it('submit button is present', () => {
+    const { getByLabelText } = render(<NewServiceRequestScreen />);
+    expect(getByLabelText('Submit service request')).toBeTruthy();
+  });
+
+  it('does not POST when no time slot is selected', () => {
     const { getByLabelText } = render(<NewServiceRequestScreen />);
     fireEvent.press(getByLabelText('Submit service request'));
     expect(mockApiPost).not.toHaveBeenCalled();
+  });
+
+  it('POSTs when a time slot is selected', async () => {
+    const { getByLabelText } = render(<NewServiceRequestScreen />);
+    fireEvent.press(getByLabelText('Select time slot 09:00 AM'));
+    await fireEvent.press(getByLabelText('Submit service request'));
+    expect(mockApiPost).toHaveBeenCalledWith(
+      '/service-requests',
+      expect.objectContaining({ category: 'Plumber' }),
+    );
   });
 });

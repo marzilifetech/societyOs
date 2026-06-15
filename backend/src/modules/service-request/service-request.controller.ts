@@ -45,6 +45,16 @@ export class ServiceRequestController {
     return this.srService.findByResident(user.sub, societyId);
   }
 
+  @Patch(':id/cancel')
+  @Roles(UserRole.RESIDENT)
+  cancelMine(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @SocietyId() societyId: string,
+  ) {
+    return this.srService.cancelByResident(user.sub, societyId, id);
+  }
+
   @Get('assigned')
   @Roles(UserRole.STAFF)
   assignedRequests(@CurrentUser() user: JwtPayload, @SocietyId() societyId: string) {

@@ -1,12 +1,32 @@
-import { View, Text, FlatList, TouchableOpacity } from 'react-native';
+import { useState } from 'react';
+import {
+  View,
+  Text,
+  ScrollView,
+  TouchableOpacity,
+  TextInput,
+  Image,
+  Alert,
+} from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useQuery } from '@tanstack/react-query';
-import { Ionicons } from '@expo/vector-icons';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+
 import { api } from '../../src/lib/api';
 import { useTheme } from '../../src/hooks/useTheme';
+import {
+  ScreenHeader,
+  Display,
+  RoundCard,
+  PillButton,
+  IconCircle,
+  StatusPill,
+  rd,
+  type RdStatusTone,
+} from '../../src/components/ui';
 
-type IoniconName = keyof typeof Ionicons.glyphMap;
+// Figma reference: Utility Service.jpg / Utility Service-1.jpg
 
 type ServiceRequestSummary = {
   id: string;
@@ -14,152 +34,364 @@ type ServiceRequestSummary = {
   description: string;
   status: string;
   createdAt: string;
+  preferredTime?: string;
+  scheduledTime?: string;
+  assignedTo?: { user?: { name?: string }; name?: string } | null;
 };
 
-const STATUS_CONFIG: Record<string, { bg: string; text: string; label: string }> = {
-  PENDING: { bg: '#EFF6FF', text: '#2563EB', label: 'Pending' },
-  ASSIGNED: { bg: '#F5F3FF', text: '#7C3AED', label: 'Assigned' },
-  IN_PROGRESS: { bg: '#FFFBEB', text: '#D97706', label: 'In Progress' },
-  COMPLETED: { bg: '#F0FDF4', text: '#16A34A', label: 'Completed' },
-  REJECTED: { bg: '#FEF2F2', text: '#DC2626', label: 'Rejected' },
-  CLOSED: { bg: '#F3F4F6', text: '#6B7280', label: 'Closed' },
-};
+type IoniconName = keyof typeof Ionicons.glyphMap;
 
-const CATEGORIES: { icon: IoniconName; label: string; tint: string }[] = [
-  { icon: 'water', label: 'Plumbing', tint: '#0EA5E9' },
-  { icon: 'flash', label: 'Electrical', tint: '#F59E0B' },
-  { icon: 'snow', label: 'AC/HVAC', tint: '#06B6D4' },
-  { icon: 'hammer', label: 'Carpentry', tint: '#A16207' },
-  { icon: 'sparkles', label: 'Cleaning', tint: '#10B981' },
-  { icon: 'swap-vertical', label: 'Lift', tint: '#6366F1' },
-  { icon: 'shield-checkmark', label: 'Security', tint: '#7C3AED' },
-  { icon: 'leaf', label: 'Gardening', tint: '#16A34A' },
+const CATEGORIES: {
+  label: string;
+  icon: IoniconName;
+  bg: string;
+  iconColor: string;
+}[] = [
+  { label: 'Plumber', icon: 'water-outline', bg: '#E8F4FD', iconColor: '#0EA5E9' },
+  { label: 'Carpenter', icon: 'hammer-outline', bg: '#FBF3E4', iconColor: '#A16207' },
+  { label: 'Electrician', icon: 'flash-outline', bg: '#FFFAEB', iconColor: '#D97706' },
+  { label: 'Painter', icon: 'color-palette-outline', bg: '#F3F0FF', iconColor: '#7C3AED' },
+  { label: 'Pest Control', icon: 'bug-outline', bg: '#F0FDF4', iconColor: '#16A34A' },
+  { label: 'Appliance Repair', icon: 'construct-outline', bg: '#FFF1F2', iconColor: '#E11D48' },
 ];
+
+function mapStatus(status: string): { tone: RdStatusTone; label: string } {
+  switch (status) {
+    case 'PENDING':
+      return { tone: 'pending', label: 'Pending' };
+    case 'ASSIGNED':
+      return { tone: 'active', label: 'Assigned' };
+    case 'IN_PROGRESS':
+      return { tone: 'active', label: 'In Progress' };
+    case 'COMPLETED':
+      return { tone: 'resolved', label: 'Completed' };
+    case 'CANCELLED':
+      return { tone: 'cancelled', label: 'Cancelled' };
+    case 'REJECTED':
+      return { tone: 'cancelled', label: 'Rejected' };
+    case 'CLOSED':
+      return { tone: 'neutral', label: 'Closed' };
+    default:
+      return { tone: 'neutral', label: status };
+  }
+}
+
+function fmtDateTime(iso: string) {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
 
 export default function ServicesScreen() {
   const t = useTheme();
-  const { data: requests, isLoading } = useQuery<ServiceRequestSummary[]>({
+  const qc = useQueryClient();
+  const [search, setSearch] = useState('');
+
+  const { data: requests } = useQuery<ServiceRequestSummary[]>({
     queryKey: ['my-service-requests'],
     queryFn: () => api.get<ServiceRequestSummary[]>('/service-requests/my'),
   });
 
-  const active = requests?.filter((r: ServiceRequestSummary) => !['COMPLETED', 'CLOSED', 'REJECTED'].includes(r.status));
-  const past = requests?.filter((r: ServiceRequestSummary) => ['COMPLETED', 'CLOSED', 'REJECTED'].includes(r.status));
+  const cancelMutation = useMutation({
+    mutationFn: (id: string) => api.patch(`/service-requests/${id}/cancel`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['my-service-requests'] }),
+    onError: (err: any) => Alert.alert('Error', err?.message ?? 'Could not cancel request.'),
+  });
 
-  const tileHeight = t.touchTarget >= 68 ? 100 : 80;
+  const handleCancel = (id: string) => {
+    Alert.alert('Cancel request?', 'Are you sure you want to cancel this request?', [
+      { text: 'No', style: 'cancel' },
+      { text: 'Yes, Cancel', style: 'destructive', onPress: () => cancelMutation.mutate(id) },
+    ]);
+  };
+
+  const active = requests?.filter(
+    (r) => !['COMPLETED', 'CLOSED', 'REJECTED', 'CANCELLED'].includes(r.status),
+  ) ?? [];
+
+  const historyBtn = (
+    <TouchableOpacity
+      onPress={() => router.push('/services/history' as any)}
+      accessibilityRole="button"
+      accessibilityLabel="View service history"
+      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+      style={{
+        width: t.touchTargetSm,
+        height: t.touchTargetSm,
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <MaterialCommunityIcons name="history" size={24} color={t.textPrimary} />
+    </TouchableOpacity>
+  );
+
+  const filteredCategories = CATEGORIES.filter((c) =>
+    search.trim() === '' ? true : c.label.toLowerCase().includes(search.toLowerCase()),
+  );
 
   return (
-    <SafeAreaView className="flex-1 bg-gray-50">
-      <FlatList
-        data={[]}
-        keyExtractor={() => 'list'}
-        ListHeaderComponent={
-          <View>
-            <View className="px-6 pt-4 pb-3 flex-row justify-between items-center">
-              <Text className="text-2xl font-bold text-gray-900">Services</Text>
+    <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+      <ScreenHeader title="Services" trailing={historyBtn} />
+
+      <ScrollView
+        contentContainerStyle={{
+          paddingHorizontal: t.screenPadding,
+          paddingTop: 14,
+          paddingBottom: 32,
+        }}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* Search */}
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            backgroundColor: rd.inkSoft,
+            borderRadius: rd.radiusInput,
+            paddingHorizontal: 14,
+            marginBottom: 20,
+            minHeight: t.touchTarget,
+          }}
+        >
+          <Ionicons name="search-outline" size={18} color={t.textMuted} />
+          <TextInput
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Search services..."
+            placeholderTextColor={t.textMuted}
+            style={{
+              flex: 1,
+              marginLeft: 10,
+              fontSize: t.fontBase,
+              color: t.textPrimary,
+            }}
+            accessibilityLabel="Search service categories"
+          />
+          {search.length > 0 && (
+            <TouchableOpacity onPress={() => setSearch('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Ionicons name="close-circle" size={18} color={t.textMuted} />
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* Category grid — 2-col RoundCards matching Figma */}
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 28 }}>
+          {filteredCategories.map((cat) => (
+            <CategoryCard
+              key={cat.label}
+              cat={cat}
+              onPress={() =>
+                router.push({ pathname: '/services/new', params: { category: cat.label } } as any)
+              }
+            />
+          ))}
+        </View>
+
+        {/* Active Requests */}
+        {active.length > 0 && (
+          <View style={{ marginBottom: 8 }}>
+            <View
+              style={{
+                flexDirection: 'row',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: 14,
+              }}
+            >
+              <Display size="sm">Active Requests</Display>
               <TouchableOpacity
-                className="bg-primary-500 rounded-xl px-4"
-                style={{ minHeight: t.touchTargetSm, justifyContent: 'center' }}
-                onPress={() => router.push('/services/new' as any)}
+                onPress={() => router.push('/services/history' as any)}
                 accessibilityRole="button"
-                accessibilityLabel="Create new service request"
+                accessibilityLabel="Show all service requests"
               >
-                <Text className="text-white font-semibold" style={{ fontSize: t.fontSm }}>+ Request</Text>
+                <Text
+                  style={{
+                    fontSize: t.fontSm,
+                    color: t.accentPrimary,
+                    fontWeight: '600',
+                  }}
+                >
+                  View all →
+                </Text>
               </TouchableOpacity>
             </View>
 
-            {/* Categories */}
-            <View className="px-6 mb-4">
-              <Text className="text-gray-700 font-semibold mb-3" style={{ fontSize: t.fontBase }}>Categories</Text>
-              <View className="flex-row flex-wrap gap-2">
-                {CATEGORIES.map((cat) => (
-                  <TouchableOpacity
-                    key={cat.label}
-                    className="bg-white rounded-xl px-3 flex-row items-center gap-2 shadow-sm"
-                    style={{ minHeight: tileHeight, paddingVertical: 8 }}
-                    onPress={() => router.push({ pathname: '/services/new', params: { category: cat.label } } as any)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Request ${cat.label} service`}
-                  >
-                    <View
-                      className="w-9 h-9 rounded-lg items-center justify-center"
-                      style={{ backgroundColor: `${cat.tint}1A` }}
-                    >
-                      <Ionicons name={cat.icon} size={18} color={cat.tint} />
-                    </View>
-                    <Text className="text-gray-700" style={{ fontSize: t.fontSm }}>{cat.label}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+            <View style={{ gap: 12 }}>
+              {active.map((req) => (
+                <ActiveRequestCard key={req.id} req={req} onCancel={handleCancel} />
+              ))}
             </View>
-
-            {/* Active requests */}
-            {active && active.length > 0 && (
-              <View className="px-6 mb-2">
-                <Text className="text-gray-700 font-semibold mb-3" style={{ fontSize: t.fontBase }}>Active ({active.length})</Text>
-                {active.map((req: ServiceRequestSummary) => (
-                  <RequestCard key={req.id} req={req} />
-                ))}
-              </View>
-            )}
-
-            {/* Past requests */}
-            {past && past.length > 0 && (
-              <View className="px-6">
-                <Text className="text-gray-500 font-semibold mb-3" style={{ fontSize: t.fontBase }}>History</Text>
-                {past.map((req: ServiceRequestSummary) => (
-                  <RequestCard key={req.id} req={req} />
-                ))}
-              </View>
-            )}
-
-            {!isLoading && !requests?.length && (
-              <View className="items-center mt-12 px-6">
-                <View className="w-16 h-16 rounded-2xl bg-primary-50 items-center justify-center mb-4">
-                  <Ionicons name="construct" size={32} color="#821A52" />
-                </View>
-                <Text className="text-gray-700 font-semibold" style={{ fontSize: t.fontBase }}>No requests yet</Text>
-                <Text className="text-gray-400 mt-1 text-center" style={{ fontSize: t.fontSm }}>
-                  Raise a service request and we'll get it sorted
-                </Text>
-              </View>
-            )}
           </View>
-        }
-        renderItem={() => null}
-        contentContainerStyle={{ paddingBottom: 32 }}
-      />
-    </SafeAreaView>
+        )}
+      </ScrollView>
+    </View>
   );
 }
 
-function RequestCard({ req }: { req: ServiceRequestSummary }) {
+function CategoryCard({
+  cat,
+  onPress,
+}: {
+  cat: (typeof CATEGORIES)[number];
+  onPress: () => void;
+}) {
   const t = useTheme();
-  const c = STATUS_CONFIG[req.status] ?? { bg: '#F3F4F6', text: '#6B7280', label: req.status };
+  // Two columns with gap=12 and horizontal padding = screenPadding*2
+  // We approximate 50% minus gap. Use flex instead.
   return (
     <TouchableOpacity
-      className="bg-white rounded-2xl px-4 py-4 mb-3 shadow-sm"
-      style={{ minHeight: t.touchTarget }}
-      onPress={() => router.push(`/services/${req.id}` as any)}
+      onPress={onPress}
+      activeOpacity={0.85}
       accessibilityRole="button"
-      accessibilityLabel={`View ${req.category} service request, status ${c.label}`}
+      accessibilityLabel={`Book ${cat.label} service`}
+      style={{ width: '47.5%' }}
     >
-      <View className="flex-row justify-between items-start">
-        <View className="flex-1 mr-2">
-          <Text className="font-semibold text-gray-900 capitalize" style={{ fontSize: t.fontBase }}>{req.category}</Text>
-          <Text className="text-gray-500 mt-0.5" style={{ fontSize: t.fontSm }} numberOfLines={2}>
-            {req.description}
-          </Text>
-          <Text className="text-gray-400 mt-1" style={{ fontSize: t.fontXs }}>
-            {new Date(req.createdAt).toLocaleDateString('en-IN')}
+      <RoundCard tone="white" padding={0} style={{ overflow: 'hidden' }}>
+        {/* Icon area */}
+        <View
+          style={{
+            backgroundColor: cat.bg,
+            height: 110,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <IconCircle size={56} bg={cat.iconColor + '22'}>
+            <Ionicons name={cat.icon} size={28} color={cat.iconColor} />
+          </IconCircle>
+        </View>
+        {/* Label */}
+        <View style={{ paddingHorizontal: 14, paddingVertical: 12 }}>
+          <Text
+            style={{
+              fontSize: t.fontBase,
+              fontWeight: '700',
+              color: t.textPrimary,
+            }}
+          >
+            {cat.label}
           </Text>
         </View>
-        <View className="rounded-full px-2.5 py-1" style={{ backgroundColor: c.bg }}>
-          <Text className="font-medium" style={{ color: c.text, fontSize: t.fontSm }}>
-            {c.label}
-          </Text>
-        </View>
-      </View>
+      </RoundCard>
     </TouchableOpacity>
+  );
+}
+
+function ActiveRequestCard({ req, onCancel }: { req: ServiceRequestSummary; onCancel: (id: string) => void }) {
+  const t = useTheme();
+  const { tone, label } = mapStatus(req.status);
+  const providerName =
+    req.assignedTo?.user?.name ?? req.assignedTo?.name ?? null;
+  const dateStr = req.scheduledTime
+    ? fmtDateTime(req.scheduledTime)
+    : fmtDateTime(req.createdAt);
+
+  return (
+    <RoundCard tone="white" padding={t.cardPaddingLg}>
+      <View
+        style={{
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          marginBottom: 8,
+        }}
+      >
+        <View style={{ flex: 1, marginRight: 12 }}>
+          <Text
+            style={{
+              fontSize: t.fontBase,
+              fontWeight: '700',
+              color: t.textPrimary,
+            }}
+          >
+            {req.category}
+          </Text>
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              marginTop: 4,
+              gap: 6,
+              flexWrap: 'wrap',
+            }}
+          >
+            <Ionicons name="calendar-outline" size={13} color={t.textMuted} />
+            <Text style={{ fontSize: t.fontXs, color: t.textMuted }}>
+              {dateStr}
+            </Text>
+            {providerName ? (
+              <>
+                <Text style={{ color: t.textMuted }}>•</Text>
+                <Text style={{ fontSize: t.fontXs, color: t.textMuted }}>
+                  {providerName}
+                </Text>
+              </>
+            ) : null}
+          </View>
+        </View>
+        <StatusPill label={label} tone={tone} />
+      </View>
+
+      <Text
+        numberOfLines={2}
+        style={{
+          fontSize: t.fontSm,
+          color: t.textSecondary,
+          marginBottom: 14,
+          lineHeight: t.fontSm * 1.5,
+        }}
+      >
+        {req.description}
+      </Text>
+
+      <View style={{ flexDirection: 'row', gap: 10 }}>
+        <TouchableOpacity
+          onPress={() => onCancel(req.id)}
+          activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel="Cancel this request"
+          style={{
+            flex: 1,
+            minHeight: t.touchTarget,
+            borderRadius: rd.radiusPill,
+            borderWidth: 1,
+            borderColor: 'rgba(0,0,0,0.12)',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Text style={{ color: rd.crimson, fontSize: t.fontSm, fontWeight: '600' }}>
+            Cancel
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={() => router.push(`/services/${req.id}` as any)}
+          activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel="Track this request"
+          style={{
+            flex: 2,
+            minHeight: t.touchTarget,
+            borderRadius: rd.radiusPill,
+            backgroundColor: rd.ink,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Text style={{ color: '#FFFFFF', fontSize: t.fontSm, fontWeight: '700' }}>
+            Track Request
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </RoundCard>
   );
 }

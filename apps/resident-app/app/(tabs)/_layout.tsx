@@ -11,15 +11,15 @@ interface TabIconProps {
 }
 
 function TabIcon({ focused, name, label }: TabIconProps) {
+  const color = focused ? '#821A52' : '#9CA3AF';
   return (
     <View className="items-center pt-1" style={{ width: 64 }}>
-      <Ionicons name={name} size={22} color={focused ? '#821A52' : '#9CA3AF'} />
+      <Ionicons name={name} size={22} color={color} />
       <Text
         numberOfLines={1}
         adjustsFontSizeToFit
         minimumFontScale={0.8}
-        style={{ fontSize: 11, marginTop: 2 }}
-        className={focused ? 'text-primary-500 font-semibold' : 'text-gray-400'}
+        style={{ fontSize: 11, marginTop: 3, color, fontWeight: focused ? '700' : '500' }}
       >
         {label}
       </Text>
@@ -35,10 +35,10 @@ export default function TabsLayout() {
         tabBarShowLabel: false,
         tabBarStyle: {
           backgroundColor: '#FFFFFF',
-          borderTopColor: '#F3F4F6',
-          height: 80,
-          paddingBottom: 16,
-          paddingTop: 4,
+          borderTopColor: '#F1F1F3',
+          height: 84,
+          paddingBottom: 18,
+          paddingTop: 6,
         },
       }}
     >
@@ -59,10 +59,10 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
-        name="visitors"
+        name="events"
         options={{
           tabBarIcon: ({ focused }: { focused: boolean }) => (
-            <TabIcon focused={focused} name={focused ? 'people' : 'people-outline'} label="Visitors" />
+            <TabIcon focused={focused} name={focused ? 'calendar' : 'calendar-outline'} label="Events" />
           ),
         }}
       />
@@ -82,6 +82,8 @@ export default function TabsLayout() {
           ),
         }}
       />
+      {/* Visitors moved out of the tab bar per the Figma nav (still routable at /visitors). */}
+      <Tabs.Screen name="visitors" options={{ href: null }} />
     </Tabs>
   );
 }

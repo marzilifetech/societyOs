@@ -73,6 +73,26 @@ export class MedicalController {
     return this.medicalService.cancelAppointment(id, user.sub);
   }
 
+  @Patch('appointments/:id/reschedule')
+  rescheduleAppointment(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @Body() body: { date?: string; timeSlot?: string; start?: string; slotId?: string },
+  ) {
+    const date = body.date ?? body.start ?? '';
+    const timeSlot = body.timeSlot ?? body.slotId ?? '';
+    return this.medicalService.rescheduleAppointment(id, user.sub, date, timeSlot);
+  }
+
+  @Post('appointments/:id/rate')
+  rateAppointment(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @Body() body: { rating: number; comment?: string },
+  ) {
+    return this.medicalService.rateAppointment(id, user.sub, body.rating, body.comment);
+  }
+
   // ── Doctor endpoints ─────────────────────────────────────────────────────────
 
   @Get('doctor/my-appointments')

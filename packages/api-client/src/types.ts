@@ -167,18 +167,19 @@ export interface Notice {
 }
 
 // Event
-export type EventCategory = 'SPORTS' | 'CULTURAL' | 'MEETING' | 'WORKSHOP' | 'FESTIVAL' | 'OTHER';
+export type EventCategory = 'SPORTS' | 'CULTURAL' | 'EDUCATIONAL' | 'SOCIAL' | 'RELIGIOUS' | 'MEETING' | 'WORKSHOP' | 'FESTIVAL' | 'OTHER';
 
 export interface Society_Event {
   id: string;
   title: string;
-  description: string;
+  description?: string;
   category: EventCategory;
-  startAt: string;
-  endAt: string;
+  date: string;
   venue: string;
-  maxAttendees?: number;
-  registeredCount: number;
+  capacity?: number;
+  registrationCount: number;
+  status?: string;
+  imageUrl?: string;
   isRegistered?: boolean;
   isWaitlisted?: boolean;
 }

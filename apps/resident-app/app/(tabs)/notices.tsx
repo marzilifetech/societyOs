@@ -1,202 +1,461 @@
-import { View, Text, FlatList, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+
 import { api } from '../../src/lib/api';
+import { useTheme } from '../../src/hooks/useTheme';
+import {
+  ScreenHeader,
+  Display,
+  RoundCard,
+  PillButton,
+  IconCircle,
+  SegmentedTabs,
+  rd,
+} from '../../src/components/ui';
 
 type Tab = 'notices' | 'polls';
 
+// Shape from GET /notices
+type Notice = {
+  id: string;
+  title: string;
+  body?: string;
+  publishedAt?: string;
+  createdAt?: string;
+  isPinned?: boolean;
+  category?: string;
+};
+
+// Shape from GET /notices/polls
+type PollOption = { id: string; label: string; votes: number };
+type Poll = {
+  id: string;
+  question: string;
+  closesAt?: string;
+  totalVotes: number;
+  options: PollOption[];
+  votedOptionId: string | null;
+};
+
+// Shape from GET /residents/birthdays
+type Birthday = {
+  id: string;
+  name: string;
+  flat: string;
+  date: string; // ISO or date string
+};
+
+// ----------------------------------------------------------------------------
+// Helpers
+// ----------------------------------------------------------------------------
+function timeAgo(iso?: string): string {
+  if (!iso) return '';
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}hrs ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
+
+function closesInDays(iso?: string): string {
+  if (!iso) return '';
+  const diff = new Date(iso).getTime() - Date.now();
+  const days = Math.ceil(diff / 86_400_000);
+  if (days <= 0) return 'Closes today';
+  if (days === 1) return 'Closes in 1 day';
+  return `Closes in ${days} days`;
+}
+
+function initials(name: string): string {
+  return name
+    .split(' ')
+    .slice(0, 2)
+    .map((w) => w[0])
+    .join('')
+    .toUpperCase();
+}
+
+function categoryIcon(category?: string): keyof typeof Ionicons.glyphMap {
+  const c = (category ?? '').toLowerCase();
+  if (c.includes('water') || c.includes('maintenance')) return 'water-outline';
+  if (c.includes('meeting') || c.includes('general')) return 'people-outline';
+  if (c.includes('security') || c.includes('gate')) return 'shield-outline';
+  if (c.includes('event') || c.includes('celebrat')) return 'sparkles-outline';
+  return 'megaphone-outline';
+}
+
+// Today's birthdays for the notice-board section (max 2)
+function todayBirthdays(list: Birthday[]): Birthday[] {
+  const today = new Date();
+  return list.filter((b) => {
+    const d = new Date(b.date);
+    return d.getDate() === today.getDate() && d.getMonth() === today.getMonth();
+  });
+}
+
+// ----------------------------------------------------------------------------
+// Main screen
+// ----------------------------------------------------------------------------
 export default function NoticesScreen() {
-  const [tab, setTab] = useState<Tab>('notices');
+  const t = useTheme();
+  const { tab: tabParam } = useLocalSearchParams<{ tab?: string }>();
+  const [tab, setTab] = useState<Tab>(tabParam === 'polls' ? 'polls' : 'notices');
+  useEffect(() => {
+    if (tabParam === 'polls' || tabParam === 'notices') setTab(tabParam);
+  }, [tabParam]);
 
   const { data: notices, isLoading: noticesLoading } = useQuery({
     queryKey: ['notices'],
-    queryFn: () => api.get<any[]>('/notices'),
+    queryFn: () => api.get<Notice[]>('/notices'),
     enabled: tab === 'notices',
   });
 
   const { data: polls, isLoading: pollsLoading } = useQuery({
     queryKey: ['polls'],
-    queryFn: () => api.get<any[]>('/notices/polls'),
+    queryFn: () => api.get<Poll[]>('/notices/polls'),
     enabled: tab === 'polls',
+    retry: false,
+  });
+
+  const { data: birthdays } = useQuery({
+    queryKey: ['birthdays'],
+    queryFn: () => api.get<Birthday[]>('/residents/birthdays'),
+    retry: false,
   });
 
   const isLoading = tab === 'notices' ? noticesLoading : pollsLoading;
+  const noticeList: Notice[] = Array.isArray(notices) ? notices : [];
+  const pollList: Poll[] = Array.isArray(polls) ? polls : [];
+  const birthdayList: Birthday[] = Array.isArray(birthdays) ? birthdays : [];
+  const todayBdays = todayBirthdays(birthdayList);
 
   return (
-    <SafeAreaView className="flex-1 bg-white">
-      <View className="px-6 pt-4 pb-3">
-        <Text className="text-2xl font-bold text-gray-900 mb-4">Updates</Text>
+    <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+      <ScreenHeader title="Notice Board" onBack={null} />
 
-        <View className="flex-row bg-gray-100 rounded-2xl p-1">
-          {(['notices', 'polls'] as Tab[]).map((tabItem) => (
-            <TouchableOpacity
-              key={tabItem}
-              className={`flex-1 py-2 rounded-xl items-center ${tab === tabItem ? 'bg-primary-500' : 'bg-transparent'}`}
-              onPress={() => setTab(tabItem)}
-              accessibilityRole="button"
-              accessibilityLabel={tabItem === 'notices' ? 'View notices' : 'View polls'}
-            >
-              <Text className={`font-semibold text-sm ${tab === tabItem ? 'text-white' : 'text-gray-500'}`}>
-                {tabItem === 'notices' ? 'Notices' : 'Polls'}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </View>
+      <ScrollView
+        contentContainerStyle={{ paddingHorizontal: t.screenPadding, paddingTop: 12, paddingBottom: 32 }}
+        showsVerticalScrollIndicator={false}
+      >
+        <SegmentedTabs
+          value={tab}
+          onChange={setTab}
+          options={[
+            { key: 'notices', label: 'Notices' },
+            { key: 'polls', label: 'Polls' },
+          ]}
+          style={{ marginBottom: 20 }}
+        />
 
-      {isLoading ? (
-        <ActivityIndicator color="#821A52" style={{ marginTop: 40 }} />
-      ) : tab === 'notices' ? (
-        <FlatList
-          data={notices}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 32 }}
-          showsVerticalScrollIndicator={false}
-          renderItem={({ item }) => {
-            const dateStr = item.publishedAt ? new Date(item.publishedAt).toLocaleDateString('en-IN') : '';
-            return (
-              <TouchableOpacity
-                onPress={() => router.push(('/notices/' + item.id) as any)}
-                className="bg-gray-50 border border-gray-200 rounded-2xl px-4 py-4 mb-3"
-                activeOpacity={0.8}
-                accessibilityRole="button"
-                accessibilityLabel={`${item.title} notice from ${dateStr}`}
-              >
-                {item.isPinned && (
-                  <View className="flex-row items-center mb-2 gap-1">
-                    <Ionicons name="bookmark" size={12} color="#821A52" />
-                    <Text className="text-primary-500 font-semibold text-xs">PINNED</Text>
-                  </View>
-                )}
-                <View className="flex-row items-start gap-3">
-                  <View className="w-10 h-10 rounded-xl bg-primary-50 items-center justify-center">
-                    <Ionicons name="megaphone" size={20} color="#821A52" />
-                  </View>
-                  <View className="flex-1">
-                    <Text className="text-gray-900 font-semibold mb-1 text-base">{item.title}</Text>
-                    <Text className="text-gray-500 text-sm leading-5">{item.body}</Text>
-                    <Text className="mt-2 text-xs text-gray-400">{dateStr}</Text>
-                  </View>
-                </View>
-              </TouchableOpacity>
-            );
-          }}
-          ListEmptyComponent={
-            <View className="items-center mt-16">
-              <View className="w-16 h-16 rounded-2xl bg-primary-50 items-center justify-center mb-4">
-                <Ionicons name="megaphone" size={32} color="#821A52" />
-              </View>
-              <Text className="text-gray-500 text-base">No notices yet</Text>
-            </View>
-          }
-        />
-      ) : (
-        <FlatList
-          data={polls}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 32 }}
-          showsVerticalScrollIndicator={false}
-          renderItem={({ item }) => <PollCard poll={item} />}
-          ListEmptyComponent={
-            <View className="items-center mt-16">
-              <View className="w-16 h-16 rounded-2xl bg-primary-50 items-center justify-center mb-4">
-                <Ionicons name="stats-chart" size={32} color="#821A52" />
-              </View>
-              <Text className="text-gray-500 text-base">No active polls</Text>
-            </View>
-          }
-        />
-      )}
-    </SafeAreaView>
+        {isLoading ? (
+          <ActivityIndicator color={t.accentPrimary} style={{ marginTop: 48 }} />
+        ) : tab === 'notices' ? (
+          <NoticesTab
+            notices={noticeList}
+            todayBdays={todayBdays}
+            allBirthdays={birthdayList}
+            t={t}
+          />
+        ) : (
+          <PollsTab polls={pollList} t={t} />
+        )}
+      </ScrollView>
+    </View>
   );
 }
 
-function PollCard({ poll }: { poll: any }) {
-  const qc = useQueryClient();
-  const options: string[] = poll.options ?? [];
-  const deadline = new Date(poll.deadline);
-  const isExpired = deadline < new Date();
-  const [selected, setSelected] = useState<number | null>(null);
-  const [voted, setVoted] = useState(false);
-
-  const voteMutation = useMutation({
-    mutationFn: (optionIndex: number) =>
-      api.post(`/notices/polls/${poll.id}/vote`, { options: [optionIndex] }),
-    onSuccess: () => {
-      setVoted(true);
-      qc.invalidateQueries({ queryKey: ['polls'] });
-    },
-    onError: (err: any) => Alert.alert('Error', err.message ?? 'Failed to submit vote'),
-  });
-
-  const handleVote = () => {
-    if (selected === null) return;
-    voteMutation.mutate(selected);
-  };
-
-  const isDisabled = isExpired || voted || voteMutation.isPending;
+// ----------------------------------------------------------------------------
+// Notices tab
+// ----------------------------------------------------------------------------
+function NoticesTab({
+  notices,
+  todayBdays,
+  allBirthdays,
+  t,
+}: {
+  notices: Notice[];
+  todayBdays: Birthday[];
+  allBirthdays: Birthday[];
+  t: ReturnType<typeof useTheme>;
+}) {
+  if (notices.length === 0) {
+    return (
+      <RoundCard tone="white" padding={t.cardPaddingLg} style={{ marginTop: 8 }}>
+        <View style={{ paddingVertical: 48, alignItems: 'center' }}>
+          <Display size="md" align="center">No new notices</Display>
+          <Text
+            style={{
+              textAlign: 'center',
+              color: t.textMuted,
+              fontSize: t.fontBase,
+              marginTop: 8,
+              lineHeight: t.fontBase * 1.5,
+            }}
+          >
+            New notices from the society will appear here.
+          </Text>
+        </View>
+      </RoundCard>
+    );
+  }
 
   return (
-    <View className="bg-gray-50 border border-gray-200 rounded-2xl px-4 py-4 mb-3">
-      <View className="flex-row items-start gap-3 mb-3">
-        <View className="w-10 h-10 rounded-xl bg-primary-50 items-center justify-center">
-          <Ionicons
-            name={voted ? 'checkmark-done-circle' : 'stats-chart'}
-            size={20}
-            color={voted ? '#22C55E' : '#821A52'}
-          />
-        </View>
-        <Text className="text-gray-900 font-semibold flex-1 text-base">{poll.question}</Text>
+    <>
+      <View style={{ gap: 12 }}>
+        {notices.map((notice) => (
+          <NoticeCard key={notice.id} notice={notice} t={t} />
+        ))}
       </View>
-      {options.map((option, i) => (
-        <TouchableOpacity
-          key={i}
-          className={`border rounded-xl px-3 mb-2 min-h-[44px] justify-center ${
-            selected === i ? 'border-primary-500 bg-primary-50' : 'border-gray-200 bg-white'
-          }`}
-          disabled={isDisabled}
-          onPress={() => !isDisabled && setSelected(i)}
-          accessibilityRole="button"
-          accessibilityLabel={`Select option: ${option}`}
-        >
-          <Text
-            className={`text-sm ${selected === i ? 'text-primary-500 font-semibold' : 'text-gray-500'}`}
-          >
-            {option}
-          </Text>
-        </TouchableOpacity>
-      ))}
-      {!isExpired && !voted && (
-        <TouchableOpacity
-          className={`mt-1 rounded-xl items-center justify-center min-h-[44px] ${
-            selected !== null && !voteMutation.isPending ? 'bg-primary-500' : 'bg-gray-100'
-          }`}
-          disabled={selected === null || voteMutation.isPending}
-          onPress={handleVote}
-          accessibilityRole="button"
-          accessibilityLabel="Submit vote"
-        >
-          <Text
-            className={`font-semibold text-sm ${
-              selected !== null && !voteMutation.isPending ? 'text-white' : 'text-gray-400'
-            }`}
-          >
-            {voteMutation.isPending ? 'Submitting…' : 'Submit Vote'}
-          </Text>
-        </TouchableOpacity>
-      )}
-      {voted && (
-        <View className="flex-row items-center justify-center mt-2 gap-1">
-          <Ionicons name="checkmark-circle" size={14} color="#22C55E" />
-          <Text className="text-green-600 font-medium text-xs">Vote submitted</Text>
+
+      {/* Birthdays section */}
+      {allBirthdays.length > 0 && (
+        <View style={{ marginTop: 24 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+            <Text style={{ fontSize: t.fontBase, fontWeight: '700', color: t.textPrimary }}>
+              {todayBdays.length > 0 ? 'Birthdays Today' : 'Upcoming Birthdays'}
+            </Text>
+            <TouchableOpacity
+              onPress={() => router.push('/notices/birthdays' as any)}
+              accessibilityRole="button"
+              accessibilityLabel="View upcoming birthdays"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Text style={{ fontSize: t.fontSm, fontWeight: '600', color: t.accentPrimary }}>
+                Upcoming →
+              </Text>
+            </TouchableOpacity>
+          </View>
+          <View style={{ gap: 0 }}>
+            {(todayBdays.length > 0 ? todayBdays : allBirthdays).slice(0, 3).map((b, i, arr) => (
+              <BirthdayRow key={b.id} birthday={b} isLast={i === arr.length - 1} t={t} />
+            ))}
+          </View>
         </View>
       )}
-      <Text className="mt-2 text-xs text-gray-400">
-        {isExpired ? 'Closed' : `Closes ${deadline.toLocaleDateString('en-IN')}`}
-      </Text>
+    </>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// Notice card
+// ----------------------------------------------------------------------------
+function NoticeCard({ notice, t }: { notice: Notice; t: ReturnType<typeof useTheme> }) {
+  const dateStr = timeAgo(notice.publishedAt ?? notice.createdAt);
+  return (
+    <RoundCard
+      tone="white"
+      padding={t.cardPaddingLg}
+      onPress={() => router.push((`/notices/${notice.id}`) as any)}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 14 }}>
+        <IconCircle size={44} bg={rd.crimsonSoft} icon={categoryIcon(notice.category)} color={t.accentPrimary} />
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: t.fontBase, fontWeight: '700', color: t.textPrimary, marginBottom: 4 }}>
+            {notice.title}
+          </Text>
+          {notice.body ? (
+            <Text numberOfLines={2} style={{ fontSize: t.fontSm, color: t.textMuted, lineHeight: t.fontSm * 1.5 }}>
+              {notice.body}
+            </Text>
+          ) : null}
+          {dateStr ? (
+            <Text style={{ fontSize: t.fontXs, color: t.textMuted, marginTop: 6 }}>{dateStr}</Text>
+          ) : null}
+        </View>
+      </View>
+    </RoundCard>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// Birthday row
+// ----------------------------------------------------------------------------
+function BirthdayRow({
+  birthday,
+  isLast,
+  t,
+}: {
+  birthday: Birthday;
+  isLast: boolean;
+  t: ReturnType<typeof useTheme>;
+}) {
+  const initStr = initials(birthday.name);
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 14,
+        paddingVertical: 12,
+        borderBottomWidth: isLast ? 0 : 1,
+        borderBottomColor: rd.cardBorder,
+      }}
+    >
+      <IconCircle size={44} bg={rd.crimsonSoft}>
+        <Text style={{ fontSize: t.fontSm, fontWeight: '700', color: t.accentPrimary }}>{initStr}</Text>
+      </IconCircle>
+      <View style={{ flex: 1 }}>
+        <Text style={{ fontSize: t.fontBase, fontWeight: '700', color: t.textPrimary }}>{birthday.name}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
+          <Ionicons name="calendar-outline" size={12} color={t.textMuted} />
+          <Text style={{ fontSize: t.fontSm, color: t.textMuted }}>
+            Today{'  '}•{'  '}Flat {birthday.flat}
+          </Text>
+        </View>
+      </View>
     </View>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// Polls tab
+// ----------------------------------------------------------------------------
+function PollsTab({ polls, t }: { polls: Poll[]; t: ReturnType<typeof useTheme> }) {
+  if (polls.length === 0) {
+    return (
+      <RoundCard tone="white" padding={t.cardPaddingLg} style={{ marginTop: 8 }}>
+        <View style={{ paddingVertical: 48, alignItems: 'center' }}>
+          <Display size="md" align="center">No active polls</Display>
+          <Text
+            style={{
+              textAlign: 'center',
+              color: t.textMuted,
+              fontSize: t.fontBase,
+              marginTop: 8,
+              lineHeight: t.fontBase * 1.5,
+            }}
+          >
+            Committee will post polls when there are community decisions to make.
+          </Text>
+        </View>
+      </RoundCard>
+    );
+  }
+
+  return (
+    <View style={{ gap: 16 }}>
+      {polls.map((poll) => (
+        <PollCard key={poll.id} poll={poll} t={t} />
+      ))}
+    </View>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// Poll card
+// ----------------------------------------------------------------------------
+function PollCard({ poll, t }: { poll: Poll; t: ReturnType<typeof useTheme> }) {
+  const qc = useQueryClient();
+  const [selectedId, setSelectedId] = useState<string | null>(poll.votedOptionId ?? null);
+  const [voted, setVoted] = useState(poll.votedOptionId != null);
+
+  const voteMutation = useMutation({
+    mutationFn: (optionId: string) =>
+      api.post(`/notices/polls/${poll.id}/vote`, { optionId }),
+    onSuccess: (updated: any) => {
+      setVoted(true);
+      qc.setQueryData(['polls'], (old: Poll[] | undefined) =>
+        old ? old.map((p) => (p.id === poll.id ? { ...p, ...updated, votedOptionId: selectedId } : p)) : old,
+      );
+    },
+  });
+
+  const handleSubmit = () => {
+    if (!selectedId || voted || voteMutation.isPending) return;
+    voteMutation.mutate(selectedId);
+  };
+
+  const closesLabel = closesInDays(poll.closesAt);
+  const meta = [closesLabel, `${poll.totalVotes} votes`].filter(Boolean).join('  •  ');
+
+  return (
+    <RoundCard tone="white" padding={t.cardPaddingLg}>
+      {/* Active Poll badge */}
+      <View
+        style={{
+          alignSelf: 'flex-start',
+          backgroundColor: rd.amberSoft,
+          borderRadius: rd.radiusPill,
+          paddingHorizontal: 10,
+          paddingVertical: 4,
+          marginBottom: 12,
+        }}
+      >
+        <Text style={{ fontSize: t.fontXs, fontWeight: '700', color: '#9A6B00' }}>Active Poll</Text>
+      </View>
+
+      {/* Question */}
+      <Display size="sm" style={{ marginBottom: 6 }}>{poll.question}</Display>
+
+      {/* Meta */}
+      {meta ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 16 }}>
+          <Ionicons name="time-outline" size={13} color={t.textMuted} />
+          <Text style={{ fontSize: t.fontXs, color: t.textMuted }}>{meta}</Text>
+        </View>
+      ) : null}
+
+      {/* Options */}
+      <View style={{ gap: 10 }}>
+        {poll.options.map((opt) => {
+          const isSelected = selectedId === opt.id;
+          return (
+            <TouchableOpacity
+              key={opt.id}
+              onPress={() => !voted && !voteMutation.isPending && setSelectedId(opt.id)}
+              disabled={voted || voteMutation.isPending}
+              activeOpacity={0.85}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: isSelected }}
+              style={{
+                minHeight: t.touchTarget,
+                borderRadius: rd.radiusPill,
+                paddingHorizontal: 18,
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                backgroundColor: isSelected ? '#FFFFFF' : rd.inkSoft,
+                borderWidth: isSelected ? 1.5 : 0,
+                borderColor: isSelected ? rd.ink : 'transparent',
+              }}
+            >
+              <Text
+                style={{
+                  fontSize: t.fontBase,
+                  color: t.textPrimary,
+                  fontWeight: isSelected ? '700' : '400',
+                }}
+              >
+                {opt.label}
+              </Text>
+              {isSelected ? <Ionicons name="checkmark" size={18} color={t.textPrimary} /> : null}
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {/* Footer: either "Submit Vote" or "Vote Submitted" */}
+      {voted ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 16 }}>
+          <Ionicons name="checkmark-circle" size={18} color={rd.green} />
+          <Text style={{ fontSize: t.fontBase, fontWeight: '700', color: rd.green }}>Vote Submitted</Text>
+        </View>
+      ) : (
+        <PillButton
+          label={voteMutation.isPending ? 'Submitting…' : 'Submit Vote'}
+          tone="dark"
+          onPress={handleSubmit}
+          disabled={!selectedId}
+          loading={voteMutation.isPending}
+          style={{ marginTop: 16 }}
+        />
+      )}
+    </RoundCard>
   );
 }

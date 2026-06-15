@@ -22,6 +22,12 @@ export class ResidentController {
     return this.residentService.getProfile(user.sub);
   }
 
+  @Get('birthdays')
+  @Roles(UserRole.RESIDENT)
+  getBirthdays(@SocietyId() societyId: string) {
+    return this.residentService.getBirthdays(societyId);
+  }
+
   @Patch('me')
   @Roles(UserRole.RESIDENT)
   updateProfile(@CurrentUser() user: JwtPayload, @Body() dto: UpdateProfileDto) {
