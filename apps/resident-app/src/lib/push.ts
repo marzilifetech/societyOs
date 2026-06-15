@@ -4,6 +4,27 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import { api } from './api';
 
+/**
+ * iOS action categories. The id MUST match the backend's `data.actionGroup`
+ * (mirrored to `aps.category`) so iOS renders the right buttons. On Android
+ * we don't need this — actions are attached to the notification at build time
+ * by our data-only handler (see backend push.service.ts and any client-side
+ * background notification builder).
+ */
+const IOS_CATEGORIES: Notifications.NotificationCategory[] = [
+  {
+    identifier: 'visitor_approval',
+    actions: [
+      { identifier: 'APPROVE', buttonTitle: 'Approve', options: { opensAppToForeground: false } },
+      {
+        identifier: 'REJECT',
+        buttonTitle: 'Reject',
+        options: { opensAppToForeground: false, isDestructive: true },
+      },
+    ],
+  },
+];
+
 // The native device push token last registered with the backend. The backend
 // sends via the Firebase Admin SDK (raw FCM), so it needs the *native* FCM
 // registration token — NOT an Expo push token. We guard with AsyncStorage to
@@ -63,6 +84,18 @@ export function setupNotificationHandler() {
       shouldSetBadge: false,
     }),
   });
+}
+
+/**
+ * Register iOS action categories so the system can render Approve/Reject buttons
+ * on the lockscreen and notification center. Safe to call multiple times — Expo
+ * dedupes by identifier. No-op on Android.
+ */
+export async function setupNotificationCategories() {
+  if (Platform.OS !== 'ios') return;
+  await Promise.all(
+    IOS_CATEGORIES.map((c) => Notifications.setNotificationCategoryAsync(c.identifier, c.actions)),
+  );
 }
 
 /**
@@ -170,6 +203,8 @@ export async function unregisterDeviceToken(): Promise<void> {
 type PushData = {
   type?: string;
   visitId?: string;
+  entityId?: string;
+  actionGroup?: string;
   [key: string]: unknown;
 };
 
@@ -179,37 +214,95 @@ function extractData(response: Notifications.NotificationResponse | null): PushD
   return null;
 }
 
-/** Route the app in response to a notification tap. */
+/** Route the app in response to a notification tap (no action identifier). */
 function routeFromData(data: PushData | null) {
   if (!data) return;
   switch (data.type) {
+    case 'VISITOR_APPROVAL_REQUEST':
     case 'VISITOR_ARRIVAL':
-      if (data.visitId) {
-        router.push(`/visitor/review/${data.visitId}` as any);
+      // visitId is the legacy field; entityId is the canonical one going forward.
+      {
+        const id = (data.entityId as string | undefined) ?? data.visitId;
+        if (id) router.push(`/visitor/review/${id}` as any);
       }
       return;
+    case 'COMPLAINT_UPDATED':
+      if (data.entityId) router.push(`/complaints/${data.entityId}` as any);
+      return;
+    case 'PACKAGE_ARRIVED':
+      router.push('/packages' as any);
+      return;
+    case 'NOTICE_PUBLISHED':
+      router.push('/(tabs)/notices' as any);
+      return;
+    case 'SOS_TRIGGERED':
     case 'SOS':
       router.push('/medical/sos' as any);
       return;
     default:
-      router.push('/' as any);
+      router.push('/notifications' as any);
   }
 }
 
 /**
- * Wire tap-routing for both warm taps (listener) and the cold-start case
- * (getLastNotificationResponseAsync). Returns the listener subscription.
+ * Handle an action-button tap (Approve/Reject). For VISITOR_APPROVAL_REQUEST
+ * we hit the decision endpoint directly so the user doesn't need to open the
+ * app. The endpoint is idempotent server-side, so duplicate taps and
+ * multi-device fan-out collapse to a no-op.
+ */
+async function handleAction(actionIdentifier: string, data: PushData): Promise<void> {
+  if (data.type === 'VISITOR_APPROVAL_REQUEST' && (data.entityId || data.visitId)) {
+    const id = (data.entityId as string | undefined) ?? (data.visitId as string | undefined);
+    const action = actionIdentifier === 'APPROVE' ? 'APPROVE' : 'REJECT';
+    try {
+      await api.post(`/visitors/${id}/decision`, { action });
+    } catch {
+      /* server is the source of truth; user can retry from the visitor screen */
+    }
+  }
+}
+
+/**
+ * Wire tap-routing for warm taps + cold start, AND action-button handling.
+ * Returns the listener subscription.
  */
 export function setupTapRouting(): Notifications.Subscription {
-  // Cold start: the app was launched by tapping a notification.
+  // Cold start: the app was launched by tapping a notification (or an action).
   Notifications.getLastNotificationResponseAsync()
-    .then((response) => routeFromData(extractData(response)))
+    .then((response) => {
+      if (!response) return;
+      const data = extractData(response);
+      if (!data) return;
+      const action = response.actionIdentifier;
+      if (action && action !== Notifications.DEFAULT_ACTION_IDENTIFIER) {
+        void handleAction(action, data);
+      }
+      routeFromData(data);
+    })
     .catch(() => {
       /* ignore */
     });
 
   // Warm taps while the app is running/backgrounded.
   return Notifications.addNotificationResponseReceivedListener((response) => {
-    routeFromData(extractData(response));
+    const data = extractData(response);
+    if (!data) return;
+    const action = response.actionIdentifier;
+    if (action && action !== Notifications.DEFAULT_ACTION_IDENTIFIER) {
+      void handleAction(action, data);
+      return; // action handled; no default route — caller stays where they are
+    }
+    routeFromData(data);
   });
+}
+
+/**
+ * Foreground receiver — fires while the app is visible. The in-app banner
+ * subscribes via this; lockscreen / background notifications are rendered by
+ * the OS and route through `setupTapRouting`.
+ */
+export function subscribeToForegroundReceived(
+  cb: (n: Notifications.Notification) => void,
+): Notifications.Subscription {
+  return Notifications.addNotificationReceivedListener(cb);
 }

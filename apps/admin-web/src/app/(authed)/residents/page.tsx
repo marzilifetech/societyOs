@@ -39,6 +39,24 @@ async function downloadResidentsCSV() {
 type TabType = 'All Residents' | 'Pending Approval';
 type StatusFilter = 'All' | 'ACTIVE' | 'PENDING' | 'INACTIVE';
 
+/** Small pill that turns green when a KYC document is uploaded, gray when not. */
+function DocPip({ label, present }: { label: string; present: boolean }) {
+  return (
+    <span
+      data-testid={`doc-pip-${label.toLowerCase()}`}
+      className={cn(
+        'inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md font-medium',
+        present
+          ? 'bg-green-50 text-green-700 border border-green-200'
+          : 'bg-gray-50 text-gray-400 border border-gray-200',
+      )}
+    >
+      <span aria-hidden>{present ? '✓' : '·'}</span>
+      <span>{label}</span>
+    </span>
+  );
+}
+
 export default function ResidentsPage() {
   const qc = useQueryClient();
   const router = useRouter();
@@ -390,27 +408,14 @@ export default function ResidentsPage() {
                             <span className={cn('text-xs font-medium px-2 py-0.5 rounded-full w-fit', docMeta.color)}>
                               {docMeta.label}
                             </span>
-                            <div className="flex gap-2 mt-0.5">
-                              {r.idProof && (
-                                <a
-                                  href={r.idProof}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-xs text-blue-600 hover:underline"
-                                >
-                                  ID Proof
-                                </a>
-                              )}
-                              {r.addressProof && (
-                                <a
-                                  href={r.addressProof}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-xs text-blue-600 hover:underline"
-                                >
-                                  Address Proof
-                                </a>
-                              )}
+                            {/* KYC completeness summary — at a glance, which of the
+                                three required documents (Aadhaar / PAN / Address) the
+                                resident has uploaded. Click "Review" on the detail
+                                page to actually see the images. */}
+                            <div className="flex items-center gap-2 mt-0.5 text-xs">
+                              <DocPip label="Aadhaar" present={!!r.aadhaarUrl} />
+                              <DocPip label="PAN" present={!!r.panUrl} />
+                              <DocPip label="Address" present={!!r.addressProof} />
                             </div>
                           </div>
                         </td>

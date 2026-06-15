@@ -2,6 +2,9 @@ import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
+  Modal,
+  Pressable,
   ScrollView,
   Switch,
   Text,
@@ -41,6 +44,11 @@ export default function ProfileSetupScreen() {
   const [emergencyContactName, setEmergencyContactName] = useState('');
   const [emergencyContactPhone, setEmergencyContactPhone] = useState('');
   const [consentAccepted, setConsentAccepted] = useState(true);
+  // Flat picker bottom-sheet state. The picker used to render every flat as a
+  // long stacked list (200+ rows in larger societies, scroll-hell), so we
+  // moved it into a search-filtered modal that opens on demand.
+  const [flatPickerOpen, setFlatPickerOpen] = useState(false);
+  const [flatSearch, setFlatSearch] = useState('');
 
   const { data: flats, isLoading } = useQuery<Flat[]>({
     queryKey: ['society-flats', societyId],
@@ -52,6 +60,19 @@ export default function ProfileSetupScreen() {
     () => flats?.find((flat: Flat) => flat.id === flatId),
     [flats, flatId],
   );
+
+  // Case-insensitive search across block, number, and floor. The query is
+  // narrow (one society) so we filter client-side; no need for a backend
+  // search endpoint.
+  const filteredFlats = useMemo(() => {
+    if (!flats) return [];
+    const q = flatSearch.trim().toLowerCase();
+    if (!q) return flats;
+    return flats.filter((f) => {
+      const label = `${f.block}-${f.number} floor ${f.floor}`.toLowerCase();
+      return label.includes(q) || `${f.block}${f.number}`.toLowerCase().includes(q);
+    });
+  }, [flats, flatSearch]);
 
   const mutation = useMutation<OnboardResponse>({
     mutationFn: () =>
@@ -160,48 +181,171 @@ export default function ProfileSetupScreen() {
           </View>
         </View>
 
-        {/* Flat selection */}
+        {/* Flat selection — opens a searchable bottom-sheet picker. Rendering
+            the full list inline is painful on larger societies (100+ flats);
+            search-then-tap is faster for elderly users too. */}
         <View className="bg-gray-50 rounded-2xl p-5 mb-4 border border-gray-200">
-          <Text className="text-gray-900 text-xs font-bold tracking-widest uppercase mb-1">Select your flat</Text>
+          <Text className="text-gray-900 text-xs font-bold tracking-widest uppercase mb-3">
+            Select your flat
+          </Text>
           {isLoading ? (
             <View className="items-center py-6">
               <ActivityIndicator color="#821A52" size="large" />
             </View>
           ) : (
-            <View className="mt-3" style={{ gap: 10 }}>
-              {flats?.map((flat: Flat) => {
+            <TouchableOpacity
+              onPress={() => setFlatPickerOpen(true)}
+              accessibilityRole="button"
+              accessibilityLabel={
+                selectedFlat
+                  ? `Selected flat ${selectedFlat.block} ${selectedFlat.number}. Tap to change.`
+                  : 'Choose your flat'
+              }
+              className={`rounded-xl px-4 py-3.5 min-h-[56px] flex-row items-center justify-between border ${
+                selectedFlat ? 'bg-primary-50 border-primary-500' : 'bg-white border-gray-200'
+              }`}
+            >
+              <View className="flex-1">
+                {selectedFlat ? (
+                  <>
+                    <Text className="text-base font-semibold text-primary-500">
+                      Flat {selectedFlat.block}-{selectedFlat.number}
+                    </Text>
+                    <Text className="text-gray-500 text-sm mt-0.5">Floor {selectedFlat.floor}</Text>
+                  </>
+                ) : (
+                  <Text className="text-base text-gray-500">Choose your flat</Text>
+                )}
+              </View>
+              <Ionicons name="chevron-down" size={20} color="#821A52" />
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* Bottom sheet — searchable list of flats */}
+        <Modal
+          visible={flatPickerOpen}
+          animationType="slide"
+          transparent
+          onRequestClose={() => setFlatPickerOpen(false)}
+        >
+          {/* Backdrop — tap to dismiss */}
+          <Pressable
+            onPress={() => setFlatPickerOpen(false)}
+            style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)' }}
+          >
+            <View style={{ flex: 1 }} />
+          </Pressable>
+
+          {/* Sheet */}
+          <View
+            style={{
+              backgroundColor: '#FFFFFF',
+              borderTopLeftRadius: 24,
+              borderTopRightRadius: 24,
+              maxHeight: '78%',
+              paddingTop: 8,
+              paddingBottom: 24,
+            }}
+          >
+            {/* Drag handle */}
+            <View
+              style={{
+                alignSelf: 'center',
+                width: 44,
+                height: 5,
+                borderRadius: 3,
+                backgroundColor: '#D1D5DB',
+                marginBottom: 12,
+              }}
+            />
+
+            <View style={{ paddingHorizontal: 20 }}>
+              <Text className="text-gray-900 text-lg font-bold mb-3">Choose your flat</Text>
+
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  backgroundColor: '#F3F4F6',
+                  borderRadius: 12,
+                  paddingHorizontal: 12,
+                  marginBottom: 12,
+                }}
+              >
+                <Ionicons name="search" size={18} color="#9CA3AF" />
+                <TextInput
+                  value={flatSearch}
+                  onChangeText={setFlatSearch}
+                  placeholder="Search e.g. A-101 or floor 3"
+                  placeholderTextColor="#9CA3AF"
+                  autoFocus
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                  className="flex-1 text-gray-900 text-base"
+                  style={{ paddingVertical: 12, marginLeft: 8 }}
+                />
+                {flatSearch ? (
+                  <TouchableOpacity
+                    onPress={() => setFlatSearch('')}
+                    accessibilityLabel="Clear search"
+                    hitSlop={10}
+                  >
+                    <Ionicons name="close-circle" size={18} color="#9CA3AF" />
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            </View>
+
+            <FlatList
+              data={filteredFlats}
+              keyExtractor={(f) => f.id}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 20 }}
+              ItemSeparatorComponent={() => <View style={{ height: 1, backgroundColor: '#F3F4F6' }} />}
+              ListEmptyComponent={
+                <View style={{ paddingVertical: 32, alignItems: 'center' }}>
+                  <Text className="text-gray-400 text-base">No flats match "{flatSearch}"</Text>
+                </View>
+              }
+              renderItem={({ item: flat }) => {
                 const selected = flat.id === flatId;
                 return (
                   <TouchableOpacity
-                    key={flat.id}
-                    onPress={() => setFlatId(flat.id)}
-                    className={`rounded-xl px-4 py-3.5 min-h-[52px] justify-center border ${
-                      selected ? 'bg-primary-50 border-primary-500' : 'bg-white border-gray-200'
-                    }`}
+                    onPress={() => {
+                      setFlatId(flat.id);
+                      setFlatPickerOpen(false);
+                      setFlatSearch('');
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Flat ${flat.block} ${flat.number}, floor ${flat.floor}`}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      paddingVertical: 14,
+                    }}
                   >
-                    <View className="flex-row items-center">
-                      <Ionicons
-                        name={selected ? 'radio-button-on' : 'radio-button-off'}
-                        size={20}
-                        color={selected ? '#821A52' : '#9CA3AF'}
-                      />
-                      <View className="ml-3">
-                        <Text
-                          className={`text-base font-semibold ${
-                            selected ? 'text-primary-500' : 'text-gray-900'
-                          }`}
-                        >
-                          Flat {flat.block}-{flat.number}
-                        </Text>
-                        <Text className="text-gray-400 text-sm mt-0.5">Floor {flat.floor}</Text>
-                      </View>
+                    <Ionicons
+                      name={selected ? 'radio-button-on' : 'radio-button-off'}
+                      size={22}
+                      color={selected ? '#821A52' : '#9CA3AF'}
+                    />
+                    <View style={{ marginLeft: 12, flex: 1 }}>
+                      <Text
+                        className={`text-base font-semibold ${
+                          selected ? 'text-primary-500' : 'text-gray-900'
+                        }`}
+                      >
+                        Flat {flat.block}-{flat.number}
+                      </Text>
+                      <Text className="text-gray-500 text-sm mt-0.5">Floor {flat.floor}</Text>
                     </View>
                   </TouchableOpacity>
                 );
-              })}
-            </View>
-          )}
-        </View>
+              }}
+            />
+          </View>
+        </Modal>
 
         {/* Emergency contact */}
         <View className="bg-gray-50 rounded-2xl p-5 mb-4 border border-gray-200">

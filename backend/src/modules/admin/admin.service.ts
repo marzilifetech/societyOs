@@ -257,21 +257,37 @@ export class AdminService {
       include: { user: true, flat: true },
       orderBy: { createdAt: 'desc' },
     });
-    return residents.map((r) => ({
-      id: r.userId,
-      residentId: r.id,
-      name: r.user.name,
-      phone: r.user.phone,
-      email: r.user.email,
-      status: r.user.status,
-      adminNote: r.user.adminNote,
-      flat: r.flat ? { id: r.flat.id, block: r.flat.block, number: r.flat.number, floor: r.flat.floor } : null,
-      type: r.type,
-      idProof: r.idProof,
-      addressProof: r.addressProof,
-      documentsStatus: r.documentsStatus,
-      createdAt: r.createdAt,
-    }));
+    return residents.map((r) => {
+      const aadhaarLast4 = (() => {
+        if (!r.aadhaar || r.aadhaar.length < 4) return null;
+        const s = Buffer.from(r.aadhaar as unknown as Uint8Array).toString('utf8');
+        return /^\d+$/.test(s) ? s.slice(-4) : null;
+      })();
+      return {
+        id: r.userId,
+        residentId: r.id,
+        name: r.user.name,
+        phone: r.user.phone,
+        email: r.user.email,
+        status: r.user.status,
+        adminNote: r.user.adminNote,
+        flat: r.flat
+          ? { id: r.flat.id, block: r.flat.block, number: r.flat.number, floor: r.flat.floor }
+          : null,
+        type: r.type,
+        // Document fields — list rendering uses presence (boolean) to show a
+        // KYC completeness summary; the detail page calls /admin/residents/:id/documents
+        // for the full set including the signed URLs.
+        idProof: r.idProof,
+        addressProof: r.addressProof,
+        aadhaarUrl: r.aadhaarUrl ?? null,
+        aadhaarLast4,
+        panUrl: r.panUrl ?? null,
+        panNumber: r.panNumber ?? null,
+        documentsStatus: r.documentsStatus,
+        createdAt: r.createdAt,
+      };
+    });
   }
 
   async getStaff(societyId: string) {
@@ -1374,15 +1390,34 @@ async createStaff(
     // auto-scoping (see tenant.extension.ts:64-66).
     const resident = await this.prisma.resident.findFirst({
       where: { id: residentId, user: { societyId } },
-      include: { user: true },
+      include: { user: true, flat: true },
     });
     if (!resident) throw new NotFoundException('Resident not found in this society');
 
+    // Aadhaar stays server-side except for the last 4 digits — full number is
+    // PII and must never reach admin UIs. PAN is less sensitive (it's used on
+    // public forms routinely) so we return it whole. The aadhaar column is
+    // typed as Bytes; we decode it the same way the resident-app does when
+    // entering the data so the round-trip is consistent.
+    const aadhaarLast4 = (() => {
+      if (!resident.aadhaar || resident.aadhaar.length < 4) return null;
+      const s = Buffer.from(resident.aadhaar as unknown as Uint8Array).toString('utf8');
+      return /^\d+$/.test(s) ? s.slice(-4) : null;
+    })();
+
     return {
       name: resident.user.name,
-      idProof: resident.idProof,
-      addressProof: resident.addressProof,
+      flat: resident.flat
+        ? { block: resident.flat.block, number: resident.flat.number }
+        : null,
       documentsStatus: resident.documentsStatus,
+      aadhaarUrl: resident.aadhaarUrl ?? null,
+      aadhaarLast4,
+      panUrl: resident.panUrl ?? null,
+      panNumber: resident.panNumber ?? null,
+      idProof: resident.idProof ?? null,
+      addressProof: resident.addressProof ?? null,
+      uploadedAt: resident.updatedAt,
     };
   }
 

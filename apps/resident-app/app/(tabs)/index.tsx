@@ -83,6 +83,15 @@ export default function HomeScreen() {
     queryKey: ['notices-pinned'],
     queryFn: () => api.get<PinnedNotice[]>('/notices?pinned=true&limit=1'),
   });
+  // Lockscreen-style unread badge on the bell icon — counts NotificationLog rows
+  // that haven't been read yet. Polls every 60s so the badge stays roughly fresh
+  // without depending on websockets.
+  const { data: unread } = useQuery<{ count: number }>({
+    queryKey: ['notifications', 'unread-count'],
+    queryFn: () => api.get<{ count: number }>('/notifications/unread-count'),
+    refetchInterval: 60_000,
+  });
+  const unreadInbox = unread?.count ?? 0;
 
   const [dismissedPinnedIds, setDismissedPinnedIds] = useState<string[]>([]);
   useEffect(() => {
@@ -145,21 +154,21 @@ export default function HomeScreen() {
                 ) : null}
               </View>
               <TouchableOpacity
-                onPress={() => router.push('/notices' as any)}
+                onPress={() => router.push('/notifications' as any)}
                 accessibilityRole="button"
-                accessibilityLabel={unreadNotices > 0 ? `Notifications, ${unreadNotices} unread` : 'Notifications'}
+                accessibilityLabel={unreadInbox > 0 ? `Notifications, ${unreadInbox} unread` : 'Notifications'}
                 style={{
                   width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFFFFF',
                   borderWidth: 1, borderColor: rd.cardBorder, alignItems: 'center', justifyContent: 'center',
                 }}
               >
                 <Ionicons name="notifications-outline" size={22} color={t.textPrimary} />
-                {unreadNotices > 0 && (
+                {unreadInbox > 0 && (
                   <View style={{
                     position: 'absolute', top: 6, right: 6, minWidth: 16, height: 16, borderRadius: 8,
                     backgroundColor: rd.crimson, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3,
                   }}>
-                    <Text style={{ color: '#FFFFFF', fontSize: 9, fontWeight: '700' }}>{unreadNotices}</Text>
+                    <Text style={{ color: '#FFFFFF', fontSize: 9, fontWeight: '700' }}>{unreadInbox > 99 ? '99+' : unreadInbox}</Text>
                   </View>
                 )}
               </TouchableOpacity>

@@ -1,7 +1,12 @@
 import { Controller, Get, Post, Patch, Body, Param, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { VisitorService } from './visitor.service';
-import { CreateVisitorDto, CheckInVisitorDto, VisitorDecisionDto } from './dto/visitor.dto';
+import {
+  CreateAtGateVisitorDto,
+  CreateVisitorDto,
+  CheckInVisitorDto,
+  VisitorDecisionDto,
+} from './dto/visitor.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { ActiveUserGuard } from '../../common/guards/active-user.guard';
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
@@ -31,6 +36,12 @@ export class VisitorController {
   @Get(':id')
   findOne(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.visitorService.findById(id, user.societyId, user.sub);
+  }
+
+  /** Guard-side walk-in: creates a PENDING visitor and fires an actionable push. */
+  @Post('at-gate')
+  createAtGate(@CurrentUser() user: JwtPayload, @Body() dto: CreateAtGateVisitorDto) {
+    return this.visitorService.createAtGate(user.sub, user.societyId, dto);
   }
 
   @Post('check-in')

@@ -25,6 +25,7 @@ import { unwrapApiEnvelope } from '@societyos/api-client';
 import { SkeletonCard, SkeletonRow } from '../../src/components/attendance/SkeletonCard';
 import { ErrorCard } from '../../src/components/ErrorCard';
 import { isSecurityStaff } from '../../src/lib/security-staff';
+import { Ionicons } from '@expo/vector-icons';
 
 type StaffHomeSummary = {
   checkedIn?: boolean;
@@ -91,6 +92,16 @@ export default function StaffHomeScreen() {
       getUnwrappedArray<TodayShift>('/staff/shifts?range=today').catch(() => [] as TodayShift[]),
     enabled: !!user,
   });
+
+  // Bell-badge — unread NotificationLog rows. Polled rather than push-driven so
+  // the count stays roughly fresh even when the app missed a foreground listener.
+  const { data: unread } = useQuery<{ count: number }>({
+    queryKey: ['notifications', 'unread-count'],
+    queryFn: () => getUnwrapped<{ count: number }>('/notifications/unread-count'),
+    refetchInterval: 60_000,
+    enabled: !!user,
+  });
+  const unreadInbox = unread?.count ?? 0;
 
   const sendSosImmediate = async () => {
     if (sosSending) return;
@@ -191,10 +202,56 @@ export default function StaffHomeScreen() {
     <SafeAreaView className="flex-1 bg-gray-50 dark:bg-gray-950">
       <ScrollView showsVerticalScrollIndicator={false}>
         {/* Header */}
-        <View className="bg-primary-500 dark:bg-primary-900 px-6 pt-4 pb-8">
-          <Text className="text-blue-200 dark:text-blue-300 text-sm">{greeting()},</Text>
-          <Text className="text-white text-2xl font-bold mt-0.5">{user?.name ?? t('home.staffFallback')}</Text>
-          <Text className="text-blue-300 dark:text-blue-200 text-sm mt-1">{user?.department ?? user?.role}</Text>
+        <View className="bg-primary-500 dark:bg-primary-900 px-6 pt-4 pb-8 flex-row items-start justify-between">
+          <View className="flex-1">
+            <Text className="text-blue-200 dark:text-blue-300 text-sm">{greeting()},</Text>
+            <Text className="text-white text-2xl font-bold mt-0.5">
+              {user?.name ?? t('home.staffFallback')}
+            </Text>
+            <Text className="text-blue-300 dark:text-blue-200 text-sm mt-1">
+              {user?.department ?? user?.role}
+            </Text>
+          </View>
+          <TouchableOpacity
+            onPress={() => router.push('/notifications' as any)}
+            accessibilityRole="button"
+            accessibilityLabel={
+              unreadInbox > 0
+                ? t('notifications.bell.unread', { count: unreadInbox, defaultValue: `Notifications, ${unreadInbox} unread` })
+                : t('notifications.inbox.title', 'Notifications')
+            }
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: 20,
+              backgroundColor: 'rgba(255,255,255,0.15)',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginTop: 6,
+            }}
+          >
+            <Ionicons name="notifications-outline" size={22} color="#FFFFFF" />
+            {unreadInbox > 0 ? (
+              <View
+                style={{
+                  position: 'absolute',
+                  top: 4,
+                  right: 4,
+                  minWidth: 16,
+                  height: 16,
+                  borderRadius: 8,
+                  backgroundColor: '#DC2626',
+                  paddingHorizontal: 3,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Text style={{ color: '#FFFFFF', fontSize: 9, fontWeight: '700' }}>
+                  {unreadInbox > 99 ? '99+' : unreadInbox}
+                </Text>
+              </View>
+            ) : null}
+          </TouchableOpacity>
         </View>
 
         {/* Daily briefing card (Task 1) */}

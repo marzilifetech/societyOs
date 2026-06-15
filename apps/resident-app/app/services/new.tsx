@@ -11,7 +11,7 @@ import {
   TextInput,
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -66,6 +66,19 @@ export default function NewServiceRequestScreen() {
   const { category: initialCategory } = useLocalSearchParams<{ category?: string }>();
   const qc = useQueryClient();
 
+  // Entry guard — the /service-requests POST endpoint requires a Resident row.
+  // If the user reached this screen without finishing onboarding (deep link,
+  // notification tap into a not-yet-approved account), submitting would fail
+  // with a cryptic 404. We probe /residents/me up front and route them to
+  // pending-approval if the profile doesn't exist, so they never see the form
+  // they can't submit.
+  const profile = useQuery({
+    queryKey: ['resident-profile-services-guard'],
+    queryFn: () => api.get<any>('/residents/me'),
+    retry: false,
+    staleTime: 60_000,
+  });
+
   const days = useMemo(() => buildDays(7), []);
 
   const [phase, setPhase] = useState<Phase>('booking');
@@ -115,6 +128,14 @@ export default function NewServiceRequestScreen() {
 
   // Date is required; preferred time is optional (matches the Figma label).
   const isValid = !!selectedDay;
+
+  // Guard: profile fetch returned 404 → user has no Resident row yet. Send
+  // them to pending-approval; that screen renders the right next-step button
+  // (Complete Home Details / Upload Documents) based on actual state.
+  if (profile.isError) {
+    router.replace('/(auth)/pending-approval' as any);
+    return null;
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>

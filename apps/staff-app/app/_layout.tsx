@@ -24,7 +24,16 @@ import { useAuthStore } from '../src/store/auth.store';
 import { useSettingsStore } from '../src/store/settings.store';
 import i18n, { initI18n } from '../src/lib/i18n';
 import { startOfflineDrainListener } from '../src/lib/offline-queue';
-import { setupNotificationHandler, registerForPushNotifications, attachNotificationTapHandler, detachNotificationTapHandler } from '../src/lib/notifications';
+import {
+  setupNotificationHandler,
+  setupNotificationCategories,
+  registerForPushNotifications,
+  attachNotificationTapHandler,
+  detachNotificationTapHandler,
+  subscribeToForegroundReceived,
+} from '../src/lib/notifications';
+import { NotificationProvider, useNotificationBanner } from '../src/contexts/NotificationContext';
+import { InAppBanner } from '../src/components/InAppBanner';
 import { initSentry, setSentryUser } from '../src/lib/sentry';
 import { ErrorBoundary } from '../src/components/ErrorBoundary';
 import { NetworkBanner } from '../src/components/NetworkBanner';
@@ -128,8 +137,13 @@ export default function RootLayout() {
   // too, not just when we re-enter a persisted session via PIN.
   useEffect(() => {
     if (!ready || !token) return;
-    registerForPushNotifications().catch(() => {});
-    attachNotificationTapHandler();
+    (async () => {
+      // Register iOS action categories BEFORE the first push can arrive, or
+      // the lockscreen buttons won't render.
+      await setupNotificationCategories();
+      await registerForPushNotifications();
+      attachNotificationTapHandler();
+    })().catch(() => {});
   }, [ready, token]);
 
   // Auto-lock after idle
@@ -165,12 +179,51 @@ export default function RootLayout() {
           <I18nextProvider i18n={i18n} defaultNS="translation">
             <ThemedStatusBar />
             <QueryClientProvider client={queryClient}>
-              <NetworkBanner />
-              <Stack screenOptions={{ headerShown: false }} />
+              <NotificationProvider>
+                <NetworkBanner />
+                <Stack screenOptions={{ headerShown: false }} />
+                <ForegroundBannerBridge active={!!token} />
+                <InAppBanner />
+              </NotificationProvider>
             </QueryClientProvider>
           </I18nextProvider>
         </SafeAreaProvider>
       </GestureHandlerRootView>
     </ErrorBoundary>
   );
+}
+
+/** Pipes foreground-received notifications into the banner queue. */
+function ForegroundBannerBridge({ active }: { active: boolean }) {
+  const { showBanner } = useNotificationBanner();
+  useEffect(() => {
+    if (!active) return;
+    const sub = subscribeToForegroundReceived((n) => {
+      const c = n.request.content;
+      const data = (c.data && typeof c.data === 'object' ? c.data : {}) as Record<string, unknown>;
+      const imageUrl =
+        typeof data.imageUrl === 'string'
+          ? data.imageUrl
+          : (c as any).attachments?.[0]?.url ?? undefined;
+      showBanner({
+        id: n.request.identifier,
+        title: c.title ?? 'Notification',
+        body: c.body ?? '',
+        imageUrl,
+        type: typeof data.type === 'string' ? data.type : undefined,
+        entityId:
+          typeof data.entityId === 'string'
+            ? data.entityId
+            : typeof data.id === 'string'
+            ? data.id
+            : typeof data.visitId === 'string'
+            ? data.visitId
+            : undefined,
+        actionGroup: typeof data.actionGroup === 'string' ? data.actionGroup : undefined,
+        data,
+      });
+    });
+    return () => sub.remove();
+  }, [active, showBanner]);
+  return null;
 }

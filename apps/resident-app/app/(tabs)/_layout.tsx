@@ -1,6 +1,9 @@
-import { Tabs } from 'expo-router';
+import { useEffect } from 'react';
+import { Tabs, router } from 'expo-router';
 import { View, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '../../src/lib/api';
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
 
@@ -27,8 +30,34 @@ function TabIcon({ focused, name, label }: TabIconProps) {
   );
 }
 
+/**
+ * Root tabs guard — every tab below requires a Resident row to exist. If the
+ * user lands here without one (status mismatch, manual admin edit, stale
+ * session, deep-link from a backgrounded notification), the home / services /
+ * profile screens would all 404 against /residents/me with a cryptic "Resident
+ * profile not found" message. This guard catches all of them in one place and
+ * sends the user back to pending-approval where they can complete profile-setup.
+ *
+ * No retry — a single 404 is enough signal; a transient network error would
+ * leave them on a broken tab, which is preferable to a flicker loop.
+ */
+function ResidentProfileGuard() {
+  const { isError } = useQuery({
+    queryKey: ['residents-me-guard'],
+    queryFn: () => api.get('/residents/me'),
+    retry: false,
+    staleTime: 60_000,
+  });
+  useEffect(() => {
+    if (isError) router.replace('/(auth)/pending-approval' as any);
+  }, [isError]);
+  return null;
+}
+
 export default function TabsLayout() {
   return (
+    <>
+    <ResidentProfileGuard />
     <Tabs
       screenOptions={{
         headerShown: false,
@@ -85,5 +114,6 @@ export default function TabsLayout() {
       {/* Visitors moved out of the tab bar per the Figma nav (still routable at /visitors). */}
       <Tabs.Screen name="visitors" options={{ href: null }} />
     </Tabs>
+    </>
   );
 }

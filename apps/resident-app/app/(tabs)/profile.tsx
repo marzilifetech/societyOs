@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, ScrollView, Alert, Switch } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, Alert, Switch, Image, Linking } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -7,10 +7,117 @@ import { api } from '../../src/lib/api';
 import { useAuthStore } from '../../src/store/auth.store';
 import { useAccessibilityStore } from '../../src/store/accessibility.store';
 import { useTheme } from '../../src/hooks/useTheme';
+import { useNotificationPermission } from '../../src/hooks/useNotificationPermission';
+
+type DocsStatus = 'PENDING' | 'UPLOADED' | 'VERIFIED' | 'REJECTED';
+type MyDocs = {
+  status: DocsStatus;
+  aadhaarLast4: string | null;
+  aadhaarUrl: string | null;
+  panNumber: string | null;
+  panUrl: string | null;
+  idProofUrl: string | null;
+  addressProofUrl: string | null;
+};
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
 
 type MenuItem = { icon: IoniconName; label: string; route: string; tint: string };
+
+/** Chip showing where the KYC documents stand in the admin review cycle. */
+function DocStatusChip({ status }: { status: DocsStatus }) {
+  const meta = (() => {
+    switch (status) {
+      case 'VERIFIED':
+        return { label: 'Verified', bg: 'bg-green-50', text: 'text-green-700', border: 'border-green-200' };
+      case 'REJECTED':
+        return { label: 'Re-upload needed', bg: 'bg-red-50', text: 'text-red-700', border: 'border-red-200' };
+      case 'UPLOADED':
+        return { label: 'Under review', bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200' };
+      default:
+        return { label: 'Pending', bg: 'bg-gray-100', text: 'text-gray-600', border: 'border-gray-200' };
+    }
+  })();
+  return (
+    <View className={`${meta.bg} ${meta.border} border rounded-full px-3 py-1`}>
+      <Text className={`${meta.text} font-semibold text-xs`}>{meta.label}</Text>
+    </View>
+  );
+}
+
+/**
+ * Single document row inside the My Documents card. Read-only thumbnail +
+ * masked caption. Tap opens the full image in a viewer (no edit). When the
+ * document is missing for whatever reason, renders a muted placeholder so
+ * the layout doesn't shift.
+ */
+function DocRow({
+  label,
+  imageUrl,
+  caption,
+  t,
+  showDivider,
+}: {
+  label: string;
+  imageUrl: string | null;
+  caption: string | null;
+  t: any;
+  showDivider?: boolean;
+}) {
+  const open = () => {
+    if (!imageUrl) return;
+    // Open the signed URL in the system image viewer — no edit affordance.
+    Linking.openURL(imageUrl).catch(() => {
+      /* swallow — the row still shows the thumbnail */
+    });
+  };
+  return (
+    <TouchableOpacity
+      onPress={open}
+      disabled={!imageUrl}
+      accessibilityRole={imageUrl ? 'button' : 'text'}
+      accessibilityLabel={imageUrl ? `View ${label}` : `${label} not uploaded`}
+      className={`flex-row items-center ${showDivider ? 'border-t border-gray-200' : ''}`}
+      style={{
+        minHeight: t.touchTarget,
+        paddingHorizontal: t.cardPadding,
+        paddingVertical: t.cardPadding * 0.75,
+      }}
+    >
+      {imageUrl ? (
+        <Image
+          source={{ uri: imageUrl }}
+          style={{ width: 44, height: 44, borderRadius: 8, backgroundColor: '#FFFFFF' }}
+        />
+      ) : (
+        <View
+          style={{
+            width: 44,
+            height: 44,
+            borderRadius: 8,
+            backgroundColor: '#F3F4F6',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Ionicons name="image-outline" size={20} color="#9CA3AF" />
+        </View>
+      )}
+      <View style={{ marginLeft: 12, flex: 1 }}>
+        <Text style={{ fontSize: t.fontBase }} className="text-gray-900 font-semibold">
+          {label}
+        </Text>
+        <Text
+          style={{ fontSize: t.fontSm }}
+          className={imageUrl ? 'text-gray-500 font-mono' : 'text-gray-400'}
+        >
+          {imageUrl ? caption ?? 'Tap to view' : 'Not uploaded'}
+        </Text>
+      </View>
+      {imageUrl ? <Ionicons name="eye-outline" size={t.iconSm} color="#821A52" /> : null}
+    </TouchableOpacity>
+  );
+}
 
 const MENU_ITEMS: MenuItem[] = [
   { icon: 'card', label: 'Maintenance & Dues', route: '/maintenance', tint: '#0EA5E9' },
@@ -18,6 +125,9 @@ const MENU_ITEMS: MenuItem[] = [
   { icon: 'sparkles', label: 'Events', route: '/events', tint: '#DB2777' },
   { icon: 'medkit', label: 'Medical Appointments', route: '/medical', tint: '#16A34A' },
   { icon: 'chatbubble-ellipses', label: 'Complaints & Support', route: '/complaints', tint: '#7C3AED' },
+  // Always-on entry to the troubleshoot screen — even when permission is
+  // granted users may need to tweak battery saver / DnD / lockscreen.
+  { icon: 'notifications-outline', label: 'Notifications troubleshooting', route: '/profile/notification-troubleshoot', tint: '#B45309' },
   { icon: 'settings-outline', label: 'Settings', route: '/settings', tint: '#821A52' },
 ];
 
@@ -27,10 +137,23 @@ export default function ProfileScreen() {
   const setSeniorMode = useAccessibilityStore((s) => s.setSeniorMode);
   const t = useTheme();
   const qc = useQueryClient();
+  const { status: notifPerm } = useNotificationPermission();
+  // Show the banner only when we have a *definitive* not-granted answer —
+  // skip "unknown" (initial render) and "undetermined" (first-ever, the
+  // system will ask) so we don't flash a warning the user shouldn't see yet.
+  const notificationsBlocked = notifPerm === 'denied';
 
   const { data: profile } = useQuery({
     queryKey: ['resident-profile'],
     queryFn: () => api.get<any>('/residents/me'),
+  });
+
+  // KYC documents — read-only on this screen. We tolerate the 404 case
+  // (profile-setup completed but documents step skipped) so the section can
+  // render the upload nudge instead of erroring.
+  const { data: myDocs } = useQuery<MyDocs | null>({
+    queryKey: ['my-documents'],
+    queryFn: () => api.get<MyDocs>('/residents/documents/me').catch(() => null),
   });
 
   const directoryMutation = useMutation({
@@ -73,6 +196,43 @@ export default function ProfileScreen() {
             )}
           </View>
 
+          {/* Notification permission banner — only when the OS has actively
+              denied (not pristine state). Tapping opens the troubleshoot
+              screen with step-by-step fixes (battery saver, lockscreen, DND). */}
+          {notificationsBlocked ? (
+            <TouchableOpacity
+              onPress={() => router.push('/profile/notification-troubleshoot' as any)}
+              accessibilityRole="button"
+              accessibilityLabel="Notifications are turned off. Tap to fix."
+              className="bg-amber-50 border border-amber-300 rounded-2xl mb-4 flex-row items-center"
+              style={{ padding: t.cardPadding }}
+            >
+              <View
+                className="rounded-full items-center justify-center"
+                style={{
+                  width: t.iconXl,
+                  height: t.iconXl,
+                  backgroundColor: '#FFFFFF',
+                  marginRight: 12,
+                }}
+              >
+                <Ionicons name="notifications-off" size={t.iconMd} color="#B45309" />
+              </View>
+              <View className="flex-1">
+                <Text className="text-amber-900 font-bold" style={{ fontSize: t.fontBase }}>
+                  Notifications are turned off
+                </Text>
+                <Text
+                  className="text-amber-800 mt-0.5"
+                  style={{ fontSize: t.fontSm, lineHeight: t.fontSm * t.lineHeightBase }}
+                >
+                  You won&apos;t hear about visitors, packages, or emergencies. Tap to fix.
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={t.iconSm} color="#B45309" />
+            </TouchableOpacity>
+          ) : null}
+
           {/* Profile Card */}
           <TouchableOpacity
             className="bg-gray-50 border border-gray-200 rounded-2xl flex-row items-center"
@@ -97,6 +257,98 @@ export default function ProfileScreen() {
             </View>
             <Ionicons name="chevron-forward" size={t.iconSm} color="#9CA3AF" />
           </TouchableOpacity>
+        </View>
+
+        {/* KYC Documents — read-only summary. Edit is intentionally NOT
+            offered here: documents go through admin review (VERIFIED state)
+            and re-uploading after that would re-trigger review, confusing
+            elderly users. If they're not uploaded yet, the section nudges
+            them to the upload screen instead of showing an edit button. */}
+        <View style={{ paddingHorizontal: t.screenPadding, marginBottom: t.sectionGap }}>
+          <View className="flex-row items-center justify-between mb-4">
+            <Text className="font-semibold text-gray-900" style={{ fontSize: t.fontXl }}>
+              My Documents
+            </Text>
+            {myDocs && (myDocs.aadhaarUrl || myDocs.panUrl || myDocs.addressProofUrl) ? (
+              <DocStatusChip status={myDocs.status} />
+            ) : null}
+          </View>
+
+          {!myDocs || (!myDocs.aadhaarUrl && !myDocs.panUrl && !myDocs.addressProofUrl) ? (
+            // No documents uploaded — nudge card.
+            <TouchableOpacity
+              onPress={() => router.push('/(auth)/documents' as any)}
+              accessibilityRole="button"
+              accessibilityLabel="Upload your identity documents"
+              className="bg-primary-50 border border-primary-500 rounded-2xl"
+              style={{ padding: t.cardPadding }}
+            >
+              <View className="flex-row items-center">
+                <View
+                  className="rounded-full items-center justify-center"
+                  style={{
+                    width: t.iconXl,
+                    height: t.iconXl,
+                    backgroundColor: '#FFFFFF',
+                    marginRight: 12,
+                  }}
+                >
+                  <Ionicons name="document-text-outline" size={t.iconMd} color="#821A52" />
+                </View>
+                <View className="flex-1">
+                  <Text className="text-primary-500 font-bold" style={{ fontSize: t.fontBase }}>
+                    Upload KYC documents
+                  </Text>
+                  <Text className="text-gray-600 mt-0.5" style={{ fontSize: t.fontSm, lineHeight: t.fontSm * t.lineHeightBase }}>
+                    Aadhaar, PAN, and address proof. Needed once for the society office.
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={t.iconSm} color="#821A52" />
+              </View>
+            </TouchableOpacity>
+          ) : (
+            // Documents present — show read-only thumbnails + masked numbers.
+            <View className="bg-gray-50 border border-gray-200 rounded-2xl overflow-hidden">
+              <DocRow
+                label="Aadhaar"
+                imageUrl={myDocs.aadhaarUrl}
+                caption={
+                  myDocs.aadhaarLast4
+                    ? `XXXX-XXXX-${myDocs.aadhaarLast4}`
+                    : myDocs.aadhaarUrl
+                    ? 'Number not provided'
+                    : null
+                }
+                t={t}
+              />
+              <DocRow
+                label="PAN"
+                imageUrl={myDocs.panUrl}
+                caption={myDocs.panNumber ?? null}
+                t={t}
+                showDivider
+              />
+              <DocRow
+                label="Address proof"
+                imageUrl={myDocs.addressProofUrl}
+                caption={null}
+                t={t}
+                showDivider
+              />
+              {myDocs.status === 'REJECTED' ? (
+                <TouchableOpacity
+                  onPress={() => router.push('/(auth)/documents' as any)}
+                  className="bg-red-50 border-t border-red-200 flex-row items-center"
+                  style={{ minHeight: t.touchTarget, paddingHorizontal: t.cardPadding }}
+                >
+                  <Ionicons name="alert-circle" size={t.iconSm} color="#DC2626" />
+                  <Text className="text-red-700 font-semibold ml-2" style={{ fontSize: t.fontSm }}>
+                    Documents were rejected — tap to re-upload
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          )}
         </View>
 
         {/* Menu */}

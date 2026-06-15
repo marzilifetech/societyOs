@@ -1,6 +1,41 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
+import { api } from '../lib/api';
+
+/**
+ * Local pref key → backend notification-category key. Only keys with a true
+ * backend equivalent are synced; the others (reviews, leave) gate UI badges
+ * only. Push opt-out happens server-side via `notification_preferences` —
+ * `tasks` and `announcements` here keep the lockscreen quiet for those
+ * categories.
+ */
+const BACKEND_CATEGORY_MAP: Partial<Record<keyof NotificationPrefs, string>> = {
+  tasks: 'staff_tasks',
+  announcements: 'notices',
+  helpRequests: 'staff_tasks',
+};
+
+let prefSyncTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Best-effort debounced sync of local prefs → backend. Failures are swallowed
+ * (network blips can't roll back a user toggle without confusing them).
+ */
+function scheduleBackendSync(prefs: NotificationPrefs) {
+  if (prefSyncTimer) clearTimeout(prefSyncTimer);
+  prefSyncTimer = setTimeout(() => {
+    const payload: { category: string; enabled: boolean }[] = [];
+    for (const [key, category] of Object.entries(BACKEND_CATEGORY_MAP) as [
+      keyof NotificationPrefs,
+      string,
+    ][]) {
+      payload.push({ category, enabled: prefs[key] });
+    }
+    if (payload.length === 0) return;
+    api.patch('/notifications/preferences', { prefs: payload }).catch(() => {});
+  }, 500);
+}
 
 export type ThemeMode = 'system' | 'light' | 'dark';
 
@@ -80,8 +115,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     await persist(get());
   },
   setNotificationPref: async (key, v) => {
-    set({ notifications: { ...get().notifications, [key]: v } });
+    const next = { ...get().notifications, [key]: v };
+    set({ notifications: next });
     await persist(get());
+    scheduleBackendSync(next);
   },
   setBadge: (key, n) => {
     set({ badges: { ...get().badges, [key]: n } });

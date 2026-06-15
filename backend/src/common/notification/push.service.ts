@@ -291,6 +291,12 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
       android,
     };
 
+    // iOS action group id — distinct from the opt-out `category`. Apps register
+    // actions via `setNotificationCategoryAsync(<actionGroup>, [...])`, so we use
+    // `data.actionGroup` if present (e.g. 'visitor_approval'), otherwise fall
+    // back to the opt-out category (legacy behaviour).
+    const apnsCategory = (data?.actionGroup as string | undefined) ?? notification.category;
+
     if (dataOnly) {
       // Data-only: client renders the notification + action buttons. Carry the
       // display fields and serialized actions in the data dictionary.
@@ -312,8 +318,7 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
             'content-available': 1,
             'mutable-content': 1,
             alert: { title: notification.title, body: notification.body },
-            // iOS action category id — the client registers actions under this.
-            ...(notification.category ? { category: notification.category } : {}),
+            ...(apnsCategory ? { category: apnsCategory } : {}),
             sound: notification.critical ? 'default' : undefined,
             ...(isSos ? { 'interruption-level': 'critical' as const } : {}),
           },
@@ -335,6 +340,7 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
       ...(Object.keys(apnsHeaders).length ? { headers: apnsHeaders } : {}),
       payload: {
         aps: {
+          ...(apnsCategory ? { category: apnsCategory } : {}),
           sound: notification.critical ? 'default' : undefined,
           // iOS critical-alert flag: respected only when the app's bundle has
           // Apple's critical-alerts entitlement granted. No-op otherwise.

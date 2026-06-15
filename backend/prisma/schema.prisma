@@ -2152,11 +2152,13 @@ model NotificationLog {
   error     String?
   createdAt DateTime           @default(now())
   sentAt    DateTime?
+  readAt    DateTime?
 
   user    User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   society Society? @relation(fields: [societyId], references: [id], onDelete: SetNull)
 
-  @@index([userId])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([userId, readAt])
   @@index([societyId, category])
   @@index([dedupKey])
   @@map("notification_logs")

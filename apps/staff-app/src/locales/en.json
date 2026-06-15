@@ -11,7 +11,25 @@
     "done": "Done",
     "yes": "Yes",
     "no": "No",
-    "ok": "OK"
+    "ok": "OK",
+    "tryAgain": "Try again",
+    "errorLoading": "Could not load."
+  },
+  "notifications": {
+    "inbox": {
+      "title": "Notifications",
+      "empty": "You're all caught up.",
+      "markAllRead": "Mark all read"
+    },
+    "bell": {
+      "unread": "Notifications, {{count}} unread"
+    },
+    "actions": {
+      "approve": "Approve",
+      "reject": "Reject",
+      "accept": "Accept",
+      "decline": "Decline"
+    }
   },
   "profile": {
     "title": "Profile",

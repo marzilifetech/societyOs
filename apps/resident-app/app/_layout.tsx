@@ -6,11 +6,15 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useFonts } from 'expo-font';
 import {
   setupNotificationHandler,
+  setupNotificationCategories,
   setupTapRouting,
   ensureAndroidChannels,
   registerDeviceToken,
   subscribeToTokenRotation,
+  subscribeToForegroundReceived,
 } from '../src/lib/push';
+import { NotificationProvider, useNotificationBanner } from '../src/contexts/NotificationContext';
+import { InAppBanner } from '../src/components/InAppBanner';
 import {
   Montserrat_400Regular,
   Montserrat_500Medium,
@@ -45,6 +49,44 @@ SplashScreen.preventAutoHideAsync().catch(() => {});
 
 function RealtimeProvider() {
   useRealtime();
+  return null;
+}
+
+/**
+ * Bridges expo-notifications' foreground listener into the banner context.
+ * Mounted inside <NotificationProvider> so it can call `showBanner`. Only
+ * subscribes while authenticated to avoid surfacing notifications meant for
+ * a previous session.
+ */
+function ForegroundBannerBridge({ active }: { active: boolean }) {
+  const { showBanner } = useNotificationBanner();
+  useEffect(() => {
+    if (!active) return;
+    const sub = subscribeToForegroundReceived((n) => {
+      const c = n.request.content;
+      const data = (c.data && typeof c.data === 'object' ? c.data : {}) as Record<string, unknown>;
+      const imageUrl =
+        typeof data.imageUrl === 'string'
+          ? data.imageUrl
+          : (c as any).attachments?.[0]?.url ?? undefined;
+      showBanner({
+        id: n.request.identifier,
+        title: c.title ?? 'Notification',
+        body: c.body ?? '',
+        imageUrl,
+        type: typeof data.type === 'string' ? data.type : undefined,
+        entityId:
+          typeof data.entityId === 'string'
+            ? data.entityId
+            : typeof data.visitId === 'string'
+            ? data.visitId
+            : undefined,
+        actionGroup: typeof data.actionGroup === 'string' ? data.actionGroup : undefined,
+        data,
+      });
+    });
+    return () => sub.remove();
+  }, [active, showBanner]);
   return null;
 }
 
@@ -100,6 +142,9 @@ export default function RootLayout() {
       // Channels must exist before requesting the token so the first push
       // lands on the correct (high-importance) channel.
       await ensureAndroidChannels();
+      // iOS action categories — must be registered before any actionable
+      // push arrives or the buttons won't render. Idempotent.
+      await setupNotificationCategories();
       await registerDeviceToken();
       sub = subscribeToTokenRotation();
     })();
@@ -115,10 +160,16 @@ export default function RootLayout() {
       <GestureHandlerRootView style={{ flex: 1 }}>
         <SafeAreaProvider>
           <QueryClientProvider client={queryClient}>
-            <NetworkBanner />
-            {token ? <RealtimeProvider /> : null}
-            <StatusBar style="auto" />
-            <Stack screenOptions={{ headerShown: false }} />
+            <NotificationProvider>
+              <NetworkBanner />
+              {token ? <RealtimeProvider /> : null}
+              <StatusBar style="auto" />
+              <Stack screenOptions={{ headerShown: false }} />
+              {/* InAppBanner is mounted last so it overlays every screen,
+                  including bottom tabs and modals. */}
+              <ForegroundBannerBridge active={!!token} />
+              <InAppBanner />
+            </NotificationProvider>
           </QueryClientProvider>
         </SafeAreaProvider>
       </GestureHandlerRootView>

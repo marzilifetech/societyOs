@@ -44,3 +44,15 @@ export class UpdatePreferencesDto {
   @Type(() => PreferenceUpdateDto)
   prefs!: PreferenceUpdateDto[];
 }
+
+export class InboxListQueryDto {
+  @ApiPropertyOptional({ description: 'Pagination cursor (id of last item from previous page).' })
+  @IsOptional()
+  @IsString()
+  cursor?: string;
+
+  @ApiPropertyOptional({ description: 'Page size (1–50, default 20).' })
+  @IsOptional()
+  @IsString()
+  limit?: string;
+}

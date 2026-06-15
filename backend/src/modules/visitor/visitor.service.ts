@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VisitorStatus } from '@prisma/client';
-import { CreateVisitorDto, CheckInVisitorDto } from './dto/visitor.dto';
+import { CreateAtGateVisitorDto, CreateVisitorDto, CheckInVisitorDto } from './dto/visitor.dto';
 import { requireResidentByUserId } from '../../common/utils/resident-context';
 import { randomBytes } from 'crypto';
 import { VisitorGateway } from './visitor.gateway';
@@ -63,6 +63,56 @@ export class VisitorService {
         });
     } catch {
       /* never let an arrival push break the gate check-in */
+    }
+  }
+
+  /**
+   * Guard added a walk-in visitor — fire actionable push (photo + name + purpose
+   * + Approve / Reject) so the resident can decide from the lockscreen. The
+   * decide() endpoint is idempotent, so duplicate taps and multi-device fan-out
+   * collapse safely. Best-effort: never blocks visitor creation.
+   */
+  private notifyResidentPendingApproval(visitor: {
+    id: string;
+    name: string;
+    purpose?: string | null;
+    photoUrl?: string | null;
+    resident?: { userId?: string | null } | null;
+  }): void {
+    try {
+      const userId = visitor?.resident?.userId;
+      if (!userId) return;
+      const purpose = visitor.purpose?.trim();
+      const body = purpose
+        ? `${visitor.name} (${purpose}) is at the gate. Approve entry?`
+        : `${visitor.name} is at the gate. Approve entry?`;
+      void this.push
+        .send(
+          userId,
+          {
+            title: 'Visitor at the gate',
+            body,
+            category: 'visitors_gate',
+            ...(visitor.photoUrl ? { imageUrl: visitor.photoUrl } : {}),
+            collapseKey: `visitor:${visitor.id}`,
+            actions: [
+              { id: 'APPROVE', title: 'Approve' },
+              { id: 'REJECT', title: 'Reject', destructive: true },
+            ],
+          },
+          {
+            type: 'VISITOR_APPROVAL_REQUEST',
+            visitId: visitor.id,
+            visitorName: visitor.name,
+            actionGroup: 'visitor_approval',
+            ...(purpose ? { purpose } : {}),
+          },
+        )
+        .catch(() => {
+          /* best-effort; gate flow must not depend on push delivery */
+        });
+    } catch {
+      /* never let an approval push break visitor creation */
     }
   }
 
@@ -148,6 +198,51 @@ export class VisitorService {
         ...(recurringSchedule !== undefined && { recurringSchedule }),
       },
     });
+  }
+
+  /**
+   * Guard-side walk-in: the visitor showed up unannounced and the guard creates
+   * a row targeting a specific resident. The visitor is PENDING approval; an
+   * actionable push fires to the resident so they can Approve/Reject from the
+   * lockscreen. Check-in is blocked until that decision lands.
+   */
+  async createAtGate(guardUserId: string, societyId: string, dto: CreateAtGateVisitorDto) {
+    const resident = await this.prisma.resident.findFirst({
+      where: { id: dto.residentId, flat: { societyId } },
+      include: { flat: true, user: true },
+    });
+    if (!resident) {
+      throw new NotFoundException({
+        code: 'RESIDENT_NOT_FOUND',
+        message: 'Resident not found in this society',
+      });
+    }
+
+    const validFrom = new Date();
+    const validUntil = new Date(validFrom.getTime() + 12 * 60 * 60 * 1000);
+
+    const created = await this.prisma.visitor.create({
+      data: {
+        residentId: resident.id,
+        name: dto.name,
+        phone: dto.phone,
+        purpose: dto.purpose,
+        vehicleNo: dto.vehicleNo,
+        photoUrl: dto.photoUrl,
+        qrToken: randomBytes(4).toString('hex').toUpperCase(),
+        validFrom,
+        validUntil,
+        status: VisitorStatus.EXPECTED,
+        approvalStatus: 'PENDING',
+      },
+      include: { resident: { include: { user: true, flat: true } } },
+    });
+
+    void guardUserId; // reserved for future audit; create itself is anonymous on the guard side today
+
+    this.notifyResidentPendingApproval(created);
+
+    return created;
   }
 
   async findByResident(userId: string, societyId: string) {

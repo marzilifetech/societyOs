@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ResidentType, UserStatus } from '@prisma/client';
 import { findResidentByUserId } from '../../common/utils/resident-context';
@@ -6,6 +6,8 @@ import { NotificationService } from '../notification/notification.service';
 
 @Injectable()
 export class ResidentService {
+  private readonly logger = new Logger(ResidentService.name);
+
   constructor(
     private prisma: PrismaService,
     private notificationService: NotificationService,
@@ -13,7 +15,22 @@ export class ResidentService {
 
   async getProfile(userId: string) {
     const resident = await findResidentByUserId(this.prisma, userId);
-    if (!resident) throw new NotFoundException('Resident profile not found');
+    if (!resident) {
+      // Observability: an ACTIVE user without a Resident row is a manual-edit
+      // mismatch (admin set status without creating the row) — the app's root
+      // tabs guard redirects them to pending-approval, but we log it here so
+      // we can spot recurring incidents in the backend log without crawling
+      // the database. We don't change behaviour — the 404 still throws.
+      const user = await this.prisma.user
+        .findUnique({ where: { id: userId }, select: { status: true } })
+        .catch(() => null);
+      if (user?.status === UserStatus.ACTIVE) {
+        this.logger.warn(
+          `Active user without Resident row: userId=${userId}. Status==ACTIVE but no resident profile — onboarding likely skipped or manually edited.`,
+        );
+      }
+      throw new NotFoundException('Resident profile not found');
+    }
     return resident;
   }
 

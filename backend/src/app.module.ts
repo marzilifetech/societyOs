@@ -21,6 +21,7 @@ import { NoticeModule } from './modules/notice/notice.module';
 import { SosModule } from './modules/sos/sos.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { DevModule } from './modules/dev/dev.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { StaffCommunityModule } from './modules/staff-community/staff-community.module';
 import { HelpRequestModule } from './modules/help-request/help-request.module';
@@ -124,6 +125,7 @@ tryAdd('./modules/compliance/compliance.module', 'ComplianceModule');
     SosModule,
     NotificationModule,
     NotificationsModule,
+    DevModule,
     AdminModule,
     StaffCommunityModule,
     HelpRequestModule,

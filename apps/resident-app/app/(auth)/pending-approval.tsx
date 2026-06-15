@@ -149,22 +149,26 @@ export default function PendingApprovalScreen() {
             </View>
           )}
 
-          {/* Action buttons */}
+          {/* Action buttons — order matters. Profile-setup creates the
+              Resident row that the documents endpoint requires, so Upload ID
+              Documents is gated on the profile already existing. Showing both
+              as alternatives previously let the user tap Upload first and hit
+              a "Resident profile not found" error on submit. */}
           {needsSetup ? (
-            <>
-              <TouchableOpacity
-                className="bg-primary-500 rounded-2xl h-14 items-center justify-center mb-3"
-                onPress={() => router.push('/(auth)/profile-setup')}
-              >
-                <Text className="text-white text-base font-bold">Complete Home Details</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                className="bg-primary-50 rounded-2xl h-14 items-center justify-center mb-3 border border-primary-500"
-                onPress={() => router.push('/(auth)/documents')}
-              >
-                <Text className="text-primary-500 text-base font-bold">Upload ID Documents</Text>
-              </TouchableOpacity>
-            </>
+            <TouchableOpacity
+              className="bg-primary-500 rounded-2xl h-14 items-center justify-center mb-3"
+              onPress={() => router.push('/(auth)/profile-setup')}
+            >
+              <Text className="text-white text-base font-bold">Complete Home Details</Text>
+            </TouchableOpacity>
+          ) : residentProfile?.documentsStatus !== 'UPLOADED' &&
+            residentProfile?.documentsStatus !== 'VERIFIED' ? (
+            <TouchableOpacity
+              className="bg-primary-50 rounded-2xl h-14 items-center justify-center mb-3 border border-primary-500"
+              onPress={() => router.push('/(auth)/documents')}
+            >
+              <Text className="text-primary-500 text-base font-bold">Upload ID Documents</Text>
+            </TouchableOpacity>
           ) : null}
 
           <TouchableOpacity

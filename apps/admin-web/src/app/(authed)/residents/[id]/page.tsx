@@ -34,6 +34,64 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
+/**
+ * One row of the Documents card. Renders a small thumbnail (clickable to open
+ * the signed S3 URL full-screen) when the document is present, or a muted
+ * "Not uploaded" state otherwise. We intentionally use `<img>` rather than
+ * next/image because Marzi-signed URLs aren't on a whitelisted host and the
+ * thumbnail is small enough that bandwidth isn't a concern.
+ */
+function DocSlot({
+  label,
+  href,
+  captionWhenPresent,
+}: {
+  label: string;
+  href: string | null;
+  captionWhenPresent?: string;
+}) {
+  if (!href) {
+    return (
+      <div
+        data-testid={`doc-slot-${label.toLowerCase().replace(/\s+/g, '-')}`}
+        className="rounded-xl border border-gray-100 bg-gray-50 p-3 flex items-center gap-3"
+      >
+        <div className="w-14 h-14 rounded-lg bg-gray-100 flex items-center justify-center text-gray-300 text-xs">
+          —
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-gray-700">{label}</p>
+          <p className="text-xs text-gray-400 mt-0.5">Not uploaded</p>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      data-testid={`doc-slot-${label.toLowerCase().replace(/\s+/g, '-')}`}
+      className="rounded-xl border border-blue-100 bg-blue-50 p-3 flex items-center gap-3 hover:bg-blue-100 transition-colors"
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={href}
+        alt={`${label} thumbnail`}
+        className="w-14 h-14 rounded-lg object-cover bg-white border border-blue-100"
+      />
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-blue-800 truncate">{label}</p>
+        {captionWhenPresent ? (
+          <p className="text-xs text-blue-700 mt-0.5 truncate font-mono">{captionWhenPresent}</p>
+        ) : (
+          <p className="text-xs text-blue-600 mt-0.5">Click to open</p>
+        )}
+      </div>
+    </a>
+  );
+}
+
 function calcAge(dob: string | null | undefined): string | null {
   if (!dob) return null;
   const birth = new Date(dob);
@@ -76,6 +134,17 @@ export default function ResidentDetailPage() {
     enabled: !!id,
   });
 
+  // Documents come from a separate endpoint — neither the list nor the detail
+  // endpoint returns the document URLs (they were intentionally left out for
+  // performance + privacy: Aadhaar last-4 is computed server-side from the
+  // encrypted column). 404 here just means the resident hasn't uploaded
+  // anything yet, so we tolerate the error and render empty fields.
+  const { data: docs } = useQuery({
+    queryKey: ['resident-documents', id],
+    queryFn: () => api.get<any>(`/admin/residents/${id}/documents`).catch(() => null),
+    enabled: !!id,
+  });
+
   // Merge: detail takes precedence
   const r = detail ?? resident;
 
@@ -83,6 +152,7 @@ export default function ResidentDetailPage() {
     qc.invalidateQueries({ queryKey: ['residents'] });
     qc.invalidateQueries({ queryKey: ['residents-pending'] });
     qc.invalidateQueries({ queryKey: ['resident-detail', id] });
+    qc.invalidateQueries({ queryKey: ['resident-documents', id] });
   };
 
   const approveMutation = useMutation({
@@ -376,29 +446,36 @@ export default function ResidentDetailPage() {
             )}
           </div>
         </div>
-        <div className="flex gap-4 flex-wrap">
-          {r.idProof ? (
-            <a
-              href={r.idProof}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-blue-100 bg-blue-50 text-blue-700 text-sm font-medium hover:bg-blue-100 transition-colors"
-            >
-              ID Proof <ExternalLink className="w-3.5 h-3.5" />
-            </a>
-          ) : (
-            <span className="text-sm text-gray-400">No ID proof uploaded</span>
-          )}
-          {r.addressProof && (
-            <a
-              href={r.addressProof}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-blue-100 bg-blue-50 text-blue-700 text-sm font-medium hover:bg-blue-100 transition-colors"
-            >
-              Address Proof <ExternalLink className="w-3.5 h-3.5" />
-            </a>
-          )}
+        {/* Five document slots — Aadhaar photo+number, PAN photo+number, and
+            Address proof. Aadhaar number is masked server-side (only last 4
+            digits leave the DB); PAN is shown in full. Thumbnails are signed
+            S3 URLs returned by Marzi /v1/media — open in a new tab so the
+            full image is reviewable, and degrade gracefully when missing. */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <DocSlot
+            label="Aadhaar photo"
+            href={docs?.aadhaarUrl ?? null}
+            captionWhenPresent={
+              docs?.aadhaarLast4
+                ? `XXXX-XXXX-${docs.aadhaarLast4}`
+                : 'Number not provided'
+            }
+          />
+          <DocSlot
+            label="PAN photo"
+            href={docs?.panUrl ?? null}
+            captionWhenPresent={docs?.panNumber ?? 'Number not provided'}
+          />
+          <DocSlot
+            label="Address proof"
+            href={docs?.addressProof ?? null}
+          />
+          {(docs?.idProof || r.idProof) ? (
+            <DocSlot
+              label="Other ID proof"
+              href={docs?.idProof ?? r.idProof ?? null}
+            />
+          ) : null}
         </div>
       </div>
 

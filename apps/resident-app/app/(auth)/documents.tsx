@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
@@ -233,6 +233,19 @@ function maskAadhaar(digits: string): string {
 }
 
 export default function DocumentsScreen() {
+  // Entry guard — the documents endpoint requires a Resident row, created by
+  // profile-setup. If the user landed here without completing that step
+  // (deep-link, stale notification tap, force-close mid-flow), don't render
+  // the form at all — show a single nudge card with a button that takes them
+  // to profile-setup. Otherwise they fill out the entire form before learning
+  // they need to go back.
+  const profile = useQuery({
+    queryKey: ['resident-profile-doc-guard'],
+    queryFn: () => api.get<any>('/residents/me'),
+    retry: false,
+    staleTime: 60_000,
+  });
+
   const [aadhaar, setAadhaar] = useState<UploadState>(EMPTY);
   const [pan, setPan] = useState<UploadState>(EMPTY);
   const [addressProof, setAddressProof] = useState<UploadState>(EMPTY);
@@ -253,7 +266,26 @@ export default function DocumentsScreen() {
         addressProofUrl: addressProof.s3Url || undefined,
       }),
     onSuccess: () => router.replace('/(auth)/pending-approval'),
-    onError: (err: any) => Alert.alert('Submit failed', err.message ?? 'Please try again.'),
+    onError: (err: any) => {
+      // The documents endpoint requires a Resident row (created by the
+      // profile-setup step). If the user reached this screen without
+      // completing profile-setup first — direct deep-link, back-stack quirk,
+      // a stale build — the cryptic backend message reads as a system bug
+      // rather than a missed step. Route them back with a friendly nudge.
+      const msg = String(err?.message ?? '');
+      if (
+        msg.toLowerCase().includes('resident profile not found') ||
+        msg.toLowerCase().includes('resident not found')
+      ) {
+        Alert.alert(
+          'Finish home details first',
+          'Please complete your home details before uploading documents.',
+          [{ text: 'OK', onPress: () => router.replace('/(auth)/profile-setup') }],
+        );
+        return;
+      }
+      Alert.alert('Submit failed', msg || 'Please try again.');
+    },
   });
 
   const anyUploading = aadhaar.uploading || pan.uploading || addressProof.uploading;
@@ -264,6 +296,39 @@ export default function DocumentsScreen() {
     aadhaar.s3Url.length > 0 &&
     pan.s3Url.length > 0 &&
     addressProof.s3Url.length > 0;
+
+  // Loading the profile-check — show a quiet spinner instead of the form.
+  // Once the check resolves: if no profile, show the nudge card. The submit
+  // mutation's onError is still in place as a final safety net.
+  if (profile.isLoading) {
+    return (
+      <SafeAreaView className="flex-1 bg-white items-center justify-center">
+        <ActivityIndicator color="#821A52" />
+      </SafeAreaView>
+    );
+  }
+  if (profile.isError) {
+    return (
+      <SafeAreaView className="flex-1 bg-white">
+        <View className="flex-1 px-6 justify-center" style={{ gap: 16 }}>
+          <Text className="text-2xl font-bold text-gray-900">Finish home details first</Text>
+          <Text className="text-base text-gray-500 leading-6">
+            Before uploading documents we need a few details about your home — the flat number,
+            whether you own or rent, and an emergency contact. Takes under a minute.
+          </Text>
+          <TouchableOpacity
+            onPress={() => router.replace('/(auth)/profile-setup')}
+            className="bg-primary-500 rounded-2xl h-14 items-center justify-center"
+          >
+            <Text className="text-white text-base font-bold">Complete Home Details</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => router.replace('/(auth)/pending-approval')}>
+            <Text className="text-primary-500 text-base text-center mt-2">Go back</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView className="flex-1 bg-white">
