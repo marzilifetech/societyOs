@@ -8,6 +8,8 @@ export enum ComplaintCategory {
   SECURITY = 'SECURITY',
   MAINTENANCE = 'MAINTENANCE',
   NEIGHBOR = 'NEIGHBOR',
+  WATER = 'WATER',
+  PETS = 'PETS',
   OTHER = 'OTHER',
 }
 
@@ -28,9 +30,10 @@ export class CreateComplaintDto {
   @IsString()
   title: string;
 
-  @ApiProperty()
+  @ApiPropertyOptional()
+  @IsOptional()
   @IsString()
-  description: string;
+  description?: string;
 
   @ApiPropertyOptional()
   @IsOptional()

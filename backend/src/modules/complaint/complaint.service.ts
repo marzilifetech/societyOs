@@ -13,7 +13,9 @@ export class ComplaintService {
 
   async create(userId: string, societyId: string, dto: CreateComplaintDto) {
     const resident = await requireResidentByUserId(this.prisma, userId);
-    return this.prisma.complaint.create({ data: { residentId: resident.id, societyId, ...dto } });
+    return this.prisma.complaint.create({
+      data: { residentId: resident.id, societyId, ...dto, description: dto.description ?? dto.title },
+    });
   }
 
   async findByResident(userId: string) {

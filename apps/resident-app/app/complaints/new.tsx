@@ -34,6 +34,17 @@ import {
 // Preserves existing API shape: POST /complaints { category, title, description, isAnonymous, photoUrl }
 // Note: Figma form drops separate "title" field — title is derived from category on submit
 //       to match existing API contract (category required, title required by backend).
+// category label → backend enum value map
+const CATEGORY_ENUM: Record<string, string> = {
+  Noise: 'NOISE',
+  Cleanliness: 'CLEANLINESS',
+  Parking: 'PARKING',
+  Water: 'WATER',
+  Maintenance: 'MAINTENANCE',
+  Neighbour: 'NEIGHBOR',
+  Pets: 'PETS',
+  Other: 'OTHER',
+};
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
 
@@ -115,10 +126,14 @@ export default function NewComplaintScreen() {
       }
       // Derive title from category (backend requires title; Figma form omits it)
       const title = category;
+      // Map display label → backend enum value
+      const categoryEnum = CATEGORY_ENUM[category] ?? category.toUpperCase();
+      // Backend requires description String; send label as fallback when user left it blank
+      const descriptionPayload = description.trim().length > 0 ? description.trim() : category;
       return api.post<{ id: string; createdAt?: string }>('/complaints', {
-        category,
+        category: categoryEnum,
         title,
-        description,
+        description: descriptionPayload,
         isAnonymous,
         photoUrl,
       });
@@ -134,7 +149,7 @@ export default function NewComplaintScreen() {
     onError: (err: Error) => Alert.alert('Error', err.message),
   });
 
-  const isValid = category.length > 0 && description.trim().length >= 20;
+  const isValid = category.length > 0;
   const selectedCat = CATEGORIES.find((c) => c.label === category);
 
   return (

@@ -172,9 +172,6 @@ export default function NoticesPage() {
     category: 'GENERAL',
     isPinned: false,
     expiresAt: '',
-    targetAudience: 'ALL',
-    isPoll: false,
-    pollOptions: ['', ''],
   });
 
   const { data: notices, isLoading, isError, refetch } = useQuery({
@@ -183,25 +180,18 @@ export default function NoticesPage() {
   });
 
   const createMutation = useMutation({
-    mutationFn: () => {
-      const payload: any = {
+    mutationFn: () =>
+      api.post('/notices', {
         title: form.title.trim(),
         body: form.body.trim(),
         category: form.category,
         isPinned: form.isPinned,
-        targetAudience: form.targetAudience,
         expiresAt: form.expiresAt || undefined,
-        isPoll: form.isPoll,
-      };
-      if (form.isPoll) {
-        payload.options = form.pollOptions.map((o) => o.trim()).filter((o) => o !== '');
-      }
-      return api.post('/notices', payload);
-    },
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin-notices'] });
       setShowForm(false);
-      setForm({ title: '', body: '', category: 'GENERAL', isPinned: false, expiresAt: '', targetAudience: 'ALL', isPoll: false, pollOptions: ['', ''] });
+      setForm({ title: '', body: '', category: 'GENERAL', isPinned: false, expiresAt: '' });
       toast.success('Notice published');
     },
     onError: (err: any) => toast.error(err?.message ?? 'Failed to create notice'),
@@ -249,12 +239,6 @@ export default function NoticesPage() {
       deleteMutation.mutate(id);
     }
   };
-
-  const addPollOption = () => setForm((f) => ({ ...f, pollOptions: [...f.pollOptions, ''] }));
-  const removePollOption = (idx: number) =>
-    setForm((f) => ({ ...f, pollOptions: f.pollOptions.filter((_, i) => i !== idx) }));
-  const updatePollOption = (idx: number, val: string) =>
-    setForm((f) => ({ ...f, pollOptions: f.pollOptions.map((o, i) => (i === idx ? val : o)) }));
 
   return (
     <div className="p-6 lg:p-8">
@@ -379,18 +363,6 @@ export default function NoticesPage() {
                 onChange={(e) => setForm((f) => ({ ...f, expiresAt: e.target.value }))}
               />
             </div>
-            <select
-              name="targetAudience"
-              className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm"
-              value={form.targetAudience}
-              onChange={(e) => setForm((f) => ({ ...f, targetAudience: e.target.value }))}
-            >
-              <option value="ALL">All</option>
-              <option value="RESIDENTS">Residents Only</option>
-              <option value="OWNERS">Owners Only</option>
-              <option value="TENANTS">Tenants Only</option>
-              <option value="STAFF">Staff Only</option>
-            </select>
             <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
               <input
                 type="checkbox"
@@ -400,46 +372,6 @@ export default function NoticesPage() {
               />
               Pin this notice (shows at top)
             </label>
-            <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={form.isPoll}
-                onChange={(e) => setForm((f) => ({ ...f, isPoll: e.target.checked }))}
-                className="rounded"
-              />
-              This is a poll
-            </label>
-            {form.isPoll && (
-              <div className="space-y-2 pl-1">
-                <p className="text-xs text-gray-500 font-medium">Poll options</p>
-                {form.pollOptions.map((opt, idx) => (
-                  <div key={idx} className="flex gap-2 items-center">
-                    <input
-                      className="flex-1 border border-gray-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary-400"
-                      placeholder={`Option ${idx + 1}`}
-                      value={opt}
-                      onChange={(e) => updatePollOption(idx, e.target.value)}
-                    />
-                    {form.pollOptions.length > 2 && (
-                      <button
-                        className="text-xs text-red-400 hover:text-red-600 border border-red-100 hover:border-red-300 px-2.5 py-1.5 rounded-lg transition-colors"
-                        onClick={() => removePollOption(idx)}
-                        type="button"
-                      >
-                        Remove
-                      </button>
-                    )}
-                  </div>
-                ))}
-                <button
-                  className="text-xs text-primary-600 hover:text-primary-700 border border-primary-200 hover:border-primary-300 px-3 py-1.5 rounded-lg transition-colors inline-flex items-center gap-1"
-                  onClick={addPollOption}
-                  type="button"
-                >
-                  <Plus className="w-3 h-3" /> Add Option
-                </button>
-              </div>
-            )}
             <button
               className="bg-primary-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold disabled:opacity-40"
               onClick={() => createMutation.mutate()}

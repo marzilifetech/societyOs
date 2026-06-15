@@ -134,13 +134,13 @@ export default function NewHelpRequestScreen() {
   });
 
   const selectedCat = CATEGORIES.find((c) => c.value === category);
-  const isValid = category.length > 0 && description.trim().length > 0;
+  const isValid = category.length > 0;
 
   const handleSubmit = () => {
     if (!isValid || mutation.isPending) return;
     mutation.mutate({
       category,
-      description: description.trim(),
+      description: description.trim() || category,
       ...(preferredTime ? { preferredTime } : {}),
     });
   };
@@ -239,7 +239,8 @@ export default function NewHelpRequestScreen() {
 
           {/* Description */}
           <Text style={{ fontSize: t.fontBase, fontWeight: '700', color: t.textPrimary, marginBottom: 8 }}>
-            Description{!selectedCat ? ' *' : ''}
+            Describe what you need{' '}
+            <Text style={{ fontWeight: '400', color: t.textMuted }}>(optional)</Text>
           </Text>
           <TextInput
             value={description}

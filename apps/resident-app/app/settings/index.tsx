@@ -10,7 +10,7 @@ type Item = { icon: IoniconName; label: string; route: string; tint: string; des
 
 const ITEMS: Item[] = [
   { icon: 'notifications-outline', label: 'Notifications', route: '/settings/notifications', tint: '#0EA5E9', description: 'Manage push and email alerts' },
-  { icon: 'eye-outline', label: 'Accessibility', route: '/settings/accessibility', tint: '#7C3AED', description: 'Senior mode, text size, contrast' },
+  { icon: 'eye-outline', label: 'Accessibility', route: '/settings/accessibility', tint: '#7C3AED', description: 'Larger fonts, text size, contrast' },
   { icon: 'language-outline', label: 'Language', route: '/settings/language', tint: '#16A34A', description: 'Change app language' },
 ];
 

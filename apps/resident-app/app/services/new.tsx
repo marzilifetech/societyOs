@@ -71,6 +71,7 @@ export default function NewServiceRequestScreen() {
   const [phase, setPhase] = useState<Phase>('booking');
   const [selectedDayIdx, setSelectedDayIdx] = useState(0);
   const [selectedTime, setSelectedTime] = useState('');
+  const [description, setDescription] = useState('');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [photoUploading, setPhotoUploading] = useState(false);
   const [createdId, setCreatedId] = useState<string | null>(null);
@@ -86,7 +87,7 @@ export default function NewServiceRequestScreen() {
     mutationFn: async () => {
       const sr = await api.post<{ id: string }>('/service-requests', {
         category,
-        description: `${category} service request`,
+        description: description.trim() || `${category} service request`,
         preferredTime,
       });
       if (photoUri) {
@@ -242,6 +243,40 @@ export default function NewServiceRequestScreen() {
               </TouchableOpacity>
             );
           })}
+        </View>
+
+        {/* Description */}
+        <View style={{ marginBottom: 24 }}>
+          <Text
+            style={{
+              fontSize: t.fontBase,
+              fontWeight: '700',
+              color: t.textPrimary,
+              marginBottom: 10,
+            }}
+          >
+            Describe the issue <Text style={{ color: t.textMuted, fontWeight: '400' }}>(optional)</Text>
+          </Text>
+          <TextInput
+            value={description}
+            onChangeText={setDescription}
+            placeholder="Describe the issue..."
+            placeholderTextColor={t.textMuted}
+            multiline
+            textAlignVertical="top"
+            maxLength={2000}
+            style={{
+              minHeight: 110,
+              borderRadius: rd.radiusInput,
+              borderWidth: 1,
+              borderColor: rd.cardBorder,
+              backgroundColor: '#FFFFFF',
+              paddingHorizontal: 16,
+              paddingVertical: 14,
+              fontSize: t.fontBase,
+              color: t.textPrimary,
+            }}
+          />
         </View>
 
       </ScrollView>
