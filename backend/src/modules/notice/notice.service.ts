@@ -96,17 +96,38 @@ export class NoticeService {
     });
   }
 
-  async getPolls(societyId: string) {
+  async getPolls(societyId: string, userId?: string) {
     const polls = await this.prisma.poll.findMany({
       where: { societyId, deadline: { gt: new Date() } },
-      include: { _count: { select: { votes: true } } },
+      orderBy: { createdAt: 'desc' },
     });
+    const myResident = userId
+      ? await this.prisma.resident.findUnique({ where: { userId } }).catch(() => null)
+      : null;
+    const pollIds = polls.map((p) => p.id);
+    const votes = pollIds.length
+      ? await this.prisma.pollVote.findMany({ where: { pollId: { in: pollIds } } })
+      : [];
 
-    return polls.map((poll) => ({
-      ...poll,
-      options: Array.isArray(poll.options) ? poll.options : [],
-      voteCount: poll._count.votes,
-    }));
+    return polls.map((poll) => {
+      const opts = Array.isArray(poll.options) ? (poll.options as string[]) : [];
+      const pollVotes = votes.filter((v) => v.pollId === poll.id);
+      const counts: Record<number, number> = {};
+      for (const v of pollVotes) {
+        const sel = Array.isArray(v.selectedOptions) ? (v.selectedOptions as number[]) : [];
+        for (const idx of sel) counts[idx] = (counts[idx] ?? 0) + 1;
+      }
+      const mine = myResident ? pollVotes.find((v) => v.residentId === myResident.id) : null;
+      const mineSel = mine && Array.isArray(mine.selectedOptions) ? (mine.selectedOptions as number[]) : [];
+      return {
+        id: poll.id,
+        question: poll.question,
+        closesAt: poll.deadline.toISOString(),
+        totalVotes: pollVotes.length,
+        options: opts.map((label, idx) => ({ id: String(idx), label, votes: counts[idx] ?? 0 })),
+        votedOptionId: mineSel.length ? String(mineSel[0]) : null,
+      };
+    });
   }
 
   async vote(pollId: string, userId: string, societyId: string, selectedOptions: number[]) {

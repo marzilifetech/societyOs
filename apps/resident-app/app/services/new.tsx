@@ -1,61 +1,95 @@
-import { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, ScrollView, Alert, Image } from 'react-native';
+import { useState, useMemo } from 'react';
+import {
+  View,
+  Text,
+  ScrollView,
+  TouchableOpacity,
+  Modal,
+  Platform,
+  KeyboardAvoidingView,
+  Alert,
+  TextInput,
+} from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
+
 import { api } from '../../src/lib/api';
 import { useTheme } from '../../src/hooks/useTheme';
 import { pickImageFromLibrary, uploadToPresignedUrl } from '../../src/lib/photo-upload';
-import { ScreenHeader, BottomActionBar } from '../../src/components/ui';
+import {
+  ScreenHeader,
+  Display,
+  RoundCard,
+  PillButton,
+  InfoRows,
+  rd,
+} from '../../src/components/ui';
 
-// Public Figma reference (Utility Service Request frame): node-id=35-433
-// Behaviour-preserving redesign — same /service-requests POST + photo presign
-// flow; new ScreenHeader + BottomActionBar primitives.
+// Figma reference: Utility Service-6.jpg (book), Utility Service-7.jpg (success modal)
 
-type IoniconName = keyof typeof Ionicons.glyphMap;
+type Phase = 'booking' | 'success';
 
-const PREFERRED_TIMES = [
-  { label: 'Morning', sub: '9 AM – 12 PM', value: 'Morning (9–12)' },
-  { label: 'Afternoon', sub: '2 PM – 5 PM', value: 'Afternoon (2–5)' },
-  { label: 'Evening', sub: '6 PM – 8 PM', value: 'Evening (6–8)' },
+// Generate next N days starting from today
+function buildDays(n: number): { dayLabel: string; dateLabel: string; date: Date }[] {
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const result = [];
+  const today = new Date();
+  for (let i = 0; i < n; i++) {
+    const d = new Date(today);
+    d.setDate(today.getDate() + i);
+    result.push({
+      dayLabel: days[d.getDay()],
+      dateLabel: String(d.getDate()),
+      date: d,
+    });
+  }
+  return result;
+}
+
+const TIME_SLOTS = [
+  '09:00 AM', '10:00 AM', '11:00 AM',
+  '01:00 PM', '02:00 PM', '03:00 PM',
+  '04:00 PM', '05:00 PM', '06:00 PM',
 ];
 
-const CATEGORIES: { icon: IoniconName; label: string; tint: string }[] = [
-  { icon: 'water', label: 'Plumbing', tint: '#0EA5E9' },
-  { icon: 'flash', label: 'Electrical', tint: '#F59E0B' },
-  { icon: 'snow', label: 'AC/HVAC', tint: '#06B6D4' },
-  { icon: 'hammer', label: 'Carpentry', tint: '#A16207' },
-  { icon: 'sparkles', label: 'Cleaning', tint: '#10B981' },
-  { icon: 'swap-vertical', label: 'Lift', tint: '#6366F1' },
-  { icon: 'shield-checkmark', label: 'Security', tint: '#7C3AED' },
-  { icon: 'leaf', label: 'Gardening', tint: '#16A34A' },
-];
+function fmtBookingDate(date: Date, time: string) {
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${date.getDate()} ${months[date.getMonth()]}, ${time}`;
+}
 
 export default function NewServiceRequestScreen() {
   const t = useTheme();
   const { category: initialCategory } = useLocalSearchParams<{ category?: string }>();
   const qc = useQueryClient();
 
-  const [category, setCategory] = useState(initialCategory ?? '');
+  const days = useMemo(() => buildDays(7), []);
+
+  const [phase, setPhase] = useState<Phase>('booking');
+  const [selectedDayIdx, setSelectedDayIdx] = useState(0);
+  const [selectedTime, setSelectedTime] = useState('');
   const [description, setDescription] = useState('');
-  const [preferredTime, setPreferredTime] = useState('');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [photoUploading, setPhotoUploading] = useState(false);
+  const [createdId, setCreatedId] = useState<string | null>(null);
 
-  const handlePickPhoto = async () => {
-    const uri = await pickImageFromLibrary();
-    if (!uri) return;
-    setPhotoUri(uri);
-  };
+  const category = initialCategory ?? '';
+  const selectedDay = days[selectedDayIdx];
+
+  const preferredTime = selectedTime
+    ? fmtBookingDate(selectedDay.date, selectedTime)
+    : undefined;
 
   const mutation = useMutation<{ id: string }, Error>({
     mutationFn: async () => {
       const sr = await api.post<{ id: string }>('/service-requests', {
         category,
-        description,
-        preferredTime: preferredTime || undefined,
+        description: description.trim() || `${category} service request`,
+        preferredTime,
       });
-      // Upload photo (if any) after the SR is created so we have an ID for the presign.
       if (photoUri) {
         try {
           setPhotoUploading(true);
@@ -71,128 +105,348 @@ export default function NewServiceRequestScreen() {
       }
       return sr;
     },
-    onSuccess: (data: { id: string }) => {
+    onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['my-service-requests'] });
-      router.replace(`/services/${data.id}` as any);
+      setCreatedId(data.id);
+      setPhase('success');
     },
-    onError: (err: Error) => Alert.alert('Error', err.message),
+    onError: (err: any) => Alert.alert('Error', err?.message ?? 'Could not book.'),
   });
 
-  const isValid = category.trim().length > 0 && description.trim().length >= 10;
+  // Date is required; preferred time is optional (matches the Figma label).
+  const isValid = !!selectedDay;
 
   return (
     <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
-      <ScreenHeader title="New Service Request" subtitle="What needs fixing?" />
-      <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-        <View className="px-6 pt-2 pb-3">
+      <ScreenHeader title={category || 'Book a Service'} />
 
-          {/* Category picker */}
-          <Text className="font-medium text-gray-700 mb-3" style={{ fontSize: t.fontSm }}>Category *</Text>
-          <View className="flex-row flex-wrap gap-2 mb-6">
-            {CATEGORIES.map((cat) => {
-              const selected = category === cat.label;
-              return (
-                <TouchableOpacity
-                  key={cat.label}
-                  className="flex-row items-center gap-2 px-3 rounded-xl border"
-                  style={{
-                    minHeight: t.touchTargetSm,
-                    alignItems: 'center',
-                    backgroundColor: selected ? cat.tint + '1A' : '#F9FAFB',
-                    borderColor: selected ? cat.tint : '#E5E7EB',
-                  }}
-                  onPress={() => setCategory(cat.label)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Select ${cat.label} category`}
-                >
-                  <View
-                    className="w-7 h-7 rounded-full items-center justify-center"
-                    style={{ backgroundColor: cat.tint + '1A' }}
-                  >
-                    <Ionicons name={cat.icon} size={16} color={cat.tint} />
-                  </View>
-                  <Text
-                    className="font-medium"
-                    style={{ fontSize: t.fontSm, color: selected ? cat.tint : '#374151' }}
-                  >
-                    {cat.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-
-          {/* Preferred Time */}
-          <Text className="font-medium text-gray-700 mb-3" style={{ fontSize: t.fontSm }}>Preferred Time (optional)</Text>
-          <View className="flex-row gap-2 mb-6">
-            {PREFERRED_TIMES.map((pt) => (
+      <ScrollView
+        contentContainerStyle={{
+          paddingHorizontal: t.screenPadding,
+          paddingTop: 16,
+          paddingBottom: 120,
+        }}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Choose a Date */}
+        <Text
+          style={{
+            fontSize: t.fontBase,
+            fontWeight: '700',
+            color: t.textPrimary,
+            marginBottom: 14,
+          }}
+        >
+          Choose a Date
+        </Text>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={{ marginBottom: 24, marginHorizontal: -t.screenPadding }}
+          contentContainerStyle={{ paddingHorizontal: t.screenPadding, gap: 10 }}
+        >
+          {days.map((day, idx) => {
+            const selected = idx === selectedDayIdx;
+            return (
               <TouchableOpacity
-                key={pt.value}
-                className={`flex-1 rounded-xl border px-2 py-3 items-center ${
-                  preferredTime === pt.value
-                    ? 'bg-primary-50 border-primary-500'
-                    : 'bg-gray-50 border-gray-200'
-                }`}
-                onPress={() => setPreferredTime(preferredTime === pt.value ? '' : pt.value)}
+                key={idx}
+                onPress={() => setSelectedDayIdx(idx)}
+                activeOpacity={0.85}
                 accessibilityRole="button"
-                accessibilityLabel={`Select ${pt.label} time slot`}
+                accessibilityLabel={`Select ${day.dayLabel} ${day.dateLabel}`}
+                accessibilityState={{ selected }}
+                style={{
+                  width: 58,
+                  minHeight: 70,
+                  borderRadius: rd.radiusCard,
+                  borderWidth: selected ? 1.5 : 1,
+                  borderColor: selected ? t.accentPrimary : rd.cardBorder,
+                  backgroundColor: '#FFFFFF',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: 10,
+                }}
               >
-                <Text className={`font-semibold ${preferredTime === pt.value ? 'text-primary-600' : 'text-gray-700'}`} style={{ fontSize: t.fontSm }}>{pt.label}</Text>
-                <Text className="text-gray-400 text-center" style={{ fontSize: 11 }}>{pt.sub}</Text>
+                <Text
+                  style={{
+                    fontSize: t.fontXs,
+                    color: selected ? t.accentPrimary : t.textMuted,
+                    fontWeight: '500',
+                    marginBottom: 4,
+                  }}
+                >
+                  {day.dayLabel}
+                </Text>
+                <Text
+                  style={{
+                    fontSize: t.font2xl,
+                    fontWeight: '700',
+                    color: selected ? t.accentPrimary : t.textPrimary,
+                  }}
+                >
+                  {day.dateLabel}
+                </Text>
               </TouchableOpacity>
-            ))}
-          </View>
+            );
+          })}
+        </ScrollView>
 
-          {/* Description */}
-          <Text className="font-medium text-gray-700 mb-1.5" style={{ fontSize: t.fontSm }}>Description *</Text>
+        {/* Time Slots */}
+        <Text
+          style={{
+            fontSize: t.fontBase,
+            fontWeight: '700',
+            color: t.textPrimary,
+            marginBottom: 14,
+          }}
+        >
+          Preferred Time <Text style={{ color: t.textMuted, fontWeight: '400' }}>(Optional)</Text>
+        </Text>
+        <View
+          style={{
+            flexDirection: 'row',
+            flexWrap: 'wrap',
+            gap: 10,
+            marginBottom: 24,
+          }}
+        >
+          {TIME_SLOTS.map((slot) => {
+            const selected = selectedTime === slot;
+            return (
+              <TouchableOpacity
+                key={slot}
+                onPress={() => setSelectedTime(selected ? '' : slot)}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel={`Select time slot ${slot}`}
+                accessibilityState={{ selected }}
+                style={{
+                  minHeight: t.touchTarget,
+                  paddingHorizontal: 16,
+                  borderRadius: rd.radiusPill,
+                  borderWidth: selected ? 1.5 : 1,
+                  borderColor: selected ? t.accentPrimary : rd.cardBorder,
+                  backgroundColor: '#FFFFFF',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Text
+                  style={{
+                    fontSize: t.fontSm,
+                    color: selected ? t.accentPrimary : t.textPrimary,
+                    fontWeight: selected ? '700' : '400',
+                  }}
+                >
+                  {slot}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        {/* Description */}
+        <View style={{ marginBottom: 24 }}>
+          <Text
+            style={{
+              fontSize: t.fontBase,
+              fontWeight: '700',
+              color: t.textPrimary,
+              marginBottom: 10,
+            }}
+          >
+            Describe the issue <Text style={{ color: t.textMuted, fontWeight: '400' }}>(optional)</Text>
+          </Text>
           <TextInput
-            className="bg-gray-100 border border-gray-200 rounded-xl px-4 py-3.5 text-gray-900 min-h-[120px]"
-            style={{ fontSize: t.fontBase }}
             value={description}
             onChangeText={setDescription}
-            placeholder="Describe the issue in detail..."
-            placeholderTextColor="#9CA3AF"
+            placeholder="Describe the issue..."
+            placeholderTextColor={t.textMuted}
             multiline
             textAlignVertical="top"
+            maxLength={2000}
+            style={{
+              minHeight: 110,
+              borderRadius: rd.radiusInput,
+              borderWidth: 1,
+              borderColor: rd.cardBorder,
+              backgroundColor: '#FFFFFF',
+              paddingHorizontal: 16,
+              paddingVertical: 14,
+              fontSize: t.fontBase,
+              color: t.textPrimary,
+            }}
           />
-          <Text className="text-xs text-gray-400 mt-1 text-right">{description.length} chars</Text>
-
-          {/* Photo picker */}
-          <Text className="font-medium text-gray-700 mb-1.5 mt-4" style={{ fontSize: t.fontSm }}>Photo (optional)</Text>
-          <TouchableOpacity
-            onPress={handlePickPhoto}
-            className="rounded-xl items-center justify-center py-8 mb-2 overflow-hidden"
-            style={{ borderWidth: 1, borderStyle: 'dashed', borderColor: '#D1D5DB', backgroundColor: '#F9FAFB' }}
-            accessibilityRole="button"
-            accessibilityLabel="Add a photo of the issue"
-          >
-            {photoUri ? (
-              <Image source={{ uri: photoUri }} style={{ width: 220, height: 140, borderRadius: 12 }} />
-            ) : (
-              <>
-                <Ionicons name="camera-outline" size={28} color="#9CA3AF" />
-                <Text className="text-gray-400 mt-2" style={{ fontSize: t.fontSm }}>Add a photo</Text>
-              </>
-            )}
-          </TouchableOpacity>
-          {photoUri && (
-            <TouchableOpacity onPress={() => setPhotoUri(null)} className="self-end mb-2">
-              <Text className="text-red-500 text-sm">Remove</Text>
-            </TouchableOpacity>
-          )}
-
         </View>
+
       </ScrollView>
 
-      <BottomActionBar
-        primary={{
-          label: mutation.isPending ? (photoUploading ? 'Uploading photo…' : 'Submitting…') : 'Submit Request',
-          onPress: () => mutation.mutate(),
-          loading: mutation.isPending || photoUploading,
-          disabled: !isValid || mutation.isPending || photoUploading,
-          accessibilityLabel: 'Submit service request',
+      {/* Footer */}
+      <SafeAreaView
+        edges={['bottom']}
+        style={{
+          backgroundColor: '#FFFFFF',
+          borderTopWidth: 1,
+          borderTopColor: rd.cardBorder,
         }}
-      />
+      >
+        <View
+          style={{
+            paddingHorizontal: t.screenPadding,
+            paddingTop: 12,
+            paddingBottom: 6,
+          }}
+        >
+          <PillButton
+            label={
+              mutation.isPending
+                ? photoUploading
+                  ? 'Uploading...'
+                  : 'Confirming...'
+                : 'Confirm Booking'
+            }
+            tone="dark"
+            onPress={() => mutation.mutate()}
+            loading={mutation.isPending || photoUploading}
+            disabled={!isValid || mutation.isPending || photoUploading}
+            accessibilityLabel="Submit service request"
+          />
+        </View>
+      </SafeAreaView>
+
+      {/* Success bottom sheet / modal */}
+      <Modal
+        visible={phase === 'success'}
+        transparent
+        animationType="slide"
+        onRequestClose={() => router.replace('/(tabs)/services' as any)}
+      >
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(0,0,0,0.45)',
+            justifyContent: 'flex-end',
+          }}
+        >
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+            <View
+              style={{
+                backgroundColor: '#FFFFFF',
+                borderTopLeftRadius: 24,
+                borderTopRightRadius: 24,
+                overflow: 'hidden',
+              }}
+            >
+              {/* Green banner */}
+              <LinearGradient
+                colors={['#5FB983', '#1F7A45']}
+                style={{
+                  height: 160,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                {/* Close button */}
+                <TouchableOpacity
+                  onPress={() => router.replace('/(tabs)/services' as any)}
+                  style={{
+                    position: 'absolute',
+                    top: 16,
+                    right: 16,
+                    width: 32,
+                    height: 32,
+                    borderRadius: 16,
+                    backgroundColor: 'rgba(255,255,255,0.25)',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Ionicons name="close" size={18} color="#FFFFFF" />
+                </TouchableOpacity>
+
+                {/* Beacon */}
+                <View
+                  style={{
+                    width: 90,
+                    height: 90,
+                    borderRadius: 45,
+                    backgroundColor: 'rgba(255,255,255,0.15)',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <View
+                    style={{
+                      width: 68,
+                      height: 68,
+                      borderRadius: 34,
+                      backgroundColor: 'rgba(255,255,255,0.25)',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Ionicons name="checkmark" size={36} color="#FFFFFF" />
+                  </View>
+                </View>
+              </LinearGradient>
+
+              <SafeAreaView
+                edges={['bottom']}
+                style={{ paddingHorizontal: t.screenPadding, paddingTop: 20, paddingBottom: 8 }}
+              >
+                <Display size="md" align="left">
+                  Booking Requested{'\n'}Successfully!
+                </Display>
+
+                {/* Meta rows */}
+                <View style={{ marginTop: 16, marginBottom: 6, gap: 10 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                    <Ionicons name="calendar-outline" size={16} color={t.textMuted} />
+                    <Text style={{ fontSize: t.fontSm, color: t.textSecondary }}>
+                      {selectedTime
+                        ? fmtBookingDate(selectedDay.date, selectedTime)
+                        : `${selectedDay.dateLabel} ${selectedDay.dayLabel}`}
+                    </Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                    <Ionicons name="checkmark-circle-outline" size={16} color={t.textMuted} />
+                    <Text style={{ fontSize: t.fontSm, color: t.textSecondary }}>
+                      {category} Service
+                    </Text>
+                  </View>
+                </View>
+
+                <Text
+                  style={{
+                    fontSize: t.fontSm,
+                    color: t.textMuted,
+                    marginBottom: 20,
+                  }}
+                >
+                  We'll notify you when booking is confirmed.
+                </Text>
+
+                <View style={{ gap: 10 }}>
+                  <PillButton
+                    label="Track Request"
+                    tone="dark"
+                    onPress={() => {
+                      if (createdId) {
+                        router.replace(`/services/${createdId}` as any);
+                      }
+                    }}
+                  />
+                  <PillButton
+                    label="Back to Services"
+                    tone="light"
+                    onPress={() => router.replace('/(tabs)/services' as any)}
+                  />
+                </View>
+              </SafeAreaView>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
     </View>
   );
 }

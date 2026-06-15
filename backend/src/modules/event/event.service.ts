@@ -108,6 +108,30 @@ export class EventService {
     return this.prisma.event.update({ where: { id }, data: { status: 'CANCELLED' } });
   }
 
+  async update(id: string, data: any) {
+    const event = await this.prisma.event.findUnique({ where: { id } });
+    if (!event) throw new NotFoundException('Event not found');
+    return this.prisma.event.update({
+      where: { id },
+      data: {
+        title: data.title,
+        description: data.description,
+        category: data.category,
+        ...(data.date ? { date: new Date(data.date) } : {}),
+        venue: data.venue,
+        capacity: data.capacity,
+      },
+    });
+  }
+
+  async remove(id: string) {
+    const event = await this.prisma.event.findUnique({ where: { id } });
+    if (!event) throw new NotFoundException('Event not found');
+    await this.prisma.eventRegistration.deleteMany({ where: { eventId: id } });
+    await this.prisma.eventFeedback.deleteMany({ where: { eventId: id } });
+    return this.prisma.event.delete({ where: { id } });
+  }
+
   async submitFeedback(eventId: string, userId: string, rating: number, comment?: string) {
     const event = await this.prisma.event.findUnique({ where: { id: eventId } });
     if (!event) throw new NotFoundException('Event not found');

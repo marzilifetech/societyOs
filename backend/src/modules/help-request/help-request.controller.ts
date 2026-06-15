@@ -42,6 +42,27 @@ export class HelpRequestController {
     return this.helpService.getHelpRequestById(id, user.sub, societyId);
   }
 
+  @Patch(':id/cancel')
+  @Roles(UserRole.RESIDENT)
+  cancelHelpRequest(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @SocietyId() societyId: string,
+  ) {
+    return this.helpService.cancelHelpRequest(id, user.sub, societyId);
+  }
+
+  @Post(':id/rate')
+  @Roles(UserRole.RESIDENT)
+  rateHelpRequest(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @SocietyId() societyId: string,
+    @Body() body: { rating: number; comment?: string },
+  ) {
+    return this.helpService.rateHelpRequest(id, user.sub, societyId, body.rating, body.comment);
+  }
+
   @Get(':id/photo-upload-url')
   @Roles(UserRole.RESIDENT, UserRole.STAFF)
   getPhotoUploadUrl(

@@ -132,8 +132,7 @@ export default function NewVisitorScreen() {
     onError: (err: Error) => Alert.alert('Error', err.message),
   });
 
-  const isValid =
-    form.name.trim().length >= 2 && (!isRecurring || selectedDays.length > 0);
+  const isValid = !isRecurring || selectedDays.length > 0;
   const isPending = mutation.isPending || uploading;
 
   return (
@@ -157,13 +156,13 @@ export default function NewVisitorScreen() {
             They&apos;ll receive a gate pass code valid for 24 hours
           </Text>
 
-          <Field label="Full Name *" value={form.name} onChange={(v) => setForm((f) => ({ ...f, name: v }))} placeholder="e.g. Rajan Mehta" />
-          <Field label="Phone (optional)" value={form.phone} onChange={(v) => setForm((f) => ({ ...f, phone: v }))} placeholder="e.g. 9876543210" keyboardType="phone-pad" />
+          <Field label="Name" value={form.name} onChange={(v) => setForm((f) => ({ ...f, name: v }))} placeholder="e.g. Rajan Mehta" />
+          <Field label="Phone" value={form.phone} onChange={(v) => setForm((f) => ({ ...f, phone: v }))} placeholder="e.g. 9876543210" keyboardType="phone-pad" />
           <Field label="Purpose of Visit" value={form.purpose} onChange={(v) => setForm((f) => ({ ...f, purpose: v }))} placeholder="e.g. Delivery, Housekeeping, Guest" />
           <Field label="Vehicle Number" value={form.vehicleNo} onChange={(v) => setForm((f) => ({ ...f, vehicleNo: v }))} placeholder="e.g. MH 01 AB 1234" />
 
           {/* Photo KYC */}
-          <Text className="font-medium text-gray-700 mb-1.5 mt-1" style={{ fontSize: t.fontSm }}>Visitor Photo (Optional)</Text>
+          <Text className="font-medium text-gray-700 mb-1.5 mt-1" style={{ fontSize: t.fontSm }}>Visitor Photo</Text>
           <View className="flex-row items-center gap-4 mb-6">
             {photoUri ? (
               <>
@@ -249,7 +248,7 @@ export default function NewVisitorScreen() {
               </View>
 
               {/* Day picker */}
-              <Text className="font-medium text-gray-700 mb-2" style={{ fontSize: t.fontSm }}>Days *</Text>
+              <Text className="font-medium text-gray-700 mb-2" style={{ fontSize: t.fontSm }}>Days<Text style={{ color: '#DC2626' }}> *</Text></Text>
               <View className="flex-row flex-wrap gap-2 mb-4">
                 {ALL_DAYS.map((day) => {
                   const active = selectedDays.includes(day);
@@ -298,15 +297,17 @@ export default function NewVisitorScreen() {
 }
 
 function Field({
-  label, value, onChange, placeholder, keyboardType,
+  label, value, onChange, placeholder, keyboardType, required,
 }: {
   label: string; value: string; onChange: (v: string) => void;
-  placeholder?: string; keyboardType?: KeyboardTypeOptions;
+  placeholder?: string; keyboardType?: KeyboardTypeOptions; required?: boolean;
 }) {
   const t = useTheme();
   return (
     <View className="mb-5">
-      <Text className="font-medium text-gray-700 mb-1.5" style={{ fontSize: t.fontSm }}>{label}</Text>
+      <Text className="font-medium text-gray-700 mb-1.5" style={{ fontSize: t.fontSm }}>
+        {label}{required && <Text style={{ color: '#DC2626' }}> *</Text>}
+      </Text>
       <TextInput
         className="bg-gray-50 border border-gray-100 rounded-xl px-4 text-gray-900"
         style={{ fontSize: t.fontBase, minHeight: t.touchTarget, paddingVertical: 12 }}

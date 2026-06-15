@@ -151,6 +151,29 @@ export class ServiceRequestService {
     return this.enrichManyWithAssignedStaff(rows);
   }
 
+  /** Resident cancels their own (not-yet-completed) request. Maps to CLOSED. */
+  async cancelByResident(userId: string, societyId: string, id: string) {
+    const resident = await requireResidentByUserId(this.prisma, userId);
+    const existing = await this.prisma.serviceRequest.findUnique({ where: { id } });
+    if (!existing || existing.deletedAt) throw new NotFoundException('Service request not found');
+    if (existing.residentId !== resident.id || existing.societyId !== societyId) {
+      throw new ForbiddenException({ code: 'NOT_OWNER', message: 'Not your request' });
+    }
+    if (
+      existing.status === ServiceRequestStatus.COMPLETED ||
+      existing.status === ServiceRequestStatus.CANCELLED
+    ) {
+      return this.enrichWithAssignedStaff(existing);
+    }
+    return this.enrichWithAssignedStaff(
+      await this.prisma.serviceRequest.update({
+        where: { id },
+        data: { status: ServiceRequestStatus.CANCELLED },
+        include: { photos: true },
+      }),
+    );
+  }
+
   async adminCreate(societyId: string, dto: AdminCreateServiceRequestDto) {
     const resident = await this.prisma.resident.findFirst({
       where: { id: dto.residentId, flat: { societyId } },

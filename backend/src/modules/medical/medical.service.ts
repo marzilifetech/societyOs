@@ -72,6 +72,34 @@ export class MedicalService {
     });
   }
 
+  async rescheduleAppointment(id: string, userId: string, date: string, timeSlot: string) {
+    const resident = await requireResidentByUserId(this.prisma, userId);
+    const appointment = await this.prisma.appointment.findUnique({ where: { id } });
+    if (!appointment || appointment.residentId !== resident.id) {
+      throw new NotFoundException('Appointment not found');
+    }
+    const clash = await this.prisma.appointment.findUnique({
+      where: { doctorId_date_timeSlot: { doctorId: appointment.doctorId, date: new Date(date), timeSlot } },
+    });
+    if (clash && clash.id !== id) throw new ConflictException('Slot already booked');
+    return this.prisma.appointment.update({
+      where: { id },
+      data: { date: new Date(date), timeSlot, status: 'BOOKED' },
+    });
+  }
+
+  async rateAppointment(id: string, userId: string, rating: number, comment?: string) {
+    const resident = await requireResidentByUserId(this.prisma, userId);
+    const appointment = await this.prisma.appointment.findUnique({ where: { id } });
+    if (!appointment || appointment.residentId !== resident.id) {
+      throw new NotFoundException('Appointment not found');
+    }
+    return this.prisma.appointment.update({
+      where: { id },
+      data: { rating, ratingText: comment ?? null },
+    });
+  }
+
   async getMyAppointments(userId: string) {
     const resident = await requireResidentByUserId(this.prisma, userId);
 

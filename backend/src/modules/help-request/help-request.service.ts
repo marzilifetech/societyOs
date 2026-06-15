@@ -51,6 +51,31 @@ export class HelpRequestService {
     return req;
   }
 
+  async cancelHelpRequest(id: string, userId: string, societyId: string) {
+    const resident = await requireResidentByUserId(this.prisma, userId);
+    const req = await requireOwnedById(
+      () => this.prisma.helpRequest.findUnique({ where: { id } }),
+      societyId,
+      'Help request',
+    );
+    if (req.residentId !== resident.id) throw new NotFoundException('Help request not found');
+    return this.prisma.helpRequest.update({ where: { id }, data: { status: 'CANCELLED' } });
+  }
+
+  async rateHelpRequest(id: string, userId: string, societyId: string, rating: number, comment?: string) {
+    const resident = await requireResidentByUserId(this.prisma, userId);
+    const req = await requireOwnedById(
+      () => this.prisma.helpRequest.findUnique({ where: { id } }),
+      societyId,
+      'Help request',
+    );
+    if (req.residentId !== resident.id) throw new NotFoundException('Help request not found');
+    return this.prisma.helpRequest.update({
+      where: { id },
+      data: { rating, ratingText: comment ?? null },
+    });
+  }
+
   // ── Staff methods ─────────────────────────────────────────────────────────────
 
   private async resolveStaffId(userId: string): Promise<string> {

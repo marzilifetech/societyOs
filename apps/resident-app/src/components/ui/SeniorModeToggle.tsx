@@ -11,7 +11,7 @@ export function SeniorModeToggle() {
     <TouchableOpacity
       onPress={toggleSeniorMode}
       accessibilityRole="switch"
-      accessibilityLabel="Senior Mode"
+      accessibilityLabel="Larger Fonts"
       accessibilityHint="Increases text size, button size, and contrast for easier reading"
       accessibilityState={{ checked: seniorMode }}
       style={{
@@ -28,7 +28,7 @@ export function SeniorModeToggle() {
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
             <Text style={{ fontSize: 20 }}>👁️</Text>
             <Text style={{ fontSize: t.fontBase, fontWeight: '700', color: t.textPrimary }}>
-              Senior Mode
+              Larger Fonts
             </Text>
             {seniorMode && (
               <View style={{

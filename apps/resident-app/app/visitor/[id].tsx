@@ -93,11 +93,14 @@ export default function VisitorDetailScreen() {
             <TouchableOpacity
               className="mt-4 bg-primary-50 rounded-xl px-5"
               style={{ minHeight: t.touchTargetSm, justifyContent: 'center' }}
-              onPress={() =>
+              onPress={() => {
+                const validLine = visitor.validTill
+                  ? `Valid until ${new Date(visitor.validTill).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
+                  : 'Valid for 24 hours';
                 Share.share({
-                  message: `Gate pass for ${visitor.name}: ${visitor.qrToken}`,
-                })
-              }
+                  message: `Gate pass for ${visitor.name ?? 'your visitor'}\nCode: ${visitor.qrToken}\n${validLine}\n\nShow this code at the gate.`,
+                });
+              }}
               accessibilityRole="button"
               accessibilityLabel={`Share gate pass for ${visitor.name}`}
             >

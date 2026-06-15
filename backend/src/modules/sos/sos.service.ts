@@ -114,6 +114,24 @@ export class SosService {
     });
   }
 
+  /** Resident's own SOS alert history (most recent first). */
+  async getHistory(userId: string) {
+    const alerts = await this.prisma.sosAlert.findMany({
+      where: { residentId: userId },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+    return alerts.map((a) => ({
+      id: a.id,
+      status: a.status,
+      note: a.note,
+      createdAt: a.createdAt,
+      durationSec: a.resolvedAt
+        ? Math.max(0, Math.floor((a.resolvedAt.getTime() - a.createdAt.getTime()) / 1000))
+        : a.responseTimeSecs ?? null,
+    }));
+  }
+
   /**
    * Resident may cancel within SOS_CANCEL_WINDOW_MS (default 5s) while ACTIVE only.
    * Admin / super-admin / staff may mark false alarm while ACTIVE or ACKNOWLEDGED.

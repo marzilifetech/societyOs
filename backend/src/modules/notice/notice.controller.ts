@@ -77,8 +77,8 @@ export class NoticeController {
   }
 
   @Get('polls')
-  getPolls(@SocietyId() societyId: string) {
-    return this.noticeService.getPolls(societyId);
+  getPolls(@SocietyId() societyId: string, @CurrentUser() user: JwtPayload) {
+    return this.noticeService.getPolls(societyId, user.sub);
   }
 
   @Post(':id/vote')
@@ -87,9 +87,10 @@ export class NoticeController {
     @Param('id') pollId: string,
     @CurrentUser() user: JwtPayload,
     @SocietyId() societyId: string,
-    @Body() body: { optionId: number },
+    @Body() body: { optionId?: number | string; options?: number[] },
   ) {
-    return this.noticeService.vote(pollId, user.sub, societyId, [body.optionId]);
+    const opts = body.options ?? (body.optionId != null ? [Number(body.optionId)] : []);
+    return this.noticeService.vote(pollId, user.sub, societyId, opts);
   }
 
   @Get(':id/results')
@@ -103,9 +104,10 @@ export class NoticeController {
     @Param('id') pollId: string,
     @CurrentUser() user: JwtPayload,
     @SocietyId() societyId: string,
-    @Body() body: { options: number[] },
+    @Body() body: { options?: number[]; optionId?: number | string },
   ) {
-    return this.noticeService.vote(pollId, user.sub, societyId, body.options);
+    const opts = body.options ?? (body.optionId != null ? [Number(body.optionId)] : []);
+    return this.noticeService.vote(pollId, user.sub, societyId, opts);
   }
 
   @Get('polls/:id/results')
