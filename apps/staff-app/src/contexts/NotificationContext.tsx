@@ -25,6 +25,40 @@ interface NotificationContextValue {
 
 const NotificationContext = createContext<NotificationContextValue | null>(null);
 
+/**
+ * Coarse-grained type used for banner tint + auto-dismiss timing. Mirrors
+ * the backend's NotificationType — see backend/src/common/notification/
+ * notification-categories.ts.
+ */
+export type BannerType = 'MARKETING' | 'DELIVERY' | 'EMERGENCY';
+
+export function classifyBannerType(n: BannerNotification | null): BannerType {
+  if (!n) return 'MARKETING';
+  const key = (n.type ?? '').toLowerCase();
+  if (key === 'sos' || key.includes('emergency') || key.includes('sos_')) return 'EMERGENCY';
+  if (
+    key.includes('visitor') ||
+    key.includes('delivery') ||
+    key.includes('package') ||
+    key === 'deliveries' ||
+    key === 'visitors_gate' ||
+    key === 'notices_urgent' ||
+    key === 'approval_results' ||
+    key === 'help' ||
+    key === 'help_request' ||
+    key.includes('task')
+  ) {
+    return 'DELIVERY';
+  }
+  return 'MARKETING';
+}
+
+const DISMISS_MS: Record<BannerType, number | null> = {
+  MARKETING: 4_000,
+  DELIVERY: 10_000,
+  EMERGENCY: null, // sticky — staff must explicitly acknowledge SOS
+};
+
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
   const [current, setCurrent] = useState<BannerNotification | null>(null);
   const queueRef = useRef<BannerNotification[]>([]);
@@ -37,16 +71,20 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     }
   };
 
+  const startDismissTimer = (n: BannerNotification) => {
+    const ms = DISMISS_MS[classifyBannerType(n)];
+    if (ms === null) return;
+    timerRef.current = setTimeout(() => {
+      setCurrent(null);
+      showNext();
+    }, ms);
+  };
+
   const showNext = useCallback(() => {
     const next = queueRef.current.shift() ?? null;
     setCurrent(next);
     clearTimer();
-    if (next) {
-      timerRef.current = setTimeout(() => {
-        setCurrent(null);
-        showNext();
-      }, 10_000);
-    }
+    if (next) startDismissTimer(next);
   }, []);
 
   const dismiss = useCallback(() => {
@@ -65,10 +103,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       }
       setCurrent(n);
       clearTimer();
-      timerRef.current = setTimeout(() => {
-        setCurrent(null);
-        showNext();
-      }, 10_000);
+      startDismissTimer(n);
     },
     [current, showNext],
   );

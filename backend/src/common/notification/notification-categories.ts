@@ -14,8 +14,27 @@
 export type NotificationImportance = 'high' | 'default' | 'low';
 export type NotificationAudience = 'resident' | 'staff' | 'admin';
 
+/**
+ * Coarse-grained type used to drive the FCM payload — Android channelId,
+ * priority, iOS interruption-level, custom sound key. Each fine-grained
+ * category below maps to exactly one of these. The apps register matching
+ * channels under the same keys (see resident-app/src/lib/push.ts +
+ * staff-app/src/lib/notifications.ts).
+ *
+ *   MARKETING  — gentle, default importance, no lockscreen disruption
+ *   DELIVERY   — heads-up over lockscreen, custom chime, action buttons
+ *   EMERGENCY  — heads-up over lockscreen, custom siren, MAX importance,
+ *                attempts DND bypass, distinct vibration
+ */
+export type NotificationType = 'MARKETING' | 'DELIVERY' | 'EMERGENCY';
+
 export interface NotificationCategory {
   key: string;
+  /**
+   * Coarse-grained type the apps map to an Android channel / iOS interruption
+   * level. See the {@link NotificationType} doc for behavior per type.
+   */
+  type: NotificationType;
   label: string;
   description: string;
   /** Shipped default when the user has no explicit preference row. */
@@ -32,6 +51,7 @@ export interface NotificationCategory {
 export const NOTIFICATION_CATEGORIES: NotificationCategory[] = [
   {
     key: 'visitors_gate',
+    type: 'DELIVERY',
     label: 'Visitor arrivals',
     description: 'A guest or cab has arrived at the gate for your approval.',
     defaultEnabled: true,
@@ -42,6 +62,7 @@ export const NOTIFICATION_CATEGORIES: NotificationCategory[] = [
   },
   {
     key: 'deliveries',
+    type: 'DELIVERY',
     label: 'Deliveries & parcels',
     description: 'A delivery agent is at the gate, or a parcel is held for you.',
     defaultEnabled: true,
@@ -52,6 +73,7 @@ export const NOTIFICATION_CATEGORIES: NotificationCategory[] = [
   },
   {
     key: 'daily_help',
+    type: 'MARKETING',
     label: 'Daily help & vendors',
     description: 'Maid, cook, driver, milk and other recurring vendor entries.',
     defaultEnabled: true,
@@ -62,6 +84,7 @@ export const NOTIFICATION_CATEGORIES: NotificationCategory[] = [
   },
   {
     key: 'family_vehicle',
+    type: 'MARKETING',
     label: 'Family & vehicle',
     description: 'Family member, child or vehicle entry and exit.',
     defaultEnabled: true,
@@ -72,6 +95,7 @@ export const NOTIFICATION_CATEGORIES: NotificationCategory[] = [
   },
   {
     key: 'complaints',
+    type: 'MARKETING',
     label: 'Complaints & service requests',
     description: 'Updates on your complaints and service requests.',
     defaultEnabled: true,
@@ -82,6 +106,7 @@ export const NOTIFICATION_CATEGORIES: NotificationCategory[] = [
   },
   {
     key: 'notices',
+    type: 'MARKETING',
     label: 'Notices & announcements',
     description: 'General society notices and announcements.',
     defaultEnabled: true,
@@ -92,6 +117,13 @@ export const NOTIFICATION_CATEGORIES: NotificationCategory[] = [
   },
   {
     key: 'notices_urgent',
+    // Urgent notices reach residents loudly but they are NOT emergencies in
+    // the SOS sense — the user opted into society-admin authored "critical"
+    // notices. Route them as DELIVERY (lockscreen + heads-up) so they break
+    // through DND-style filtering without hijacking the screen the way SOS
+    // does. If society-admins start abusing this and the user complains, the
+    // mapping is one line below.
+    type: 'DELIVERY',
     label: 'Urgent notices',
     description: 'Critical alerts: water, power, safety. Always on.',
     defaultEnabled: true,
@@ -102,6 +134,7 @@ export const NOTIFICATION_CATEGORIES: NotificationCategory[] = [
   },
   {
     key: 'community',
+    type: 'MARKETING',
     label: 'Community & celebrations',
     description: 'Events, polls and birthday/anniversary celebrations.',
     defaultEnabled: true,
@@ -112,6 +145,7 @@ export const NOTIFICATION_CATEGORIES: NotificationCategory[] = [
   },
   {
     key: 'payments_dues',
+    type: 'MARKETING',
     label: 'Payments & dues',
     description: 'Maintenance dues, invoices and payment receipts.',
     defaultEnabled: true,
@@ -122,6 +156,7 @@ export const NOTIFICATION_CATEGORIES: NotificationCategory[] = [
   },
   {
     key: 'emergency_sos',
+    type: 'EMERGENCY',
     label: 'Emergency & SOS',
     description: 'Panic / SOS alerts. Always on.',
     defaultEnabled: true,
@@ -132,6 +167,7 @@ export const NOTIFICATION_CATEGORIES: NotificationCategory[] = [
   },
   {
     key: 'staff_tasks',
+    type: 'MARKETING',
     label: 'Duty & tasks',
     description: 'Patrol reminders, shift handovers and task assignments.',
     defaultEnabled: true,
@@ -142,6 +178,7 @@ export const NOTIFICATION_CATEGORIES: NotificationCategory[] = [
   },
   {
     key: 'approval_results',
+    type: 'DELIVERY',
     label: 'Approval outcomes',
     description: 'Resident decisions on visitors you logged. Always on.',
     defaultEnabled: true,
@@ -152,6 +189,7 @@ export const NOTIFICATION_CATEGORIES: NotificationCategory[] = [
   },
   {
     key: 'account_auth',
+    type: 'DELIVERY',
     label: 'Account & security',
     description: 'OTP, logins and role changes. Always on.',
     defaultEnabled: true,
@@ -182,4 +220,23 @@ export function isForceOn(key: string): boolean {
 /** Categories offered to a given app audience (for the settings UI). */
 export function categoriesForAudience(audience: NotificationAudience): NotificationCategory[] {
   return NOTIFICATION_CATEGORIES.filter((c) => c.audiences.includes(audience));
+}
+
+/**
+ * Resolve a category key (or a free-form `data.type` string from a payload) to
+ * the coarse-grained {@link NotificationType}. Unknown keys default to
+ * `MARKETING` — the safe, non-disruptive class. The same map is used in
+ * `push.service.ts` to pick channel id, FCM priority and APNs interruption
+ * level for every outgoing notification.
+ */
+export function getNotificationType(key: string | undefined | null): NotificationType {
+  if (!key) return 'MARKETING';
+  const exact = BY_KEY.get(key);
+  if (exact) return exact.type;
+  // Allow callers to pass legacy/aliased strings (e.g. 'sos', 'SOS_TRIGGERED')
+  // that don't appear in the registry but clearly belong to one type.
+  const k = key.toLowerCase();
+  if (k === 'sos' || k.includes('sos_') || k.includes('emergency')) return 'EMERGENCY';
+  if (k.includes('visitor') || k.includes('delivery') || k.includes('package')) return 'DELIVERY';
+  return 'MARKETING';
 }

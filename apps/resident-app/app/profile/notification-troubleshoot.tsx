@@ -108,17 +108,58 @@ export default function NotificationTroubleshootScreen() {
         }}
         showsVerticalScrollIndicator={false}
       >
-        <Text className="text-gray-500 mb-6 leading-6" style={{ fontSize: t.fontBase }}>
-          Visitors at the gate, package arrivals, and emergencies all use phone notifications. If
-          notifications are off, you won&apos;t hear them. Follow the steps below to make sure they
-          come through.
-        </Text>
+        {/* Current status card — gives the user immediate feedback so they
+            don't have to back out and check Profile to know if their fix
+            worked. Auto-refreshes on AppState change via the hook. */}
+        <View
+          className={
+            'rounded-2xl mb-5 flex-row items-center ' +
+            (permStatus === 'granted'
+              ? 'bg-green-50 border border-green-200'
+              : 'bg-amber-50 border border-amber-200')
+          }
+          style={{ padding: t.cardPadding }}
+        >
+          <View
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: 18,
+              backgroundColor: '#FFFFFF',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginRight: 12,
+            }}
+          >
+            <Ionicons
+              name={permStatus === 'granted' ? 'checkmark-circle' : 'notifications-off'}
+              size={20}
+              color={permStatus === 'granted' ? '#16A34A' : '#B45309'}
+            />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text
+              className={permStatus === 'granted' ? 'text-green-900 font-bold' : 'text-amber-900 font-bold'}
+              style={{ fontSize: t.fontBase }}
+            >
+              {permStatus === 'granted' ? 'Notifications are on' : 'Notifications are off'}
+            </Text>
+            <Text
+              className={permStatus === 'granted' ? 'text-green-700' : 'text-amber-800'}
+              style={{ fontSize: t.fontSm, marginTop: 2 }}
+            >
+              {permStatus === 'granted'
+                ? 'You will hear about visitors, packages, and emergencies.'
+                : 'Follow the steps below to turn them on.'}
+            </Text>
+          </View>
+        </View>
 
         {/* STEP 1 — System permission */}
         <Step
           number={1}
           title="Allow notifications"
-          description="The phone needs your permission to show notifications from SocietyOS."
+          description="Give SocietyOS permission to send notifications."
           status={
             permStatus === 'granted'
               ? 'done'
@@ -144,12 +185,10 @@ export default function NotificationTroubleshootScreen() {
         {allowedToBypassBatterySaving ? (
           <Step
             number={2}
-            title="Stop battery saver from blocking us"
-            description={
-              'Some phones (Xiaomi, Vivo, Oppo) put apps to sleep to save battery and notifications stop arriving.\n\nIn Settings → Apps → SocietyOS → Battery, choose "Unrestricted" (or "No restrictions").'
-            }
+            title="Stop battery saver"
+            description='In Settings → Apps → SocietyOS → Battery, choose "Unrestricted".'
             status="action"
-            actionLabel="Open Battery Settings"
+            actionLabel="Open Settings"
             onAction={openBatterySettings}
             t={t}
           />
@@ -158,12 +197,10 @@ export default function NotificationTroubleshootScreen() {
         {/* STEP 3 — Lockscreen visibility */}
         <Step
           number={allowedToBypassBatterySaving ? 3 : 2}
-          title="Show notifications on the lock screen"
-          description={
-            'You want to see visitor names and approve/reject without unlocking the phone.\n\nIn Settings → Notifications → SocietyOS, turn on "Show on lock screen" and set content to "Show all".'
-          }
+          title="Show on lock screen"
+          description='In Notifications, turn on "Show on lock screen" → "Show all".'
           status="action"
-          actionLabel="Open Notification Settings"
+          actionLabel="Open Settings"
           onAction={() => Linking.openSettings()}
           t={t}
         />
@@ -172,30 +209,14 @@ export default function NotificationTroubleshootScreen() {
         {isAndroid ? (
           <Step
             number={allowedToBypassBatterySaving ? 4 : 3}
-            title="Let urgent alerts through Do Not Disturb"
-            description={
-              'When Do Not Disturb is on, only "priority" notifications come through. Make sure SocietyOS is in your priority list so emergency and gate alerts always ring.\n\nSettings → Sound → Do Not Disturb → Apps → Add SocietyOS.'
-            }
+            title="Let urgent alerts through DND"
+            description="Add SocietyOS to your Do Not Disturb priority list so emergencies always ring."
             status="action"
             actionLabel="Open Settings"
             onAction={() => Linking.openSettings()}
             t={t}
           />
         ) : null}
-
-        {/* Reassurance footer */}
-        <View
-          className="bg-primary-50 border border-primary-500 rounded-2xl mt-2"
-          style={{ padding: t.cardPadding }}
-        >
-          <Text className="text-primary-500 font-bold mb-1" style={{ fontSize: t.fontBase }}>
-            Test it
-          </Text>
-          <Text className="text-gray-700 leading-6" style={{ fontSize: t.fontSm }}>
-            After fixing the settings above, open this app again. If the warning banner on Profile
-            disappears, notifications are working.
-          </Text>
-        </View>
       </ScrollView>
     </SafeAreaView>
   );

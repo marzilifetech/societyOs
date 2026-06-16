@@ -98,62 +98,91 @@ export async function setupNotificationHandler() {
 }
 
 /**
- * Android notification channels. Channel id == backend category key so push
- * payloads can target the right channel (push.service.ts sets channel_id to
- * the category). HIGH/MAX importance + PUBLIC lockscreen visibility so staff
- * alerts surface with full content. 'sos' is kept as a legacy alias of the
- * emergency_sos channel.
+ * Android notification channels grouped under three coarse user-facing types
+ * — MARKETING, DELIVERY, EMERGENCY — mirroring the backend's NotificationType.
+ *
+ * The three "primary" channels (marketing/deliveries/emergency_sos) are what
+ * the backend now targets via FCM channelId. The legacy ids below them
+ * (staff_tasks, notices, approval_results, etc.) are kept as ALIASES so
+ * devices that already registered them keep working — Android locks
+ * importance once a channel is created, so renaming or dropping them would
+ * silently degrade behavior on existing installs.
+ *
+ * Per-channel sound is intentionally LEFT EMPTY for v1; differentiation comes
+ * from importance + vibration patterns. To wire a custom ringtone, drop the
+ * file under apps/staff-app/assets/sounds/{name}.mp3, declare it under
+ * app.json expo-notifications "sounds", then set `sound: '{name}'` below.
  */
 async function setupAndroidChannels() {
   const PUBLIC = Notifications.AndroidNotificationVisibility.PUBLIC;
+  const PRIVATE = Notifications.AndroidNotificationVisibility.PRIVATE;
 
-  // Routine staff work + notices.
-  for (const id of ['staff_tasks', 'notices'] as const) {
-    await Notifications.setNotificationChannelAsync(id, {
-      name: id === 'staff_tasks' ? 'Tasks' : 'Notices',
-      importance: Notifications.AndroidImportance.DEFAULT,
-      lockscreenVisibility: PUBLIC,
-      vibrationPattern: [0, 250, 250, 250],
-    });
-  }
+  // ─── Primary channels — what the backend targets going forward ──────────
+  await Notifications.setNotificationChannelAsync('marketing', {
+    name: 'News & Updates',
+    importance: Notifications.AndroidImportance.DEFAULT,
+    lockscreenVisibility: PRIVATE,
+    vibrationPattern: [0, 200],
+    enableVibrate: true,
+  });
+  await Notifications.setNotificationChannelAsync('deliveries', {
+    name: 'Deliveries & Visitors',
+    importance: Notifications.AndroidImportance.HIGH,
+    lockscreenVisibility: PUBLIC,
+    vibrationPattern: [0, 250, 250, 250],
+    enableVibrate: true,
+  });
+  const emergency: Notifications.NotificationChannelInput = {
+    name: 'Emergency Alerts',
+    importance: Notifications.AndroidImportance.MAX,
+    lockscreenVisibility: PUBLIC,
+    vibrationPattern: [0, 500, 250, 500, 250, 500, 250, 500],
+    enableVibrate: true,
+    enableLights: true,
+    bypassDnd: true,
+  };
+  await Notifications.setNotificationChannelAsync('emergency_sos', { ...emergency });
 
-  // Higher-priority categories: approvals + urgent notices + the generic
-  // fallback channel.
+  // ─── Legacy aliases — already exist on installed devices ────────────────
+  // Importance is locked after channel creation, so we keep these with the
+  // SAME importance as the primary channel they map to. The backend no
+  // longer targets these names directly but in-flight payloads still land
+  // correctly during the rolling deploy.
+  await Notifications.setNotificationChannelAsync('staff_tasks', {
+    name: 'Tasks',
+    importance: Notifications.AndroidImportance.DEFAULT,
+    lockscreenVisibility: PRIVATE,
+    vibrationPattern: [0, 200],
+    enableVibrate: true,
+  });
+  await Notifications.setNotificationChannelAsync('notices', {
+    name: 'Notices',
+    importance: Notifications.AndroidImportance.DEFAULT,
+    lockscreenVisibility: PRIVATE,
+    vibrationPattern: [0, 200],
+    enableVibrate: true,
+  });
   await Notifications.setNotificationChannelAsync('approval_results', {
     name: 'Approvals',
     importance: Notifications.AndroidImportance.HIGH,
     lockscreenVisibility: PUBLIC,
     vibrationPattern: [0, 250, 250, 250],
+    enableVibrate: true,
   });
   await Notifications.setNotificationChannelAsync('notices_urgent', {
     name: 'Urgent Notices',
     importance: Notifications.AndroidImportance.HIGH,
     lockscreenVisibility: PUBLIC,
     vibrationPattern: [0, 250, 250, 250],
+    enableVibrate: true,
   });
   await Notifications.setNotificationChannelAsync('default', {
-    name: 'default',
+    name: 'General',
     importance: Notifications.AndroidImportance.HIGH,
-    lockscreenVisibility: PUBLIC,
+    lockscreenVisibility: PRIVATE,
     vibrationPattern: [0, 250, 250, 250],
-  });
-
-  // SOS / emergency channels — MAX importance, distinct vibration + lights so
-  // on-call staff notice even in noisy notification environments. We register
-  // both 'emergency_sos' (backend category key) and 'sos' (legacy alias kept
-  // for existing payloads). We deliberately do NOT set bypassDnd=true: it
-  // requires ACCESS_NOTIFICATION_POLICY plus an explicit user-side DND grant
-  // and silently no-ops otherwise.
-  const emergency: Notifications.NotificationChannelInput = {
-    name: 'Emergency Alerts',
-    importance: Notifications.AndroidImportance.MAX,
-    lockscreenVisibility: PUBLIC,
-    sound: 'default',
-    vibrationPattern: [0, 500, 250, 500],
     enableVibrate: true,
-    enableLights: true,
-  };
-  await Notifications.setNotificationChannelAsync('emergency_sos', { ...emergency });
+  });
   await Notifications.setNotificationChannelAsync('sos', { ...emergency });
 }
 

@@ -10,10 +10,21 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { useNotificationBanner, BannerNotification } from '../contexts/NotificationContext';
+import { useNotificationBanner, BannerNotification, classifyBannerType, type BannerType } from '../contexts/NotificationContext';
 import { api } from '../lib/api';
 
 const BRAND = '#821A52';
+
+/**
+ * Left-border tint per notification type — matches the 3 channel colors used
+ * in the primer modal (green / amber / red). The shared classifier keeps the
+ * banner and the auto-dismiss timing in lockstep with one source of truth.
+ */
+const TYPE_TINT: Record<BannerType, string> = {
+  MARKETING: '#16A34A',
+  DELIVERY: '#D97706',
+  EMERGENCY: '#DC2626',
+};
 
 /**
  * Foreground rich-notification banner. Sits above all routes — so a visitor
@@ -84,6 +95,8 @@ export function InAppBanner() {
   };
 
   const hasActions = current.actionGroup === 'visitor_approval';
+  const bannerType = classifyBannerType(current);
+  const tint = TYPE_TINT[bannerType];
 
   return (
     <Animated.View
@@ -102,7 +115,7 @@ export function InAppBanner() {
         onPress={handleTap}
         accessibilityRole="alert"
         accessibilityLabel={`${current.title}. ${current.body}`}
-        style={styles.card}
+        style={[styles.card, { borderLeftWidth: 4, borderLeftColor: tint }]}
       >
         <View style={styles.row}>
           {current.imageUrl ? (

@@ -4,7 +4,11 @@ import * as admin from 'firebase-admin';
 import IORedis from 'ioredis';
 import { Queue, Worker } from 'bullmq';
 import { PrismaService } from '../../prisma/prisma.service';
-import { getCategory, isForceOn } from './notification-categories';
+import {
+  getNotificationType,
+  isForceOn,
+  type NotificationType,
+} from './notification-categories';
 
 export interface PushNotificationAction {
   id: string;
@@ -260,21 +264,46 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
     notification: PushNotification,
     data?: Record<string, string>,
   ): admin.messaging.MulticastMessage {
-    // Route critical-tagged or SOS-category alerts to the dedicated `sos`
-    // Android channel (declared by staff-app in src/lib/notifications.ts with
-    // MAX importance + lockscreen PUBLIC). Non-critical payloads fall through
-    // to the default channel.
-    const isSos =
-      notification.critical || notification.category === 'sos' || data?.type === 'SOS_TRIGGERED';
-    const channelId = isSos ? 'sos' : 'default';
+    // Resolve coarse-grained type (MARKETING/DELIVERY/EMERGENCY) from the
+    // category key (preferred) or the free-form data.type. `notification.critical`
+    // is a hard override — if the caller flagged the push as critical we route
+    // through the EMERGENCY pipeline regardless of category.
+    const ntype: NotificationType = notification.critical
+      ? 'EMERGENCY'
+      : getNotificationType(notification.category ?? data?.type);
+
+    // Channel id mirrors the apps' channel registrations (see
+    // resident-app/src/lib/push.ts + staff-app/src/lib/notifications.ts).
+    // The CHANNEL owns the Android sound + vibration + importance; we do NOT
+    // set `notification.sound` on the FCM payload because doing so would
+    // override the per-channel sound chosen by the app.
+    const channelId =
+      ntype === 'EMERGENCY' ? 'emergency_sos'
+      : ntype === 'DELIVERY' ? 'deliveries'
+      : 'marketing';
+
+    // iOS interruption level: EMERGENCY uses 'critical' (needs the critical-alerts
+    // entitlement to actually break through silent mode; harmless otherwise),
+    // DELIVERY uses 'time-sensitive' (bypasses Focus modes when the user has
+    // granted Time Sensitive Notifications), MARKETING stays 'active' (default).
+    const apnsInterruptionLevel: 'critical' | 'time-sensitive' | 'active' =
+      ntype === 'EMERGENCY' ? 'critical'
+      : ntype === 'DELIVERY' ? 'time-sensitive'
+      : 'active';
+
+    // iOS sound: until the apps bundle custom .caf files, every type gets the
+    // OS default — differentiation comes from interruption level + apns headers.
+    // To wire a custom sound later, replace 'default' below with the bundled
+    // filename ('emergency.caf', 'delivery.caf') and add it to the app target's
+    // resources via the expo-notifications plugin `sounds` array. See the per-
+    // app `assets/sounds/README.md` for the swap-in checklist.
+    const apnsSound = ntype === 'MARKETING' ? undefined : 'default';
 
     const hasActions = !!notification.actions && notification.actions.length > 0;
     const dataOnly = !!notification.dataOnly || hasActions;
-    // High FCM priority for critical, data-only/actionable, OR any category the
-    // registry marks 'high' importance (e.g. visitors_gate) — so time-sensitive
-    // alerts wake the device + show heads-up instead of being batched in doze.
-    const catImportance = notification.category ? getCategory(notification.category)?.importance : undefined;
-    const highPriority = !!notification.critical || dataOnly || catImportance === 'high';
+    // High FCM priority for anything except MARKETING — DELIVERY + EMERGENCY
+    // need to wake the device + show heads-up instead of being batched in doze.
+    const highPriority = ntype !== 'MARKETING' || dataOnly;
 
     const android: admin.messaging.AndroidConfig = {
       priority: highPriority ? 'high' : 'normal',
@@ -319,8 +348,8 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
             'mutable-content': 1,
             alert: { title: notification.title, body: notification.body },
             ...(apnsCategory ? { category: apnsCategory } : {}),
-            sound: notification.critical ? 'default' : undefined,
-            ...(isSos ? { 'interruption-level': 'critical' as const } : {}),
+            ...(apnsSound ? { sound: apnsSound } : {}),
+            'interruption-level': apnsInterruptionLevel,
           },
         },
       };
@@ -341,10 +370,12 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
       payload: {
         aps: {
           ...(apnsCategory ? { category: apnsCategory } : {}),
-          sound: notification.critical ? 'default' : undefined,
-          // iOS critical-alert flag: respected only when the app's bundle has
-          // Apple's critical-alerts entitlement granted. No-op otherwise.
-          ...(isSos ? { 'interruption-level': 'critical' as const } : {}),
+          ...(apnsSound ? { sound: apnsSound } : {}),
+          // iOS interruption level — EMERGENCY uses 'critical' (requires the
+          // Apple critical-alerts entitlement to actually break through silent
+          // mode; harmless otherwise). DELIVERY uses 'time-sensitive' so it
+          // bypasses Focus when the user has granted that to us.
+          'interruption-level': apnsInterruptionLevel,
         },
       },
     };

@@ -10,11 +10,17 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { useNotificationBanner, BannerNotification } from '../contexts/NotificationContext';
+import { useNotificationBanner, BannerNotification, classifyBannerType, type BannerType } from '../contexts/NotificationContext';
 import { api } from '../lib/api';
 
 const BRAND = '#1E3A5F';
 const DESTRUCTIVE = '#DC2626';
+
+const TYPE_TINT: Record<BannerType, string> = {
+  MARKETING: '#16A34A',
+  DELIVERY: '#D97706',
+  EMERGENCY: '#DC2626',
+};
 
 /**
  * Foreground banner for staff push notifications. Overlays every screen so a
@@ -87,6 +93,7 @@ export function InAppBanner() {
   };
 
   const actions = actionsForGroup(current.actionGroup);
+  const tint = TYPE_TINT[classifyBannerType(current)];
 
   const handleAction = async (actionId: string) => {
     dismiss();
@@ -119,7 +126,7 @@ export function InAppBanner() {
         onPress={handleTap}
         accessibilityRole="alert"
         accessibilityLabel={`${current.title}. ${current.body}`}
-        style={styles.card}
+        style={[styles.card, { borderLeftWidth: 4, borderLeftColor: tint }]}
       >
         <View style={styles.row}>
           {current.imageUrl ? (

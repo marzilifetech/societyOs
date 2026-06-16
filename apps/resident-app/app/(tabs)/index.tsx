@@ -10,6 +10,8 @@ import { useAuthStore } from '../../src/store/auth.store';
 import { useTheme } from '../../src/hooks/useTheme';
 import { api } from '../../src/lib/api';
 import { Display, RoundCard, IconCircle, PillButton, StatusPill, rd, type RdStatusTone } from '../../src/components/ui';
+import { NotificationPrimerModal } from '../../src/components/NotificationPrimerModal';
+import { useNotificationPermission } from '../../src/hooks/useNotificationPermission';
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
 
@@ -27,6 +29,13 @@ type Notice = { id: string; isRead: boolean };
 type PinnedNotice = { id: string; title: string; body: string; isPinned: boolean };
 
 const DISMISSED_PINNED_KEY = 'dismissed_pinned_notice_ids';
+/**
+ * AsyncStorage flag — set after the NotificationPrimerModal has been shown
+ * once (granted, denied, or dismissed). Prevents the modal from re-opening
+ * on every Home mount. The persistent banner takes over the gentle nag if
+ * the user dismissed or denied.
+ */
+const NOTIF_PRIMER_SHOWN_KEY = 'notif_primer_shown_v1';
 
 // 9 quick actions in the Figma 3×3 grid (node-id=22-1418 Home frame).
 type QuickAction = { icon: IoniconName; label: string; route: string; bg: string; tint: string };
@@ -93,6 +102,35 @@ export default function HomeScreen() {
   });
   const unreadInbox = unread?.count ?? 0;
 
+  // ─── Post-document-upload notification primer ──────────────────────────
+  // Fires ONCE per install: the moment a freshly-onboarded user lands on
+  // Home with documents already uploaded AND notification permission not
+  // yet granted, we open the primer modal explaining the 3 alert types.
+  // The AsyncStorage flag is set immediately on first eligible mount so
+  // multiple `useEffect` ticks don't re-open it. See NotificationPrimerModal
+  // for the soft-prompt rationale.
+  const { status: notifPerm } = useNotificationPermission();
+  const { data: myDocs } = useQuery<{ status?: string } | null>({
+    queryKey: ['my-documents'],
+    queryFn: () => api.get<{ status?: string }>('/residents/documents/me').catch(() => null),
+  });
+  const [primerVisible, setPrimerVisible] = useState(false);
+  useEffect(() => {
+    if (primerVisible) return;
+    if (notifPerm !== 'undetermined' && notifPerm !== 'denied') return;
+    const docsReady = myDocs?.status === 'UPLOADED' || myDocs?.status === 'VERIFIED';
+    if (!docsReady) return;
+    let cancelled = false;
+    AsyncStorage.getItem(NOTIF_PRIMER_SHOWN_KEY).then((flag) => {
+      if (cancelled || flag) return;
+      AsyncStorage.setItem(NOTIF_PRIMER_SHOWN_KEY, '1').catch(() => {});
+      setPrimerVisible(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [notifPerm, myDocs?.status, primerVisible]);
+
   const [dismissedPinnedIds, setDismissedPinnedIds] = useState<string[]>([]);
   useEffect(() => {
     AsyncStorage.getItem(DISMISSED_PINNED_KEY).then((raw) => {
@@ -125,6 +163,10 @@ export default function HomeScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+      <NotificationPrimerModal
+        visible={primerVisible}
+        onClose={() => setPrimerVisible(false)}
+      />
       <LinearGradient
         colors={['#FCEAEF', '#FFF6F1', '#FFFFFF']}
         style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 280 }}

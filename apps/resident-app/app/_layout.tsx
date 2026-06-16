@@ -15,6 +15,7 @@ import {
 } from '../src/lib/push';
 import { NotificationProvider, useNotificationBanner } from '../src/contexts/NotificationContext';
 import { InAppBanner } from '../src/components/InAppBanner';
+import { NotificationPermissionBanner } from '../src/components/NotificationPermissionBanner';
 import {
   Montserrat_400Regular,
   Montserrat_500Medium,
@@ -165,6 +166,12 @@ export default function RootLayout() {
               {token ? <RealtimeProvider /> : null}
               <StatusBar style="auto" />
               <Stack screenOptions={{ headerShown: false }} />
+              {/* Global "notifications are off" strip — zIndex 8000. Only
+                  rendered while authenticated so we don't pester a brand
+                  new user before the primer modal has had its chance.
+                  Sits beneath InAppBanner (zIndex 9999) so a foreground
+                  push still overlays it cleanly. */}
+              {token ? <NotificationPermissionBanner /> : null}
               {/* InAppBanner is mounted last so it overlays every screen,
                   including bottom tabs and modals. */}
               <ForegroundBannerBridge active={!!token} />

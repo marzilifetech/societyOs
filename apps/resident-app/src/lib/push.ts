@@ -31,44 +31,112 @@ const IOS_CATEGORIES: Notifications.NotificationCategory[] = [
 // avoid redundant POSTs but always re-register when the token rotates.
 const DEVICE_TOKEN_KEY = 'fcm_device_token';
 
-// Android notification channels mirror the backend notification categories.
-// The channel id MUST equal the category key — the backend sets the FCM
-// android.channelId to the category, so a missing/mismatched channel would
-// silently fall back to the default channel (wrong importance/visibility).
+// Android notification channels are grouped under three coarse user-facing
+// types — MARKETING, DELIVERY, EMERGENCY — that mirror the backend's
+// NotificationType. The three "primary" channels (marketing/deliveries/
+// emergency_sos) are what the backend now targets via FCM channelId. The
+// legacy ids below them (visitors_gate, daily_help, sos, default) are kept
+// as ALIASES so devices that already have those channels registered keep
+// working with the same importance/sound — Android locks importance once
+// a channel is created, so renaming or dropping them would silently degrade
+// behavior on existing installs. New installs get the same three primary
+// channels under their final names.
+//
+// Per-channel sound is intentionally LEFT EMPTY for v1: users hear the OS
+// default through differentiated importance + distinct vibration patterns.
+// To swap in a custom ringtone:
+//   1. Drop the file into apps/resident-app/assets/sounds/{name}.mp3
+//   2. Reference it in app.json under expo-notifications "sounds"
+//   3. Set `sound: '{name}'` (no extension) on the channel below
+//   4. expo prebuild + rebuild the APK.
 type ChannelSpec = {
   id: string;
   name: string;
   importance: Notifications.AndroidImportance;
   visibility?: Notifications.AndroidNotificationVisibility;
+  /** Bundled asset filename WITHOUT the .mp3/.wav extension. */
+  sound?: string;
+  vibrationPattern?: number[];
+  enableLights?: boolean;
+  enableVibrate?: boolean;
+  /**
+   * Attempt to bypass Do Not Disturb. Silently no-ops without the
+   * ACCESS_NOTIFICATION_POLICY user grant — used here only as a hint for
+   * the emergency channel. Not declared as a manifest permission because
+   * granting it is per-device and per-user.
+   */
+  bypassDnd?: boolean;
 };
 
 const ANDROID_CHANNELS: ChannelSpec[] = [
+  // ─── Primary channels — what the backend targets going forward ──────────
+  {
+    id: 'marketing',
+    name: 'News & Updates',
+    importance: Notifications.AndroidImportance.DEFAULT,
+    visibility: Notifications.AndroidNotificationVisibility.PRIVATE,
+    // Short single buzz — informational, doesn't demand attention.
+    vibrationPattern: [0, 200],
+    enableVibrate: true,
+  },
+  {
+    id: 'deliveries',
+    name: 'Deliveries & Visitors',
+    importance: Notifications.AndroidImportance.HIGH,
+    visibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+    // Two-pulse pattern — recognisable as "delivery / visitor at gate".
+    vibrationPattern: [0, 250, 250, 250],
+    enableVibrate: true,
+  },
+  {
+    id: 'emergency_sos',
+    name: 'Emergency Alerts',
+    importance: Notifications.AndroidImportance.MAX,
+    visibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+    // Long siren-style pattern — unmistakable, keeps buzzing on lockscreen.
+    vibrationPattern: [0, 500, 250, 500, 250, 500, 250, 500],
+    enableVibrate: true,
+    enableLights: true,
+    bypassDnd: true,
+  },
+  // ─── Legacy aliases — already exist on installed devices ────────────────
+  // Importance is locked after a channel is created on a device, so we keep
+  // these (identical importance to the primary channel they map to) and the
+  // backend stops sending to them after this release. If/when zero devices
+  // are on a pre-fix build we can drop these.
   {
     id: 'visitors_gate',
     name: 'Visitor & Gate Alerts',
     importance: Notifications.AndroidImportance.HIGH,
     visibility: Notifications.AndroidNotificationVisibility.PUBLIC,
-  },
-  {
-    id: 'deliveries',
-    name: 'Deliveries',
-    importance: Notifications.AndroidImportance.HIGH,
+    vibrationPattern: [0, 250, 250, 250],
+    enableVibrate: true,
   },
   {
     id: 'daily_help',
     name: 'Daily Help',
     importance: Notifications.AndroidImportance.DEFAULT,
+    visibility: Notifications.AndroidNotificationVisibility.PRIVATE,
+    vibrationPattern: [0, 200],
+    enableVibrate: true,
   },
   {
-    id: 'emergency_sos',
-    name: 'Emergency & SOS',
+    id: 'sos',
+    name: 'SOS',
     importance: Notifications.AndroidImportance.MAX,
     visibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+    vibrationPattern: [0, 500, 250, 500, 250, 500, 250, 500],
+    enableVibrate: true,
+    enableLights: true,
+    bypassDnd: true,
   },
   {
     id: 'default',
     name: 'General',
     importance: Notifications.AndroidImportance.HIGH,
+    visibility: Notifications.AndroidNotificationVisibility.PRIVATE,
+    vibrationPattern: [0, 250, 250, 250],
+    enableVibrate: true,
   },
 ];
 
@@ -110,7 +178,13 @@ export async function ensureAndroidChannels() {
         name: c.name,
         importance: c.importance,
         lockscreenVisibility: c.visibility,
-        vibrationPattern: [0, 250, 250, 250],
+        vibrationPattern: c.vibrationPattern,
+        enableVibrate: c.enableVibrate,
+        enableLights: c.enableLights,
+        // sound: c.sound — set once we ship custom .mp3 assets. expo-notifications
+        // treats `undefined` as "use platform default", which is what we want
+        // until then.
+        bypassDnd: c.bypassDnd,
       }),
     ),
   );

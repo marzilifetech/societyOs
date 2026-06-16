@@ -34,6 +34,7 @@ import {
 } from '../src/lib/notifications';
 import { NotificationProvider, useNotificationBanner } from '../src/contexts/NotificationContext';
 import { InAppBanner } from '../src/components/InAppBanner';
+import { NotificationPermissionBanner } from '../src/components/NotificationPermissionBanner';
 import { initSentry, setSentryUser } from '../src/lib/sentry';
 import { ErrorBoundary } from '../src/components/ErrorBoundary';
 import { NetworkBanner } from '../src/components/NetworkBanner';
@@ -182,6 +183,10 @@ export default function RootLayout() {
               <NotificationProvider>
                 <NetworkBanner />
                 <Stack screenOptions={{ headerShown: false }} />
+                {/* Global "notifications are off" strip — zIndex 8000.
+                    Beneath InAppBanner (9999) so a foreground push overlays
+                    it. Only rendered while authenticated. */}
+                {token ? <NotificationPermissionBanner /> : null}
                 <ForegroundBannerBridge active={!!token} />
                 <InAppBanner />
               </NotificationProvider>

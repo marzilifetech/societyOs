@@ -7,7 +7,6 @@ import { api } from '../../src/lib/api';
 import { useAuthStore } from '../../src/store/auth.store';
 import { useAccessibilityStore } from '../../src/store/accessibility.store';
 import { useTheme } from '../../src/hooks/useTheme';
-import { useNotificationPermission } from '../../src/hooks/useNotificationPermission';
 
 type DocsStatus = 'PENDING' | 'UPLOADED' | 'VERIFIED' | 'REJECTED';
 type MyDocs = {
@@ -137,11 +136,6 @@ export default function ProfileScreen() {
   const setSeniorMode = useAccessibilityStore((s) => s.setSeniorMode);
   const t = useTheme();
   const qc = useQueryClient();
-  const { status: notifPerm } = useNotificationPermission();
-  // Show the banner only when we have a *definitive* not-granted answer —
-  // skip "unknown" (initial render) and "undetermined" (first-ever, the
-  // system will ask) so we don't flash a warning the user shouldn't see yet.
-  const notificationsBlocked = notifPerm === 'denied';
 
   const { data: profile } = useQuery({
     queryKey: ['resident-profile'],
@@ -196,42 +190,10 @@ export default function ProfileScreen() {
             )}
           </View>
 
-          {/* Notification permission banner — only when the OS has actively
-              denied (not pristine state). Tapping opens the troubleshoot
-              screen with step-by-step fixes (battery saver, lockscreen, DND). */}
-          {notificationsBlocked ? (
-            <TouchableOpacity
-              onPress={() => router.push('/profile/notification-troubleshoot' as any)}
-              accessibilityRole="button"
-              accessibilityLabel="Notifications are turned off. Tap to fix."
-              className="bg-amber-50 border border-amber-300 rounded-2xl mb-4 flex-row items-center"
-              style={{ padding: t.cardPadding }}
-            >
-              <View
-                className="rounded-full items-center justify-center"
-                style={{
-                  width: t.iconXl,
-                  height: t.iconXl,
-                  backgroundColor: '#FFFFFF',
-                  marginRight: 12,
-                }}
-              >
-                <Ionicons name="notifications-off" size={t.iconMd} color="#B45309" />
-              </View>
-              <View className="flex-1">
-                <Text className="text-amber-900 font-bold" style={{ fontSize: t.fontBase }}>
-                  Notifications are turned off
-                </Text>
-                <Text
-                  className="text-amber-800 mt-0.5"
-                  style={{ fontSize: t.fontSm, lineHeight: t.fontSm * t.lineHeightBase }}
-                >
-                  You won&apos;t hear about visitors, packages, or emergencies. Tap to fix.
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={t.iconSm} color="#B45309" />
-            </TouchableOpacity>
-          ) : null}
+          {/* Notification permission warning lives at the GLOBAL banner level
+              now (see _layout.tsx → NotificationPermissionBanner). Removing
+              the duplicate here also reclaims vertical space on Profile,
+              addressing the "Profile UI is complex" feedback. */}
 
           {/* Profile Card */}
           <TouchableOpacity
