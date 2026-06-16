@@ -3,6 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { ResidentType, UserStatus } from '@prisma/client';
 import { findResidentByUserId } from '../../common/utils/resident-context';
 import { NotificationService } from '../notification/notification.service';
+import { MarziMediaSigner } from '../../common/storage/marzi-media-signer.service';
 
 @Injectable()
 export class ResidentService {
@@ -11,6 +12,7 @@ export class ResidentService {
   constructor(
     private prisma: PrismaService,
     private notificationService: NotificationService,
+    private mediaSigner: MarziMediaSigner,
   ) {}
 
   async getProfile(userId: string) {
@@ -225,14 +227,24 @@ export class ResidentService {
         ? Buffer.from(resident.aadhaar as unknown as Uint8Array).toString('utf8').slice(-4)
         : null;
 
+    // Same private-S3 signing as the admin viewer — short-lived (15 min) GET
+    // URLs so the resident can inspect what they uploaded without us exposing
+    // a permanent link.
+    const signed = await this.mediaSigner.signMany({
+      aadhaarUrl: (resident as any).aadhaarUrl,
+      panUrl: (resident as any).panUrl,
+      idProofUrl: resident.idProof,
+      addressProofUrl: resident.addressProof,
+    });
+
     return {
       status: resident.documentsStatus,
       aadhaarLast4,
-      aadhaarUrl: (resident as any).aadhaarUrl ?? null,
+      aadhaarUrl: signed.aadhaarUrl,
       panNumber: resident.panNumber,
-      panUrl: (resident as any).panUrl ?? null,
-      idProofUrl: resident.idProof,
-      addressProofUrl: resident.addressProof,
+      panUrl: signed.panUrl,
+      idProofUrl: signed.idProofUrl,
+      addressProofUrl: signed.addressProofUrl,
     };
   }
 

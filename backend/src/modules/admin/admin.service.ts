@@ -11,6 +11,7 @@ import { parseCsv, rowToRecord, toCsvRow } from '../../common/utils/csv.util';
 import { SocietySeederService } from '../society/society-seeder.service';
 import { runWithTenantContext, getTenantContext } from '../../common/tenancy/tenant.context';
 import { asyncPool } from '../../common/utils/async-pool';
+import { MarziMediaSigner } from '../../common/storage/marzi-media-signer.service';
 
 // Concurrency ceiling for fan-out push delivery — keeps a 1k-resident society
 // from saturating FCM rate limits while still finishing well under a minute.
@@ -36,6 +37,7 @@ export class AdminService {
     private compliance: ComplianceService,
     private audit: AuditService,
     private societySeeder: SocietySeederService,
+    private mediaSigner: MarziMediaSigner,
   ) {}
 
   async exportResidentDataAsAdmin(
@@ -1405,18 +1407,29 @@ async createStaff(
       return /^\d+$/.test(s) ? s.slice(-4) : null;
     })();
 
+    // KYC docs upload as visibility=private through Marzi, so the columns hold
+    // S3 keys (not URLs). The admin viewer needs short-lived signed GET URLs
+    // — 15 minutes is enough to inspect + decide, short enough that a leaked
+    // page doesn't permanently expose the documents.
+    const signed = await this.mediaSigner.signMany({
+      aadhaarUrl: resident.aadhaarUrl,
+      panUrl: resident.panUrl,
+      idProof: resident.idProof,
+      addressProof: resident.addressProof,
+    });
+
     return {
       name: resident.user.name,
       flat: resident.flat
         ? { block: resident.flat.block, number: resident.flat.number }
         : null,
       documentsStatus: resident.documentsStatus,
-      aadhaarUrl: resident.aadhaarUrl ?? null,
+      aadhaarUrl: signed.aadhaarUrl,
       aadhaarLast4,
-      panUrl: resident.panUrl ?? null,
+      panUrl: signed.panUrl,
       panNumber: resident.panNumber ?? null,
-      idProof: resident.idProof ?? null,
-      addressProof: resident.addressProof ?? null,
+      idProof: signed.idProof,
+      addressProof: signed.addressProof,
       uploadedAt: resident.updatedAt,
     };
   }
