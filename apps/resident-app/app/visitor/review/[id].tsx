@@ -13,9 +13,11 @@ type Visitor = {
   photoUrl?: string;
   createdAt?: string;
   status?: string;
+  type?: 'GUEST' | 'DELIVERY';
+  deliveryPartner?: string | null;
 };
 
-type Decision = 'APPROVE' | 'REJECT';
+type Decision = 'APPROVE' | 'REJECT' | 'LEAVE_AT_SECURITY';
 
 /**
  * Live arrival approval screen. Reached by tapping a VISITOR_ARRIVAL push.
@@ -38,13 +40,22 @@ export default function VisitorReviewScreen() {
     onSuccess: (_data, action) => {
       qc.invalidateQueries({ queryKey: ['visitor', id] });
       qc.invalidateQueries({ queryKey: ['my-visitors'] });
-      Alert.alert(
-        action === 'APPROVE' ? 'Entry Approved' : 'Entry Denied',
+      const { title, body } =
         action === 'APPROVE'
-          ? 'Security has been notified to let your visitor in.'
-          : 'Security has been notified to deny entry.',
-        [{ text: 'OK', onPress: () => router.back() }],
-      );
+          ? {
+              title: 'Entry Approved',
+              body: 'Security has been notified to let them in.',
+            }
+          : action === 'LEAVE_AT_SECURITY'
+          ? {
+              title: 'Leave at Security',
+              body: 'Security will keep the package at the desk.',
+            }
+          : {
+              title: 'Entry Denied',
+              body: 'Security has been notified to deny entry.',
+            };
+      Alert.alert(title, body, [{ text: 'OK', onPress: () => router.back() }]);
     },
     onError: (err: Error) => Alert.alert('Error', err.message ?? 'Could not submit your decision.'),
   });
@@ -113,6 +124,13 @@ export default function VisitorReviewScreen() {
           <Text className="font-bold text-gray-900 mt-5" style={{ fontSize: t.fontXl }}>
             {visitor.name ?? 'Visitor'}
           </Text>
+          {visitor.type === 'DELIVERY' && visitor.deliveryPartner ? (
+            <View className="bg-amber-100 rounded-full px-3 py-1 mt-2">
+              <Text className="text-amber-800 font-bold text-xs uppercase" style={{ letterSpacing: 1 }}>
+                {visitor.deliveryPartner}
+              </Text>
+            </View>
+          ) : null}
           {visitor.purpose ? (
             <Text className="text-gray-600 mt-1 text-center" style={{ fontSize: t.fontBase }}>{visitor.purpose}</Text>
           ) : null}
@@ -138,9 +156,27 @@ export default function VisitorReviewScreen() {
             {busy ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Text className="text-white font-semibold" style={{ fontSize: t.fontBase }}>Approve Entry</Text>
+              <Text className="text-white font-semibold" style={{ fontSize: t.fontBase }}>
+                {visitor.type === 'DELIVERY' ? 'Approve & let them in' : 'Approve Entry'}
+              </Text>
             )}
           </TouchableOpacity>
+          {/* Third option only appears for deliveries — for guests there's
+              no "leave at security" alternative. */}
+          {visitor.type === 'DELIVERY' && (
+            <TouchableOpacity
+              className="bg-amber-500 rounded-2xl items-center justify-center"
+              style={{ minHeight: t.touchTargetLg }}
+              onPress={() => decisionMutation.mutate('LEAVE_AT_SECURITY')}
+              disabled={busy}
+              accessibilityRole="button"
+              accessibilityLabel="Leave at security"
+            >
+              <Text className="text-white font-semibold" style={{ fontSize: t.fontBase }}>
+                Leave at security
+              </Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
             className="bg-red-50 border border-red-200 rounded-2xl items-center justify-center"
             style={{ minHeight: t.touchTargetLg }}
@@ -149,7 +185,9 @@ export default function VisitorReviewScreen() {
             accessibilityRole="button"
             accessibilityLabel={`Deny entry for ${visitor.name ?? 'visitor'}`}
           >
-            <Text className="text-red-600 font-semibold" style={{ fontSize: t.fontBase }}>Deny Entry</Text>
+            <Text className="text-red-600 font-semibold" style={{ fontSize: t.fontBase }}>
+              {visitor.type === 'DELIVERY' ? 'Reject' : 'Deny Entry'}
+            </Text>
           </TouchableOpacity>
         </View>
       </ScrollView>

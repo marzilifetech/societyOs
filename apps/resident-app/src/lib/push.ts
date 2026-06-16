@@ -23,6 +23,26 @@ const IOS_CATEGORIES: Notifications.NotificationCategory[] = [
       },
     ],
   },
+  // Delivery has the same Approve/Reject buttons PLUS a middle "Leave at
+  // security" option that maps to approvalStatus=LEFT_AT_SECURITY server-side.
+  // iOS allows up to 4 actions per category — 3 fits cleanly on the lockscreen
+  // long-press menu.
+  {
+    identifier: 'delivery_approval',
+    actions: [
+      { identifier: 'APPROVE', buttonTitle: 'Approve', options: { opensAppToForeground: false } },
+      {
+        identifier: 'LEAVE_AT_SECURITY',
+        buttonTitle: 'Leave at security',
+        options: { opensAppToForeground: false },
+      },
+      {
+        identifier: 'REJECT',
+        buttonTitle: 'Reject',
+        options: { opensAppToForeground: false, isDestructive: true },
+      },
+    ],
+  },
 ];
 
 // The native device push token last registered with the backend. The backend
@@ -293,6 +313,7 @@ function routeFromData(data: PushData | null) {
   if (!data) return;
   switch (data.type) {
     case 'VISITOR_APPROVAL_REQUEST':
+    case 'DELIVERY_APPROVAL_REQUEST':
     case 'VISITOR_ARRIVAL':
       // visitId is the legacy field; entityId is the canonical one going forward.
       {
@@ -325,14 +346,24 @@ function routeFromData(data: PushData | null) {
  * multi-device fan-out collapse to a no-op.
  */
 async function handleAction(actionIdentifier: string, data: PushData): Promise<void> {
-  if (data.type === 'VISITOR_APPROVAL_REQUEST' && (data.entityId || data.visitId)) {
-    const id = (data.entityId as string | undefined) ?? (data.visitId as string | undefined);
-    const action = actionIdentifier === 'APPROVE' ? 'APPROVE' : 'REJECT';
-    try {
-      await api.post(`/visitors/${id}/decision`, { action });
-    } catch {
-      /* server is the source of truth; user can retry from the visitor screen */
-    }
+  const isVisitor =
+    data.type === 'VISITOR_APPROVAL_REQUEST' || data.type === 'DELIVERY_APPROVAL_REQUEST';
+  if (!isVisitor) return;
+  const id = (data.entityId as string | undefined) ?? (data.visitId as string | undefined);
+  if (!id) return;
+  // Maps the lockscreen button identifier to the value the backend's
+  // decision endpoint expects. Anything unrecognised falls back to REJECT
+  // (the safer default — never let a misfire silently approve a stranger).
+  const action =
+    actionIdentifier === 'APPROVE'
+      ? 'APPROVE'
+      : actionIdentifier === 'LEAVE_AT_SECURITY'
+      ? 'LEAVE_AT_SECURITY'
+      : 'REJECT';
+  try {
+    await api.post(`/visitors/${id}/decision`, { action });
+  } catch {
+    /* server is the source of truth; user can retry from the visitor screen */
   }
 }
 

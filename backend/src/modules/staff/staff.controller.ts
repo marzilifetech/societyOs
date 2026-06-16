@@ -369,4 +369,16 @@ export class StaffController {
   ) {
     return this.staffService.lookupVisitorByPhone(societyId, phone);
   }
+
+  /**
+   * Get one visitor row — staff-scoped (only checks society membership, NOT
+   * resident ownership). Used by the Add Entry awaiting screen which polls
+   * for the resident's decision; the regular /visitors/:id endpoint requires
+   * the caller to be the owning resident and would 403 a guard.
+   */
+  @Get('visitors/:id')
+  @Roles(UserRole.STAFF)
+  getVisitorById(@SocietyId() societyId: string, @Param('id') id: string) {
+    return this.staffService.getVisitorById(societyId, id);
+  }
 }

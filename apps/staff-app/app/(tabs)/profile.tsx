@@ -268,6 +268,8 @@ export default function StaffProfileScreen() {
           <QuickLink icon="📅" label={t('leave.requestTitle')} onPress={() => router.push('/leave/new' as any)} />
           <QuickLink icon="📋" label={t('leave.historyTitle')} onPress={() => router.push('/leave/history' as any)} />
           <QuickLink icon="⚙️" label={t('profile.settings')} onPress={() => router.push('/settings' as any)} />
+          {/* SOS — moved here from the home FAB. Still one tap away. */}
+          <QuickLink icon="🚨" label="Emergency / SOS" onPress={() => router.push('/sos' as any)} />
           <QuickLink icon="❓" label={t('profile.help')} onPress={() => router.push('/settings/help' as any)} last />
         </View>
 

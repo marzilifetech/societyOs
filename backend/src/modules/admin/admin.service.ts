@@ -381,6 +381,9 @@ export class AdminService {
       phone: v.phone,
       purpose: v.purpose,
       vehicleNumber: v.vehicleNo,
+      // Surfaced for the admin visitors page's Type + Partner columns.
+      type: v.type,
+      deliveryPartner: v.deliveryPartner,
       status: v.status === 'EXPECTED' ? 'PENDING' : v.status,
       approvalStatus: v.approvalStatus,
       validFrom: v.validFrom,

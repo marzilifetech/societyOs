@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -17,6 +17,7 @@ import { NotificationProvider, useNotificationBanner } from '../src/contexts/Not
 import { InAppBanner } from '../src/components/InAppBanner';
 import { NotificationPermissionBanner } from '../src/components/NotificationPermissionBanner';
 import { AppUpdateGate } from '../src/components/AppUpdateGate';
+import { DeliveryApprovalModal, type DeliveryPayload } from '../src/components/DeliveryApprovalModal';
 import {
   Montserrat_400Regular,
   Montserrat_500Medium,
@@ -59,8 +60,20 @@ function RealtimeProvider() {
  * Mounted inside <NotificationProvider> so it can call `showBanner`. Only
  * subscribes while authenticated to avoid surfacing notifications meant for
  * a previous session.
+ *
+ * Delivery branch: when data.type === 'DELIVERY_APPROVAL_REQUEST' arrives in
+ * foreground we BYPASS the in-app banner and surface a full-screen
+ * DeliveryApprovalModal instead. The resident must make a decision (Approve
+ * / Leave at security / Reject) — the modal is intentionally not
+ * dismissible. Guest pushes still ride the banner.
  */
-function ForegroundBannerBridge({ active }: { active: boolean }) {
+function ForegroundBannerBridge({
+  active,
+  onDelivery,
+}: {
+  active: boolean;
+  onDelivery: (payload: DeliveryPayload) => void;
+}) {
   const { showBanner } = useNotificationBanner();
   useEffect(() => {
     if (!active) return;
@@ -71,12 +84,36 @@ function ForegroundBannerBridge({ active }: { active: boolean }) {
         typeof data.imageUrl === 'string'
           ? data.imageUrl
           : (c as any).attachments?.[0]?.url ?? undefined;
+
+      const dataType = typeof data.type === 'string' ? data.type : undefined;
+
+      // Delivery → full-screen takeover. Pull out the fields the modal needs;
+      // the banner queue is skipped so the resident isn't distracted by
+      // two competing UIs.
+      if (dataType === 'DELIVERY_APPROVAL_REQUEST') {
+        const visitId =
+          typeof data.entityId === 'string'
+            ? data.entityId
+            : typeof data.visitId === 'string'
+            ? data.visitId
+            : null;
+        if (visitId) {
+          onDelivery({
+            visitId,
+            visitorName: typeof data.visitorName === 'string' ? data.visitorName : c.title ?? 'Delivery',
+            deliveryPartner: typeof data.deliveryPartner === 'string' ? data.deliveryPartner : null,
+            photoUrl: imageUrl ?? null,
+          });
+          return;
+        }
+      }
+
       showBanner({
         id: n.request.identifier,
         title: c.title ?? 'Notification',
         body: c.body ?? '',
         imageUrl,
-        type: typeof data.type === 'string' ? data.type : undefined,
+        type: dataType,
         entityId:
           typeof data.entityId === 'string'
             ? data.entityId
@@ -88,7 +125,7 @@ function ForegroundBannerBridge({ active }: { active: boolean }) {
       });
     });
     return () => sub.remove();
-  }, [active, showBanner]);
+  }, [active, showBanner, onDelivery]);
   return null;
 }
 
@@ -163,30 +200,48 @@ export default function RootLayout() {
         <SafeAreaProvider>
           <QueryClientProvider client={queryClient}>
             <NotificationProvider>
-              <NetworkBanner />
-              {token ? <RealtimeProvider /> : null}
-              <StatusBar style="auto" />
-              {/* AppUpdateGate wraps the navigation Stack so when the
-                  policy says 'immediate' we replace the entire app with
-                  the blocker screen — even unauthenticated boot can't
-                  bypass it. */}
-              <AppUpdateGate>
-                <Stack screenOptions={{ headerShown: false }} />
-              </AppUpdateGate>
-              {/* Global "notifications are off" strip — zIndex 8000. Only
-                  rendered while authenticated so we don't pester a brand
-                  new user before the primer modal has had its chance.
-                  Sits beneath InAppBanner (zIndex 9999) so a foreground
-                  push still overlays it cleanly. */}
-              {token ? <NotificationPermissionBanner /> : null}
-              {/* InAppBanner is mounted last so it overlays every screen,
-                  including bottom tabs and modals. */}
-              <ForegroundBannerBridge active={!!token} />
-              <InAppBanner />
+              <RootShell token={token} />
             </NotificationProvider>
           </QueryClientProvider>
         </SafeAreaProvider>
       </GestureHandlerRootView>
     </ErrorBoundary>
+  );
+}
+
+/**
+ * Carved out so the delivery-takeover state can live inside the React tree
+ * AND consume the notification context. Putting useState on RootLayout
+ * itself would force RootShell to re-render on every state flip, but the
+ * isolation here keeps Stack remount-free.
+ */
+function RootShell({ token }: { token: string | null }) {
+  const [deliveryPayload, setDeliveryPayload] = useState<DeliveryPayload | null>(null);
+  return (
+    <>
+      <NetworkBanner />
+      {token ? <RealtimeProvider /> : null}
+      <StatusBar style="auto" />
+      {/* AppUpdateGate wraps the navigation Stack so when the policy says
+          'immediate' we replace the entire app with the blocker screen —
+          even unauthenticated boot can't bypass it. */}
+      <AppUpdateGate>
+        <Stack screenOptions={{ headerShown: false }} />
+      </AppUpdateGate>
+      {/* Global "notifications are off" strip — zIndex 8000. Only rendered
+          while authenticated so we don't pester a brand new user before
+          the primer modal has had its chance. Sits beneath InAppBanner
+          (zIndex 9999) so a foreground push still overlays it cleanly. */}
+      {token ? <NotificationPermissionBanner /> : null}
+      {/* InAppBanner is mounted last so it overlays every screen, including
+          bottom tabs and modals. Delivery pushes are diverted from the
+          banner into a full-screen modal (DeliveryApprovalModal) below. */}
+      <ForegroundBannerBridge active={!!token} onDelivery={setDeliveryPayload} />
+      <InAppBanner />
+      <DeliveryApprovalModal
+        payload={deliveryPayload}
+        onResolved={() => setDeliveryPayload(null)}
+      />
+    </>
   );
 }

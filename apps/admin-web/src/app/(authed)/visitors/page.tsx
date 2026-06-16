@@ -38,6 +38,8 @@ const DATE_TABS: Array<{ key: DateFilter; label: string }> = [
 type VisitorWithResident = Visitor & {
   resident?: { name: string; unit?: { flatNumber: string } };
   approvalStatus?: string;
+  type?: 'GUEST' | 'DELIVERY';
+  deliveryPartner?: string | null;
 };
 
 function formatTime(iso?: string) {
@@ -238,7 +240,7 @@ export default function VisitorsPage() {
           <table className="w-full">
             <thead className="bg-gray-50">
               <tr>
-                {['Visitor', 'Phone', 'Purpose', 'Host', 'Flat', 'Entry', 'Exit', 'Valid', 'Approval', 'Status', ''].map((h) => (
+                {['Visitor', 'Type', 'Partner', 'Phone', 'Purpose', 'Host', 'Flat', 'Entry', 'Exit', 'Valid', 'Approval', 'Status', ''].map((h) => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
                     {h}
                   </th>
@@ -259,6 +261,20 @@ export default function VisitorsPage() {
                         <VisitorAvatar name={v.name} />
                         <span className="text-sm font-medium text-gray-900">{v.name}</span>
                       </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      {v.type === 'DELIVERY' ? (
+                        <span className="text-[11px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full">
+                          Delivery
+                        </span>
+                      ) : (
+                        <span className="text-[11px] font-bold text-gray-700 bg-gray-100 px-2 py-0.5 rounded-full">
+                          Guest
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-gray-600">
+                      {v.deliveryPartner ?? '—'}
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600">{v.phone ?? '—'}</td>
                     <td className="px-4 py-3 text-sm text-gray-600">{v.purpose}</td>

@@ -860,6 +860,26 @@ export class StaffService {
   }
 
   /**
+   * Staff-scoped single-visitor fetch. Skips the resident-ownership check
+   * that VisitorService.findById enforces (which would 403 a guard) — staff
+   * only needs society membership. Used by the Add Entry awaiting screen's
+   * poll loop.
+   */
+  async getVisitorById(societyId: string, visitorId: string) {
+    const visitor = await this.prisma.visitor.findFirst({
+      where: { id: visitorId, resident: { flat: { societyId } } },
+      include: { resident: { include: { user: true, flat: true } } },
+    });
+    if (!visitor) {
+      throw new NotFoundException({
+        code: 'VISITOR_NOT_FOUND',
+        message: 'Visitor not found in this society',
+      });
+    }
+    return visitor;
+  }
+
+  /**
    * Last-known visitor with this phone in the society. Prefills name + photo
    * in the Add Entry form so a repeat courier doesn't have to be re-typed.
    * Returns 404 when this phone has never visited; the form falls back to

@@ -1,17 +1,10 @@
-import { useState } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   ScrollView,
   ActivityIndicator,
-  Alert,
-  Modal,
-  TextInput,
-  KeyboardAvoidingView,
-  Platform,
 } from 'react-native';
-import * as Location from 'expo-location';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -19,9 +12,7 @@ import i18nInstance from '../../src/lib/i18n';
 import { useQuery } from '@tanstack/react-query';
 import type { ServiceRequest } from '@societyos/api-client';
 import { useAuthStore } from '../../src/store/auth.store';
-import { api } from '../../src/lib/api';
 import { getUnwrapped, getUnwrappedArray } from '../../src/lib/unwrapped-get';
-import { unwrapApiEnvelope } from '@societyos/api-client';
 import { SkeletonCard, SkeletonRow } from '../../src/components/attendance/SkeletonCard';
 import { ErrorCard } from '../../src/components/ErrorCard';
 import { isSecurityStaff } from '../../src/lib/security-staff';
@@ -48,10 +39,6 @@ function taskStatusStyleKey(status: string): 'PENDING' | 'ASSIGNED' | 'IN_PROGRE
 export default function StaffHomeScreen() {
   const { t } = useTranslation(undefined, { i18n: i18nInstance });
   const user = useAuthStore((s) => s.user);
-  const [sosNoteOpen, setSosNoteOpen] = useState(false);
-  const [sosAlertId, setSosAlertId] = useState<string | null>(null);
-  const [sosSending, setSosSending] = useState(false);
-  const [sosNote, setSosNote] = useState('');
 
   const { data: summary, isLoading: loadingSummary, isError: summaryError, isFetching: fetchingSummary, refetch: refetchSummary } = useQuery({
     queryKey: ['staff-summary'],
@@ -102,67 +89,6 @@ export default function StaffHomeScreen() {
     enabled: !!user,
   });
   const unreadInbox = unread?.count ?? 0;
-
-  const sendSosImmediate = async () => {
-    if (sosSending) return;
-    setSosSending(true);
-    try {
-      let lat: number | undefined;
-      let lng: number | undefined;
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === 'granted') {
-        try {
-          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-          lat = loc.coords.latitude;
-          lng = loc.coords.longitude;
-        } catch {
-          // continue without coordinates
-        }
-      }
-      const body: { lat?: number; lng?: number } = {};
-      if (lat != null) body.lat = lat;
-      if (lng != null) body.lng = lng;
-      const raw = await api.post<object>('/sos/staff', body);
-      const alert = unwrapApiEnvelope<{ id: string }>(raw);
-      setSosAlertId(alert.id);
-      setSosNote('');
-      setSosNoteOpen(true);
-    } catch {
-      Alert.alert(t('home.alertSosFailTitle'), t('home.alertSosFailBody'));
-    } finally {
-      setSosSending(false);
-    }
-  };
-
-  const submitSosNoteUpdate = async () => {
-    const id = sosAlertId;
-    const text = sosNote.trim();
-    if (!id) {
-      setSosNoteOpen(false);
-      return;
-    }
-    if (!text) {
-      setSosNoteOpen(false);
-      setSosAlertId(null);
-      return;
-    }
-    try {
-      await api.patch(`/sos/${id}/note`, { note: text });
-      Alert.alert(t('home.alertNoteSentTitle'), t('home.alertNoteSentBody'));
-    } catch {
-      Alert.alert(t('home.alertNoteFailTitle'), t('home.alertNoteFailBody'));
-    } finally {
-      setSosNoteOpen(false);
-      setSosAlertId(null);
-      setSosNote('');
-    }
-  };
-
-  const skipSosNote = () => {
-    setSosNoteOpen(false);
-    setSosAlertId(null);
-    setSosNote('');
-  };
 
   const pendingTasks = myTasks.filter((task) => task.status !== 'COMPLETED' && task.status !== 'REJECTED');
   const doneToday = myTasks.filter((task) => {
@@ -410,60 +336,18 @@ export default function StaffHomeScreen() {
         </View>
       </ScrollView>
 
-      {/* SOS: send immediately with location; optional note is a follow-up PATCH */}
+      {/* Add Entry — opens the new guest/delivery entry form. SOS moved to
+          Profile → Emergency / SOS. Keeping a single primary FAB on Home
+          per the user's request; emergencies are a Profile menu item now. */}
       <TouchableOpacity
-        className="absolute bottom-6 right-6 bg-red-500 rounded-full w-14 h-14 items-center justify-center shadow-lg"
-        onPress={sendSosImmediate}
-        disabled={sosSending}
+        className="absolute bottom-6 right-6 bg-primary-500 dark:bg-primary-600 rounded-full px-5 h-14 flex-row items-center shadow-lg"
+        onPress={() => router.push('/entry/new' as any)}
+        accessibilityRole="button"
+        accessibilityLabel="Add visitor or delivery entry"
       >
-        {sosSending ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text className="text-white font-bold text-xs">SOS</Text>
-        )}
+        <Ionicons name="add" size={22} color="#fff" />
+        <Text className="text-white font-bold ml-1.5">Add Entry</Text>
       </TouchableOpacity>
-
-      <Modal visible={sosNoteOpen} transparent animationType="fade" onRequestClose={skipSosNote}>
-        <KeyboardAvoidingView
-          className="flex-1"
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        >
-          <View className="flex-1 bg-black/50 justify-end">
-            <View className="bg-white dark:bg-gray-900 rounded-t-3xl px-6 pt-6 pb-8 border-t border-gray-100 dark:border-gray-800">
-              <Text className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-1">{t('home.sosModalTitle')}</Text>
-              <Text className="text-xs text-gray-500 dark:text-gray-400 mb-4">{t('home.sosModalBody')}</Text>
-              <Text className="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-2">{t('home.noteOptional')}</Text>
-              <TextInput
-                className="bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl px-4 py-3 text-sm text-gray-900 dark:text-gray-100 min-h-[100px]"
-                placeholder={t('home.sosNotePlaceholder')}
-                placeholderTextColor="#9CA3AF"
-                value={sosNote}
-                onChangeText={setSosNote}
-                multiline
-                textAlignVertical="top"
-                maxLength={2000}
-              />
-              <View className="flex-row gap-3 mt-5">
-                <TouchableOpacity
-                  className="flex-1 bg-gray-100 dark:bg-gray-800 rounded-xl py-3 items-center"
-                  onPress={skipSosNote}
-                >
-                  <Text className="text-sm font-semibold text-gray-700 dark:text-gray-200">{t('home.skip')}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  className="flex-1 bg-primary-500 dark:bg-primary-600 rounded-xl py-3 items-center"
-                  onPress={() => submitSosNoteUpdate()}
-                  disabled={sosNote.trim().length === 0}
-                >
-                  <Text className={`text-sm font-semibold ${sosNote.trim().length === 0 ? 'text-gray-400' : 'text-white'}`}>
-                    {t('home.sendNote')}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
     </SafeAreaView>
   );
 }
