@@ -22,6 +22,7 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import Constants from 'expo-constants';
 import { useAuthStore } from '../../src/store/auth.store';
 import { api } from '../../src/lib/api';
+import { uploadViaMedia } from '../../src/lib/photo-upload';
 
 interface StaffProfile {
   employeeId?: string;
@@ -80,6 +81,11 @@ export default function StaffProfileScreen() {
     },
   });
 
+  // Profile photo upload — goes through the Marzi /media proxy (same as
+  // resident-app document uploads). The previous self-signed S3 PUT was
+  // failing with 403 because the backend's IAM principal had no PutObject
+  // permission. The /media flow uses Marzi's S3 + presigned POST, which we
+  // know works.
   const photoMutation = useMutation({
     mutationFn: async (uri: string) => {
       const compressed = await ImageManipulator.manipulateAsync(
@@ -87,21 +93,18 @@ export default function StaffProfileScreen() {
         [{ resize: { width: 600 } }],
         { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG },
       );
-      const presigned = await api.post<{ uploadUrl: string; key: string; fileUrl?: string }>(
-        '/staff/profile/photo-url',
-        { contentType: 'image/jpeg' },
-      );
-      const blob = await (await fetch(compressed.uri)).blob();
-      const put = await fetch(presigned.uploadUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'image/jpeg' },
-        body: blob,
+      const result = await uploadViaMedia(compressed.uri, {
+        contentType: 'image/jpeg',
+        visibility: 'public',
+        filename: 'profile.jpg',
       });
-      if (!put.ok) throw new Error(`Upload failed (${put.status})`);
-      try {
-        await api.post('/staff/profile/photo-confirm', { key: presigned.key });
-      } catch {}
-      return presigned.fileUrl;
+      if (!result.publicUrl) {
+        // Public uploads must come back with a CDN URL — if not, persisting
+        // an empty string would clear the photo.
+        throw new Error('Upload did not return a public URL');
+      }
+      await api.post('/staff/profile/photo', { photoUrl: result.publicUrl });
+      return result.publicUrl;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['staff-profile'] }),
     onError: (err: any) => Alert.alert('Photo upload failed', err?.message ?? 'Try again'),

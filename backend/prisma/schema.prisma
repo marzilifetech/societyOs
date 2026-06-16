@@ -612,6 +612,9 @@ model StaffMember {
   leavingDate      DateTime?
   familyDetails    Json?
   emergencyContact Json?
+  // Public CDN URL of the staff member's profile photo, uploaded via the
+  // Marzi /media proxy (public visibility). Null when not set.
+  photoUrl         String?
   deletedAt        DateTime?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt

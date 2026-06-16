@@ -269,16 +269,20 @@ export class StaffController {
     return this.staffService.getCheckInVoiceUploadUrl(user.sub, contentType);
   }
 
-  @Post('profile/photo-url')
+  /**
+   * Persist a staff profile photo URL.
+   *
+   * The previous flow (`/profile/photo-url` → S3 presign → `/photo-confirm`)
+   * relied on the backend's own S3 IAM credentials which lack PutObject on
+   * any bucket, so every PUT failed with 403. Staff photos now flow through
+   * the Marzi `/media` proxy (same path as resident-app uploads) — the
+   * client uploads to Marzi's S3 directly with Marzi's presigned POST, then
+   * tells us the public URL it received. We just persist.
+   */
+  @Post('profile/photo')
   @Roles(UserRole.STAFF)
-  getProfilePhotoUploadUrl(@CurrentUser() user: JwtPayload, @Body() body: { contentType?: string }) {
-    return this.staffService.getProfilePhotoUploadUrl(user.sub, body?.contentType);
-  }
-
-  @Post('profile/photo-confirm')
-  @Roles(UserRole.STAFF)
-  confirmProfilePhoto(@CurrentUser() user: JwtPayload, @Body() body: { key: string }) {
-    return this.staffService.confirmProfilePhoto(user.sub, body.key);
+  setProfilePhoto(@CurrentUser() user: JwtPayload, @Body() body: { photoUrl: string }) {
+    return this.staffService.setProfilePhoto(user.sub, body.photoUrl);
   }
 
   // ─── Documents confirm ──────────────────────────────────────

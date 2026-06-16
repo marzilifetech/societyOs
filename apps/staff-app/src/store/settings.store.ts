@@ -85,7 +85,11 @@ const defaultNotifications: NotificationPrefs = {
 };
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
-  theme: 'system',
+  // Default to light. Earlier we used 'system' which inherits the phone's
+  // dark/light setting — many test devices are on dark, so first-launch
+  // showed the app in dark even though most staff prefer light. Users can
+  // still pick System/Dark from Settings → Theme.
+  theme: 'light',
   largeText: false,
   dataSaver: false,
   biometricEnabled: false,
@@ -128,8 +132,14 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       const raw = await AsyncStorage.getItem(KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
+        // One-shot migration: every install before this build persisted theme
+        // 'system' (the old default), which renders dark on dark-mode phones.
+        // We coerce that single persisted value to 'light' so existing users
+        // get the new default without having to dig through Settings. Anyone
+        // who has explicitly picked 'light' or 'dark' is unaffected.
+        const persistedTheme: ThemeMode = parsed.theme === 'system' ? 'light' : (parsed.theme ?? 'light');
         set({
-          theme: parsed.theme ?? 'system',
+          theme: persistedTheme,
           largeText: !!parsed.largeText,
           dataSaver: !!parsed.dataSaver,
           autoLockMinutes: parsed.autoLockMinutes ?? 5,

@@ -695,17 +695,18 @@ export class StaffService {
     return this.s3.getPresignedUploadUrl(`staff/${staffId}/check-in/voice`, contentType ?? 'audio/m4a');
   }
 
-  async getProfilePhotoUploadUrl(userId: string, contentType?: string) {
-    const staffId = await this.resolveStaffId(userId);
-    return this.s3.getPresignedUploadUrl(`staff/${staffId}/profile`, contentType ?? 'image/jpeg');
-  }
-
-  async confirmProfilePhoto(userId: string, key: string) {
+  async setProfilePhoto(userId: string, photoUrl: string) {
+    if (!photoUrl || typeof photoUrl !== 'string' || !/^https?:\/\//.test(photoUrl)) {
+      throw new BadRequestException('photoUrl must be a valid http(s) URL');
+    }
     const staff = await this.prisma.staffMember.findUnique({ where: { userId } });
     if (!staff) throw new NotFoundException('Staff profile not found');
-    // TODO: persist profile photo URL once StaffMember has a dedicated column.
-    const url = this.s3.getPublicUrl(key);
-    return { ok: true, url };
+    const updated = await this.prisma.staffMember.update({
+      where: { userId },
+      data: { photoUrl },
+      select: { id: true, photoUrl: true },
+    });
+    return { ok: true, photoUrl: updated.photoUrl };
   }
 
   async confirmDocumentUpload(
