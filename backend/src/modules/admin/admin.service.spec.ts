@@ -544,6 +544,82 @@ describe('AdminService', () => {
       ).rejects.toThrow(NotFoundException);
       expect(mockPrisma.staffMember.update).not.toHaveBeenCalled();
     });
+
+    describe('shiftTemplateId', () => {
+      // shiftTemplateId points at a template stored in JSON on Society.config.
+      // No FK enforces it, so updateStaff must validate the id exists in the
+      // society's template list before persisting.
+      beforeEach(() => {
+        mockPrisma.staffMember.findFirst.mockResolvedValue({
+          id: 'sm-1',
+          userId: 'u1',
+          salaryStructure: {},
+        });
+        mockPrisma.user.update.mockResolvedValue({});
+        mockPrisma.staffMember.update.mockResolvedValue({ id: 'sm-1' });
+      });
+
+      it('persists a valid shiftTemplateId after looking it up in society.config', async () => {
+        mockPrisma.society.findUnique.mockResolvedValue({
+          config: {
+            shiftTemplates: [
+              { id: 'sh_morning', name: 'Morning', startTime: '06:00', endTime: '14:00' },
+              { id: 'sh_night', name: 'Night', startTime: '22:00', endTime: '06:00' },
+            ],
+          },
+        });
+
+        await service.updateStaff('soc-1', 'sm-1', { shiftTemplateId: 'sh_morning' });
+
+        expect(mockPrisma.society.findUnique).toHaveBeenCalledWith({
+          where: { id: 'soc-1' },
+          select: { config: true },
+        });
+        expect(mockPrisma.staffMember.update).toHaveBeenCalledWith({
+          where: { id: 'sm-1' },
+          data: expect.objectContaining({ shiftTemplateId: 'sh_morning' }),
+          include: { user: true },
+        });
+      });
+
+      it('rejects an unknown shiftTemplateId with BadRequestException', async () => {
+        mockPrisma.society.findUnique.mockResolvedValue({
+          config: { shiftTemplates: [{ id: 'sh_morning' }] },
+        });
+
+        await expect(
+          service.updateStaff('soc-1', 'sm-1', { shiftTemplateId: 'sh_does_not_exist' }),
+        ).rejects.toThrow(BadRequestException);
+        expect(mockPrisma.staffMember.update).not.toHaveBeenCalled();
+      });
+
+      it('clears the shift when shiftTemplateId is null', async () => {
+        await service.updateStaff('soc-1', 'sm-1', { shiftTemplateId: null });
+        // Should NOT have consulted society.config — null skips the lookup.
+        expect(mockPrisma.society.findUnique).not.toHaveBeenCalled();
+        expect(mockPrisma.staffMember.update).toHaveBeenCalledWith({
+          where: { id: 'sm-1' },
+          data: expect.objectContaining({ shiftTemplateId: null }),
+          include: { user: true },
+        });
+      });
+
+      it('treats empty string as a clear (same as null)', async () => {
+        await service.updateStaff('soc-1', 'sm-1', { shiftTemplateId: '' });
+        expect(mockPrisma.staffMember.update).toHaveBeenCalledWith({
+          where: { id: 'sm-1' },
+          data: expect.objectContaining({ shiftTemplateId: null }),
+          include: { user: true },
+        });
+      });
+
+      it('rejects when society has no shiftTemplates defined yet', async () => {
+        mockPrisma.society.findUnique.mockResolvedValue({ config: {} });
+        await expect(
+          service.updateStaff('soc-1', 'sm-1', { shiftTemplateId: 'sh_morning' }),
+        ).rejects.toThrow(BadRequestException);
+      });
+    });
   });
 
   describe('staff documents — cross-tenant guards', () => {

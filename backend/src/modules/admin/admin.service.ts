@@ -1175,6 +1175,7 @@ async createStaff(
       gender?: string;
       dateOfBirth?: string | null;
       emergencyContact?: { name: string; phone: string; relation?: string } | null;
+      shiftTemplateId?: string | null;
     },
   ) {
     // Composite (id, societyId) WHERE — defends against SUPER_ADMIN bypass
@@ -1198,6 +1199,31 @@ async createStaff(
     if (body.emergencyContact !== undefined) staffData.emergencyContact = body.emergencyContact;
     if (body.gender !== undefined) userData.gender = body.gender;
     if (body.dateOfBirth !== undefined) userData.dateOfBirth = body.dateOfBirth ? new Date(body.dateOfBirth) : null;
+
+    // shiftTemplateId: explicit null clears the assignment, a string assigns
+    // it. Validate the id exists in the society's templates BEFORE we
+    // persist — otherwise we'd leak orphan ids when the admin renames /
+    // deletes a template on the Shift Timings page.
+    if (body.shiftTemplateId !== undefined) {
+      if (body.shiftTemplateId === null || body.shiftTemplateId === '') {
+        staffData.shiftTemplateId = null;
+      } else {
+        const society = await this.prisma.society.findUnique({
+          where: { id: societyId },
+          select: { config: true },
+        });
+        const config = (society?.config as Record<string, unknown> | null) ?? {};
+        const templates = (config.shiftTemplates as Array<{ id?: string }> | undefined) ?? [];
+        const exists = templates.some((t) => t?.id === body.shiftTemplateId);
+        if (!exists) {
+          throw new BadRequestException(
+            'shiftTemplateId does not match any template in this society. ' +
+              'Open Staff → Shift Timings to define one first.',
+          );
+        }
+        staffData.shiftTemplateId = body.shiftTemplateId;
+      }
+    }
 
     if (Object.keys(userData).length > 0) {
       await this.prisma.user.update({ where: { id: staff.userId }, data: userData });

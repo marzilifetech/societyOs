@@ -250,6 +250,7 @@ export class AdminController {
       gender?: string;
       dateOfBirth?: string | null;
       emergencyContact?: { name: string; phone: string; relation?: string } | null;
+      shiftTemplateId?: string | null;
     },
   ) {
     return this.adminService.updateStaff(societyId, id, body);

@@ -5,7 +5,7 @@ import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ArrowLeft, CalendarDays, ArrowLeftRight, Ban, UserX, Plus, Trash2 } from 'lucide-react';
+import { ArrowLeft, CalendarDays, ArrowLeftRight, Ban, UserX, Plus, Trash2, Clock } from 'lucide-react';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { ErrorState } from '@/components/ui/ErrorState';
@@ -86,6 +86,12 @@ export default function StaffDetailPage() {
   const [showDocUpload, setShowDocUpload] = useState(false);
   const [docForm, setDocForm] = useState({ documentType: 'AADHAR', file: null as File | null });
 
+  // Shift assignment — reads templates from /admin/society config; persists
+  // via the shared PATCH /admin/staff/:id endpoint. Empty string === "no
+  // shift" (backend coerces to null).
+  const [shiftTemplateId, setShiftTemplateId] = useState<string>('');
+  const [shiftEdited, setShiftEdited] = useState(false);
+
   // Family state
   const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
   const [familyEdited, setFamilyEdited] = useState(false);
@@ -129,7 +135,32 @@ export default function StaffDetailPage() {
       relation: ec?.relation ?? '',
     });
     setEcEdited(false);
+    setShiftTemplateId((staff as any).shiftTemplateId ?? '');
+    setShiftEdited(false);
   }, [staff]);
+
+  // Society shift templates — needed for the dropdown options. Cached briefly
+  // since admins rarely tweak them mid-session; sharing the queryKey with the
+  // Shift Timings page lets a save there invalidate this list too.
+  const { data: society } = useQuery({
+    queryKey: ['admin-society-shift-templates'],
+    queryFn: () => api.get<{ config?: { shiftTemplates?: Array<{ id: string; name: string; startTime: string; endTime: string }> } }>('/admin/society'),
+    staleTime: 5 * 60_000,
+  });
+  const shiftTemplates = society?.config?.shiftTemplates ?? [];
+
+  const updateShiftMutation = useMutation({
+    mutationFn: () =>
+      api.patch(`/admin/staff/${staffId}`, {
+        shiftTemplateId: shiftTemplateId || null,
+      }),
+    onSuccess: () => {
+      setShiftEdited(false);
+      qc.invalidateQueries({ queryKey: ['staff-detail', staffId] });
+      toast.success('Shift updated');
+    },
+    onError: (err: Error) => toast.error(err.message ?? 'Could not update shift'),
+  });
 
   const { data: documents } = useQuery({
     queryKey: ['staff-documents', staffId],
@@ -483,6 +514,64 @@ export default function StaffDetailPage() {
             >
               {updateProfileMutation.isPending ? 'Saving…' : 'Save Changes'}
             </button>
+          </div>
+
+          {/* Shift assignment. Dropdown is populated from the society's
+              templates (Staff -> Shift Timings). If none exist yet, the
+              select is disabled and a one-line nudge sends the admin there. */}
+          <div className="bg-white rounded-2xl border border-gray-100 p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <Clock className="w-4 h-4 text-primary-600" />
+              <h2 className="font-semibold text-gray-900">Shift</h2>
+            </div>
+            {shiftTemplates.length === 0 ? (
+              <p className="text-sm text-gray-600">
+                No shift timings defined yet.{' '}
+                <a
+                  href="/staff/shift-timings"
+                  className="text-primary-600 font-medium underline"
+                >
+                  Define them here
+                </a>{' '}
+                first, then assign a shift to this staff member.
+              </p>
+            ) : (
+              <>
+                <label className="text-xs text-gray-500 mb-1 block">
+                  Assigned shift
+                </label>
+                <select
+                  value={shiftTemplateId}
+                  onChange={(e) => {
+                    setShiftTemplateId(e.target.value);
+                    setShiftEdited(true);
+                  }}
+                  className="w-full sm:w-auto min-w-[260px] border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-800 outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-50"
+                >
+                  <option value="">No shift assigned</option>
+                  {shiftTemplates.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name} ({t.startTime}–{t.endTime})
+                    </option>
+                  ))}
+                </select>
+                <div className="mt-4 flex items-center gap-3">
+                  <button
+                    onClick={() => updateShiftMutation.mutate()}
+                    disabled={!shiftEdited || updateShiftMutation.isPending}
+                    className="px-4 py-2 bg-primary-500 text-white rounded-xl text-sm font-semibold disabled:opacity-50"
+                  >
+                    {updateShiftMutation.isPending ? 'Saving…' : 'Save shift'}
+                  </button>
+                  <a
+                    href="/staff/shift-timings"
+                    className="text-[12px] text-gray-500 hover:text-primary-600"
+                  >
+                    Edit shift timings →
+                  </a>
+                </div>
+              </>
+            )}
           </div>
 
 

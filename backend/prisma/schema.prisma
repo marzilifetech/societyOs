@@ -615,6 +615,12 @@ model StaffMember {
   // Public CDN URL of the staff member's profile photo, uploaded via the
   // Marzi /media proxy (public visibility). Null when not set.
   photoUrl         String?
+  // Optional pointer to one of the society-wide shift templates stored at
+  // society.config.shiftTemplates[].id. Plain string (NOT a FK) because
+  // templates live in JSON, not in their own table — see the Shift Timings
+  // admin page (apps/admin-web/src/app/(authed)/staff/shift-timings/).
+  // Null = no shift assigned.
+  shiftTemplateId  String?
   deletedAt        DateTime?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
