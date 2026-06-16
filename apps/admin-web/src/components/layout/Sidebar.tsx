@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import {
-  LayoutDashboard, Users, UserCircle, Trophy, CalendarOff, UserCheck,
+  LayoutDashboard, Users, UserCircle, Trophy, CalendarOff, UserCheck, Clock,
   Wrench, FileText, MessageSquareWarning, Receipt, Megaphone, CalendarDays, Siren,
   UtensilsCrossed, Stethoscope, Shirt, ConciergeBell, Sparkles, ShieldCheck,
   HandPlatter, ParkingSquare, Plane, Package, Bug,
@@ -24,9 +24,10 @@ const NAV_ITEMS: Item[] = [
   { href: '/dashboard',         icon: LayoutDashboard,      label: 'Dashboard' },
   { href: '/residents',         icon: Users,                label: 'Residents' },
   { href: '/flats',             icon: Building2,            label: 'Flats & Blocks' },
-  { href: '/staff',             icon: UserCircle,           label: 'Staff' },
-  { href: '/staff/leaderboard', icon: Trophy,               label: 'Leaderboard' },
-  { href: '/staff/leaves',      icon: CalendarOff,          label: 'Staff Leaves' },
+  { href: '/staff',                icon: UserCircle,        label: 'Staff' },
+  { href: '/staff/leaderboard',    icon: Trophy,            label: 'Leaderboard' },
+  { href: '/staff/leaves',         icon: CalendarOff,       label: 'Staff Leaves' },
+  { href: '/staff/shift-timings',  icon: Clock,             label: 'Shift Timings' },
   { href: '/visitors',          icon: UserCheck,            label: 'Visitors' },
   { href: '/service-requests',  icon: Wrench,               label: 'Service Requests' },
   { href: '/document-requests', icon: FileText,             label: 'Document Requests' },
