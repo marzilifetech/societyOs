@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   NotFoundException,
   ForbiddenException,
@@ -6,12 +7,51 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { VisitorStatus } from '@prisma/client';
+import { VisitorStatus, VisitorType } from '@prisma/client';
 import { CreateAtGateVisitorDto, CreateVisitorDto, CheckInVisitorDto } from './dto/visitor.dto';
 import { requireResidentByUserId } from '../../common/utils/resident-context';
 import { randomBytes } from 'crypto';
 import { VisitorGateway } from './visitor.gateway';
 import { PushService } from '../../common/notification/push.service';
+
+/**
+ * Canonical India delivery partners shown to staff in the Add Entry form
+ * picker. Kept here (not in a separate constants file) because this is the
+ * service that enforces the value — keeping the list adjacent to its
+ * validator means one PR to add a new courier. The mobile apps reuse this
+ * list via a parallel TypeScript file (apps/staff-app/src/constants/
+ * delivery-partners.ts) — keep them in sync.
+ */
+export const DELIVERY_PARTNERS: readonly string[] = [
+  'Amazon',
+  'Flipkart',
+  'Swiggy',
+  'Swiggy Instamart',
+  'Zomato',
+  'Blinkit',
+  'Zepto',
+  'BigBasket',
+  'Dunzo',
+  'Meesho',
+  'BlueDart',
+  'Delhivery',
+  'DTDC',
+  'Shadowfax',
+  'Ecom Express',
+  'Xpressbees',
+  'India Post',
+  'FedEx',
+];
+
+function isAllowedDeliveryPartner(value: string | undefined | null): boolean {
+  if (!value) return false;
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.length > 80) return false;
+  if (DELIVERY_PARTNERS.includes(trimmed)) return true;
+  // Free-text fallback the staff app emits when the partner isn't on the
+  // list. Bounded length keeps the column safe.
+  return trimmed.startsWith('Other: ') && trimmed.length <= 80;
+}
 
 type VisitorWithResidentFlat = {
   resident: { flat: { societyId: string } };
@@ -67,44 +107,73 @@ export class VisitorService {
   }
 
   /**
-   * Guard added a walk-in visitor — fire actionable push (photo + name + purpose
-   * + Approve / Reject) so the resident can decide from the lockscreen. The
-   * decide() endpoint is idempotent, so duplicate taps and multi-device fan-out
-   * collapse safely. Best-effort: never blocks visitor creation.
+   * Guard added a walk-in visitor — fire actionable push so the resident can
+   * decide from the lockscreen. Two payload shapes:
+   *
+   *   GUEST    → category='visitors_gate', actionGroup='visitor_approval',
+   *              2 buttons (Approve / Reject), data.type='VISITOR_APPROVAL_REQUEST'
+   *   DELIVERY → category='deliveries',    actionGroup='delivery_approval',
+   *              3 buttons (Approve / Leave at Security / Reject),
+   *              data.type='DELIVERY_APPROVAL_REQUEST', data.deliveryPartner
+   *
+   * The decide() endpoint is idempotent — duplicate taps and multi-device fan-
+   * out collapse safely. Best-effort: never blocks visitor creation.
    */
   private notifyResidentPendingApproval(visitor: {
     id: string;
     name: string;
     purpose?: string | null;
     photoUrl?: string | null;
+    type: VisitorType;
+    deliveryPartner?: string | null;
     resident?: { userId?: string | null } | null;
   }): void {
     try {
       const userId = visitor?.resident?.userId;
       if (!userId) return;
+
+      const isDelivery = visitor.type === VisitorType.DELIVERY;
+      const partner = visitor.deliveryPartner?.trim();
       const purpose = visitor.purpose?.trim();
-      const body = purpose
+
+      const title = isDelivery
+        ? `${partner ?? 'Delivery'} at the gate`
+        : 'Visitor at the gate';
+      const body = isDelivery
+        ? `${visitor.name} is at the gate with a delivery. What should we do?`
+        : purpose
         ? `${visitor.name} (${purpose}) is at the gate. Approve entry?`
         : `${visitor.name} is at the gate. Approve entry?`;
+
+      const actions = isDelivery
+        ? [
+            { id: 'APPROVE', title: 'Approve' },
+            { id: 'LEAVE_AT_SECURITY', title: 'Leave at security' },
+            { id: 'REJECT', title: 'Reject', destructive: true },
+          ]
+        : [
+            { id: 'APPROVE', title: 'Approve' },
+            { id: 'REJECT', title: 'Reject', destructive: true },
+          ];
+
       void this.push
         .send(
           userId,
           {
-            title: 'Visitor at the gate',
+            title,
             body,
-            category: 'visitors_gate',
+            category: isDelivery ? 'deliveries' : 'visitors_gate',
             ...(visitor.photoUrl ? { imageUrl: visitor.photoUrl } : {}),
             collapseKey: `visitor:${visitor.id}`,
-            actions: [
-              { id: 'APPROVE', title: 'Approve' },
-              { id: 'REJECT', title: 'Reject', destructive: true },
-            ],
+            actions,
           },
           {
-            type: 'VISITOR_APPROVAL_REQUEST',
+            type: isDelivery ? 'DELIVERY_APPROVAL_REQUEST' : 'VISITOR_APPROVAL_REQUEST',
             visitId: visitor.id,
+            entityId: visitor.id,
             visitorName: visitor.name,
-            actionGroup: 'visitor_approval',
+            actionGroup: isDelivery ? 'delivery_approval' : 'visitor_approval',
+            ...(partner ? { deliveryPartner: partner } : {}),
             ...(purpose ? { purpose } : {}),
           },
         )
@@ -113,6 +182,50 @@ export class VisitorService {
         });
     } catch {
       /* never let an approval push break visitor creation */
+    }
+  }
+
+  /**
+   * Push back to the staff member who created the entry once the resident
+   * makes a decision. Lets the guard see the outcome without polling. Quiet
+   * category (no actions) — purely informational. Uses approval_results
+   * which our 3-type taxonomy classifies as DELIVERY (lockscreen + heads-up).
+   * Best-effort.
+   */
+  private notifyStaffOfDecision(
+    staffUserId: string | null,
+    visitor: { id: string; name: string; type: VisitorType; approvalStatus: string },
+  ): void {
+    if (!staffUserId) return;
+    const outcome =
+      visitor.approvalStatus === 'APPROVED'
+        ? 'approved entry'
+        : visitor.approvalStatus === 'LEFT_AT_SECURITY'
+        ? 'asked to leave it at security'
+        : 'rejected the entry';
+    const label = visitor.type === VisitorType.DELIVERY ? 'delivery' : 'visitor';
+    try {
+      void this.push
+        .send(
+          staffUserId,
+          {
+            title: 'Resident decision',
+            body: `Resident ${outcome} for ${label} "${visitor.name}".`,
+            category: 'approval_results',
+            collapseKey: `visitor-decision:${visitor.id}`,
+          },
+          {
+            type: 'VISITOR_DECISION_RESULT',
+            visitId: visitor.id,
+            entityId: visitor.id,
+            approvalStatus: visitor.approvalStatus,
+          },
+        )
+        .catch(() => {
+          /* best-effort */
+        });
+    } catch {
+      /* never let a feedback push break the decide flow */
     }
   }
 
@@ -203,8 +316,9 @@ export class VisitorService {
   /**
    * Guard-side walk-in: the visitor showed up unannounced and the guard creates
    * a row targeting a specific resident. The visitor is PENDING approval; an
-   * actionable push fires to the resident so they can Approve/Reject from the
-   * lockscreen. Check-in is blocked until that decision lands.
+   * actionable push fires to the resident so they can Approve/Reject (guests)
+   * or Approve / Leave at Security / Reject (deliveries) from the lockscreen.
+   * Check-in is blocked until that decision lands.
    */
   async createAtGate(guardUserId: string, societyId: string, dto: CreateAtGateVisitorDto) {
     const resident = await this.prisma.resident.findFirst({
@@ -218,6 +332,30 @@ export class VisitorService {
       });
     }
 
+    const type = dto.type === 'DELIVERY' ? VisitorType.DELIVERY : VisitorType.GUEST;
+
+    // Delivery rows MUST carry a recognised partner — the resident notification
+    // copy depends on it ("Amazon at the gate") and reporting later wants a
+    // bounded set of values. Empty / unrecognised free-text rejected.
+    let deliveryPartner: string | null = null;
+    if (type === VisitorType.DELIVERY) {
+      const partner = dto.deliveryPartner?.trim();
+      if (!partner) {
+        throw new BadRequestException({
+          code: 'DELIVERY_PARTNER_REQUIRED',
+          message: 'Select a delivery partner (or "Other: ...") for delivery entries.',
+        });
+      }
+      if (!isAllowedDeliveryPartner(partner)) {
+        throw new BadRequestException({
+          code: 'DELIVERY_PARTNER_INVALID',
+          message:
+            'Delivery partner must be one of the known list or start with "Other: ".',
+        });
+      }
+      deliveryPartner = partner;
+    }
+
     const validFrom = new Date();
     const validUntil = new Date(validFrom.getTime() + 12 * 60 * 60 * 1000);
 
@@ -229,6 +367,9 @@ export class VisitorService {
         purpose: dto.purpose,
         vehicleNo: dto.vehicleNo,
         photoUrl: dto.photoUrl,
+        type,
+        deliveryPartner,
+        createdByStaffId: guardUserId,
         qrToken: randomBytes(4).toString('hex').toUpperCase(),
         validFrom,
         validUntil,
@@ -237,8 +378,6 @@ export class VisitorService {
       },
       include: { resident: { include: { user: true, flat: true } } },
     });
-
-    void guardUserId; // reserved for future audit; create itself is anonymous on the guard side today
 
     this.notifyResidentPendingApproval(created);
 
@@ -483,12 +622,17 @@ export class VisitorService {
     visitorId: string,
     societyId: string,
     userId: string,
-    action: 'APPROVE' | 'REJECT',
+    action: 'APPROVE' | 'REJECT' | 'LEAVE_AT_SECURITY',
   ): Promise<{ decision: string; applied: boolean; visitor: unknown }> {
     // Ownership + society scoping (only the owning resident may decide).
     await this.findById(visitorId, societyId, userId);
 
-    const target = action === 'APPROVE' ? 'APPROVED' : 'REJECTED';
+    const target =
+      action === 'APPROVE'
+        ? 'APPROVED'
+        : action === 'LEAVE_AT_SECURITY'
+        ? 'LEFT_AT_SECURITY'
+        : 'REJECTED';
 
     const res = await this.prisma.visitor.updateMany({
       where: { id: visitorId, approvalStatus: 'PENDING' },
@@ -499,6 +643,18 @@ export class VisitorService {
       where: { id: visitorId },
       include: { resident: { include: { user: true, flat: true } } },
     });
+
+    // Fire-and-forget feedback push to the guard who created the entry, but
+    // only on the request that actually transitioned the row — otherwise a
+    // duplicate tap would re-notify them.
+    if (res.count > 0 && visitor) {
+      this.notifyStaffOfDecision(visitor.createdByStaffId, {
+        id: visitor.id,
+        name: visitor.name,
+        type: visitor.type,
+        approvalStatus: visitor.approvalStatus,
+      });
+    }
 
     // applied=false => a prior decision already won; we return that decision.
     return { decision: visitor!.approvalStatus, applied: res.count > 0, visitor };

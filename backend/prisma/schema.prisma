@@ -678,6 +678,11 @@ model StaffLoan {
 
 // ─── Visitor Management ───────────────────────────────────────────────────────
 
+enum VisitorType {
+  GUEST
+  DELIVERY
+}
+
 model Visitor {
   id                String        @id @default(uuid())
   residentId        String
@@ -687,14 +692,30 @@ model Visitor {
   qrToken           String        @unique @default(uuid())
   photoUrl          String?
   vehicleNo         String?
+  // Coarse classification — drives the resident-app UX (3-button delivery
+  // modal vs 2-button guest banner) and the backend's push payload
+  // (delivery_approval iOS category vs visitor_approval). Default GUEST
+  // keeps every existing row classified.
+  type              VisitorType   @default(GUEST)
+  // Free-form courier / brand name when type=DELIVERY (e.g. 'Amazon',
+  // 'Swiggy Instamart', or 'Other: <custom>'). Null when type=GUEST.
+  deliveryPartner   String?
   status            VisitorStatus @default(EXPECTED)
   validFrom         DateTime?
   validUntil        DateTime?
   entryAt           DateTime?
   exitAt            DateTime?
   checkedInBy       String?
+  // User-id of the staff member who created the row (when the visitor was
+  // logged at the gate by security). Lets us push the decision back to
+  // that specific guard instead of broadcasting to all staff in the
+  // society. Null for resident-pre-approved visitors.
+  createdByStaffId  String?
   isRecurring       Boolean       @default(false)
   recurringSchedule Json?
+  // Existing values: 'PENDING' | 'APPROVED' | 'REJECTED'. New value
+  // 'LEFT_AT_SECURITY' added for deliveries the resident accepts but
+  // doesn't want at their door.
   approvalStatus    String        @default("PENDING")
   approvedById      String?
   approvedAt        DateTime?
@@ -705,6 +726,7 @@ model Visitor {
   @@index([residentId])
   @@index([qrToken])
   @@index([residentId, status])
+  @@index([createdByStaffId, approvalStatus])
   @@map("visitors")
 }
 

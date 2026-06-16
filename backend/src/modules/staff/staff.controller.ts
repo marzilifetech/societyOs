@@ -338,4 +338,35 @@ export class StaffController {
   ) {
     return this.staffService.rejectVisitorAsSecurity(user.sub, societyId, id);
   }
+
+  // ─── Lookups used by the Add Entry form ────────────────────
+  // All return the bare minimum needed by the form — guard against accidental
+  // PII leaks (we don't surface phone, email, document urls, etc.).
+
+  /** Every flat in the staff's society + its primary resident name. */
+  @Get('flats')
+  @Roles(UserRole.STAFF)
+  listFlatsForGate(@SocietyId() societyId: string) {
+    return this.staffService.listFlatsForGate(societyId);
+  }
+
+  /** Look up a resident by phone for the fallback "I only know their phone" path. */
+  @Get('residents/lookup')
+  @Roles(UserRole.STAFF)
+  lookupResidentByPhone(
+    @SocietyId() societyId: string,
+    @Query('phone') phone: string,
+  ) {
+    return this.staffService.lookupResidentByPhone(societyId, phone);
+  }
+
+  /** Look up the last known visitor by phone (prefills name in the Add Entry form). */
+  @Get('visitors/lookup')
+  @Roles(UserRole.STAFF)
+  lookupVisitorByPhone(
+    @SocietyId() societyId: string,
+    @Query('phone') phone: string,
+  ) {
+    return this.staffService.lookupVisitorByPhone(societyId, phone);
+  }
 }

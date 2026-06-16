@@ -63,4 +63,63 @@ describe('VisitorService.decide — idempotent / race-safe', () => {
 
     expect(mockPrisma.visitor.updateMany.mock.calls[0][0].data.approvalStatus).toBe('REJECTED');
   });
+
+  it('maps LEAVE_AT_SECURITY action to LEFT_AT_SECURITY', async () => {
+    mockPrisma.visitor.updateMany.mockResolvedValue({ count: 1 });
+    mockPrisma.visitor.findUnique.mockResolvedValue({
+      id: 'v1',
+      approvalStatus: 'LEFT_AT_SECURITY',
+      type: 'DELIVERY',
+      name: 'Amazon courier',
+      createdByStaffId: 'staff-1',
+    });
+
+    const res = await service.decide('v1', 'soc1', 'u1', 'LEAVE_AT_SECURITY');
+
+    expect(mockPrisma.visitor.updateMany.mock.calls[0][0].data.approvalStatus).toBe('LEFT_AT_SECURITY');
+    expect(res.decision).toBe('LEFT_AT_SECURITY');
+    expect(res.applied).toBe(true);
+  });
+
+  it('fires a feedback push to the staff member who created the entry when applied=true', async () => {
+    mockPrisma.visitor.updateMany.mockResolvedValue({ count: 1 });
+    mockPrisma.visitor.findUnique.mockResolvedValue({
+      id: 'v1',
+      approvalStatus: 'APPROVED',
+      type: 'DELIVERY',
+      name: 'Amazon',
+      createdByStaffId: 'staff-1',
+    });
+    mockPush.send.mockResolvedValue({ ok: true });
+
+    await service.decide('v1', 'soc1', 'u1', 'APPROVE');
+
+    // Allow the fire-and-forget push to schedule before assertions.
+    await new Promise((r) => setImmediate(r));
+    expect(mockPush.send).toHaveBeenCalled();
+    const [staffUserId, payload, data] = mockPush.send.mock.calls[0];
+    expect(staffUserId).toBe('staff-1');
+    expect(payload.category).toBe('approval_results');
+    expect(data).toMatchObject({
+      type: 'VISITOR_DECISION_RESULT',
+      visitId: 'v1',
+      approvalStatus: 'APPROVED',
+    });
+  });
+
+  it('does NOT fire the staff feedback push when applied=false (race loser)', async () => {
+    mockPrisma.visitor.updateMany.mockResolvedValue({ count: 0 });
+    mockPrisma.visitor.findUnique.mockResolvedValue({
+      id: 'v1',
+      approvalStatus: 'APPROVED',
+      type: 'DELIVERY',
+      name: 'Amazon',
+      createdByStaffId: 'staff-1',
+    });
+
+    await service.decide('v1', 'soc1', 'u-late', 'REJECT');
+
+    await new Promise((r) => setImmediate(r));
+    expect(mockPush.send).not.toHaveBeenCalled();
+  });
 });

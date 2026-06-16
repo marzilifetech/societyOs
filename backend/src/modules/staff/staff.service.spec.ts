@@ -9,6 +9,9 @@ import { VisitorService } from '../visitor/visitor.service';
 const mockPrisma = {
   staffMember: { findUnique: jest.fn(), update: jest.fn() },
   leaveRequest: { findMany: jest.fn(), findFirst: jest.fn(), create: jest.fn() },
+  flat: { findMany: jest.fn() },
+  resident: { findFirst: jest.fn() },
+  visitor: { findFirst: jest.fn() },
 };
 
 const mockVisitorService = {
@@ -185,6 +188,124 @@ describe('StaffService', () => {
       await expect(
         service.setProfilePhoto('orphan-user', 'https://cdn.example/x.jpg'),
       ).rejects.toThrow(/staff profile not found/i);
+    });
+  });
+
+  describe('Add Entry lookups', () => {
+    // listFlatsForGate / lookupResidentByPhone / lookupVisitorByPhone — used by
+    // the new "+ Add Entry" form on the staff app. PII guardrails: lookups
+    // must never surface phone/email/document URLs in the response.
+
+    describe('listFlatsForGate', () => {
+      it('returns each flat with its primary resident name', async () => {
+        mockPrisma.flat.findMany.mockResolvedValue([
+          {
+            id: 'flat-1',
+            block: 'A',
+            number: '302',
+            residents: [{ id: 'r1', user: { name: 'Mr. Sharma' } }],
+          },
+          { id: 'flat-2', block: 'B', number: '101', residents: [] },
+        ]);
+        const out = await service.listFlatsForGate('soc1');
+        expect(out).toEqual([
+          {
+            flatId: 'flat-1',
+            block: 'A',
+            number: '302',
+            primaryResidentId: 'r1',
+            primaryResidentName: 'Mr. Sharma',
+          },
+          {
+            flatId: 'flat-2',
+            block: 'B',
+            number: '101',
+            primaryResidentId: null,
+            primaryResidentName: null,
+          },
+        ]);
+        // Sort: prisma order is asc by block then number — assert the query
+        // shape rather than the in-memory output.
+        expect(mockPrisma.flat.findMany.mock.calls[0][0].orderBy).toEqual([
+          { block: 'asc' },
+          { number: 'asc' },
+        ]);
+      });
+
+      it('does NOT include resident phone, email, or any document field', async () => {
+        mockPrisma.flat.findMany.mockResolvedValue([]);
+        await service.listFlatsForGate('soc1');
+        const where = mockPrisma.flat.findMany.mock.calls[0][0];
+        // Sanity: the include clause only picks user.name on the primary.
+        const pickedFields = JSON.stringify(where.include);
+        expect(pickedFields).not.toMatch(/phone/i);
+        expect(pickedFields).not.toMatch(/email/i);
+        expect(pickedFields).not.toMatch(/aadhaar/i);
+      });
+    });
+
+    describe('lookupResidentByPhone', () => {
+      it('returns the matched resident + flat coords on hit', async () => {
+        mockPrisma.resident.findFirst.mockResolvedValue({
+          id: 'r1',
+          flat: { id: 'flat-1', block: 'A', number: '302' },
+          user: { name: 'Mr. Sharma' },
+        });
+        const out = await service.lookupResidentByPhone('soc1', '+919999000001');
+        expect(out).toEqual({
+          residentId: 'r1',
+          flatId: 'flat-1',
+          block: 'A',
+          number: '302',
+          name: 'Mr. Sharma',
+        });
+      });
+
+      it('rejects empty phone with 400 PHONE_REQUIRED', async () => {
+        await expect(service.lookupResidentByPhone('soc1', '')).rejects.toThrow(/phone/i);
+        await expect(service.lookupResidentByPhone('soc1', undefined)).rejects.toThrow(/phone/i);
+        expect(mockPrisma.resident.findFirst).not.toHaveBeenCalled();
+      });
+
+      it('404s when no resident matches', async () => {
+        mockPrisma.resident.findFirst.mockResolvedValue(null);
+        await expect(service.lookupResidentByPhone('soc1', '+919999999999')).rejects.toThrow(
+          /no resident/i,
+        );
+      });
+
+      it('does an EXACT phone match (no substring probe)', async () => {
+        mockPrisma.resident.findFirst.mockResolvedValue(null);
+        await expect(service.lookupResidentByPhone('soc1', '999')).rejects.toThrow();
+        const call = mockPrisma.resident.findFirst.mock.calls[0][0];
+        // user.phone is set to the trimmed input, NOT a contains/startsWith.
+        expect(call.where.user.phone).toBe('999');
+      });
+    });
+
+    describe('lookupVisitorByPhone', () => {
+      it('returns the last-known visitor (name + photo + type + partner)', async () => {
+        mockPrisma.visitor.findFirst.mockResolvedValue({
+          name: 'Amazon courier',
+          photoUrl: 'https://cdn/x.jpg',
+          type: 'DELIVERY',
+          deliveryPartner: 'Amazon',
+        });
+        const out = await service.lookupVisitorByPhone('soc1', '+919876543210');
+        expect(out).toEqual({
+          name: 'Amazon courier',
+          photoUrl: 'https://cdn/x.jpg',
+          type: 'DELIVERY',
+          deliveryPartner: 'Amazon',
+        });
+      });
+
+      it('404s with VISITOR_NOT_FOUND when this phone has never visited', async () => {
+        mockPrisma.visitor.findFirst.mockResolvedValue(null);
+        await expect(service.lookupVisitorByPhone('soc1', '+919999999999')).rejects.toThrow(
+          /never been seen|not been seen|visitor with that phone/i,
+        );
+      });
     });
   });
 });

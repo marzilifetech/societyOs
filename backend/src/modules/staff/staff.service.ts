@@ -784,4 +784,106 @@ export class StaffService {
     await this.requireSecurityStaff(userId);
     return this.visitorService.rejectVisitor(visitorId, societyId);
   }
+
+  // ─── Add Entry lookups ───────────────────────────────────────────────
+  // PII discipline: we surface ONLY what the form needs. The phone-lookup
+  // endpoints intentionally never return phone, dateOfBirth, or any document
+  // url — security guards shouldn't be able to scrape resident contacts.
+
+  /**
+   * Every flat in the society plus the primary resident's display name. Used
+   * by the staff Add Entry form's flat picker. "Primary resident" = the
+   * oldest still-active Resident row on the flat (createdAt ASC); fallback
+   * 'Vacant' when no active resident is mapped.
+   */
+  async listFlatsForGate(societyId: string) {
+    const flats = await this.prisma.flat.findMany({
+      where: { societyId },
+      include: {
+        residents: {
+          where: { user: { status: 'ACTIVE' }, isAnonymised: false, deletedAt: null },
+          orderBy: { createdAt: 'asc' },
+          take: 1,
+          include: { user: { select: { name: true } } },
+        },
+      },
+      orderBy: [{ block: 'asc' }, { number: 'asc' }],
+    });
+    return flats.map((f) => {
+      const primary = f.residents[0];
+      return {
+        flatId: f.id,
+        block: f.block,
+        number: f.number,
+        primaryResidentId: primary?.id ?? null,
+        primaryResidentName: primary?.user?.name ?? null,
+      };
+    });
+  }
+
+  /**
+   * Resolve a phone to its resident + flat. Returns 404 when not found —
+   * the staff form treats that as "ask the courier for the flat number".
+   * Phone match is exact; we don't substring-search because that would let
+   * a guard probe the directory by typing partial numbers.
+   */
+  async lookupResidentByPhone(societyId: string, phone: string | undefined) {
+    const trimmed = phone?.trim();
+    if (!trimmed) {
+      throw new BadRequestException({
+        code: 'PHONE_REQUIRED',
+        message: 'phone query param is required',
+      });
+    }
+    const resident = await this.prisma.resident.findFirst({
+      where: {
+        flat: { societyId },
+        deletedAt: null,
+        isAnonymised: false,
+        user: { phone: trimmed, status: 'ACTIVE' },
+      },
+      include: { flat: true, user: { select: { name: true } } },
+    });
+    if (!resident) {
+      throw new NotFoundException({
+        code: 'RESIDENT_NOT_FOUND',
+        message: 'No resident in this society has that phone',
+      });
+    }
+    return {
+      residentId: resident.id,
+      flatId: resident.flat.id,
+      block: resident.flat.block,
+      number: resident.flat.number,
+      name: resident.user?.name ?? null,
+    };
+  }
+
+  /**
+   * Last-known visitor with this phone in the society. Prefills name + photo
+   * in the Add Entry form so a repeat courier doesn't have to be re-typed.
+   * Returns 404 when this phone has never visited; the form falls back to
+   * a fresh entry.
+   */
+  async lookupVisitorByPhone(societyId: string, phone: string | undefined) {
+    const trimmed = phone?.trim();
+    if (!trimmed) {
+      throw new BadRequestException({
+        code: 'PHONE_REQUIRED',
+        message: 'phone query param is required',
+      });
+    }
+    const visitor = await this.prisma.visitor.findFirst({
+      where: { phone: trimmed, resident: { flat: { societyId } } },
+      orderBy: { createdAt: 'desc' },
+      select: { name: true, photoUrl: true, type: true, deliveryPartner: true },
+    });
+    if (!visitor) {
+      throw new NotFoundException({
+        code: 'VISITOR_NOT_FOUND',
+        message: 'No visitor with that phone has been seen here before',
+      });
+    }
+    return visitor;
+  }
 }
