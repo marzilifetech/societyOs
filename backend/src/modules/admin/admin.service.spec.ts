@@ -13,6 +13,7 @@ import { PushService } from '../../common/notification/push.service';
 import { ComplianceService } from '../compliance/compliance.service';
 import { AuditService } from '../../common/audit/audit.service';
 import { SocietySeederService } from '../society/society-seeder.service';
+import { MarziMediaSigner } from '../../common/storage/marzi-media-signer.service';
 
 const mockPrisma: Record<string, any> = {
   complaint: { findUnique: jest.fn(), update: jest.fn() },
@@ -51,6 +52,10 @@ describe('AdminService', () => {
         { provide: ComplianceService, useValue: { dataExport: jest.fn() } },
         { provide: AuditService, useValue: { write: auditWriteSpy } },
         { provide: SocietySeederService, useValue: { buildDefaultConfig: jest.fn(() => ({})) } },
+        {
+          provide: MarziMediaSigner,
+          useValue: { sign: jest.fn().mockResolvedValue(null), signMany: jest.fn().mockResolvedValue({}) },
+        },
       ],
     }).compile();
 

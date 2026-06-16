@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ResidentService } from './resident.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
+import { MarziMediaSigner } from '../../common/storage/marzi-media-signer.service';
 
 const mockResident = {
   id: 'res-1',
@@ -27,6 +28,15 @@ const mockNotifications = {
   sendToMultiple: jest.fn(),
 };
 
+// MarziMediaSigner is used by getMyDocuments to mint short-lived GET URLs
+// for private S3 keys. uploadDocuments + getEmergencyContacts paths under
+// test here don't touch the signer, but Nest's DI still needs a provider
+// at construction time. A bare stub is enough.
+const mockMediaSigner = {
+  sign: jest.fn().mockResolvedValue(null),
+  signMany: jest.fn().mockResolvedValue({}),
+};
+
 describe('ResidentService.uploadDocuments', () => {
   let service: ResidentService;
 
@@ -36,6 +46,7 @@ describe('ResidentService.uploadDocuments', () => {
         ResidentService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: NotificationService, useValue: mockNotifications },
+        { provide: MarziMediaSigner, useValue: mockMediaSigner },
       ],
     }).compile();
 
@@ -82,6 +93,7 @@ describe('ResidentService.getEmergencyContacts', () => {
         ResidentService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: NotificationService, useValue: mockNotifications },
+        { provide: MarziMediaSigner, useValue: mockMediaSigner },
       ],
     }).compile();
 
