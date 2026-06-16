@@ -214,11 +214,16 @@ export class DevPublicController {
   @Post('seed-test-users')
   @ApiOperation({ summary: 'Run the dev seed-test-users SQL (dev only, public).' })
   async seedTestUsers() {
-    const env = this.config.get<string>('NODE_ENV') ?? 'development';
-    if (env === 'production') {
+    // The Dockerfile pins NODE_ENV=production for image-build reasons (smaller
+    // bundles, real-mode logging) even on the dev instance, so we can't gate
+    // on NODE_ENV alone — we'd lock ourselves out of the dev instance too.
+    // ALLOW_DEV_ENDPOINTS is a separate explicit opt-in: dev secret sets it
+    // to '1', production secret leaves it unset.
+    const allow = this.config.get<string>('ALLOW_DEV_ENDPOINTS');
+    if (allow !== '1' && allow !== 'true') {
       throw new ForbiddenException({
         code: 'DEV_ENDPOINT_DISABLED',
-        message: 'Dev endpoints are disabled in production',
+        message: 'Dev endpoints are disabled here',
       });
     }
 
