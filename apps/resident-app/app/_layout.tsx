@@ -16,6 +16,7 @@ import {
 import { NotificationProvider, useNotificationBanner } from '../src/contexts/NotificationContext';
 import { InAppBanner } from '../src/components/InAppBanner';
 import { NotificationPermissionBanner } from '../src/components/NotificationPermissionBanner';
+import { AppUpdateGate } from '../src/components/AppUpdateGate';
 import {
   Montserrat_400Regular,
   Montserrat_500Medium,
@@ -165,7 +166,13 @@ export default function RootLayout() {
               <NetworkBanner />
               {token ? <RealtimeProvider /> : null}
               <StatusBar style="auto" />
-              <Stack screenOptions={{ headerShown: false }} />
+              {/* AppUpdateGate wraps the navigation Stack so when the
+                  policy says 'immediate' we replace the entire app with
+                  the blocker screen — even unauthenticated boot can't
+                  bypass it. */}
+              <AppUpdateGate>
+                <Stack screenOptions={{ headerShown: false }} />
+              </AppUpdateGate>
               {/* Global "notifications are off" strip — zIndex 8000. Only
                   rendered while authenticated so we don't pester a brand
                   new user before the primer modal has had its chance.

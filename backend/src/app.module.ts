@@ -51,6 +51,7 @@ import { ParkingModule } from './modules/parking/parking.module';
 import { UploadModule } from './modules/upload/upload.module';
 import { MediaModule } from './modules/media/media.module';
 import { VehicleModule } from './modules/vehicle/vehicle.module';
+import { AppPolicyModule } from './modules/app-policy/app-policy.module';
 
 import { envValidationSchema } from './common/config/env.validation';
 import { AppLoggerModule } from './common/logging/logger.module';
@@ -153,6 +154,7 @@ tryAdd('./modules/compliance/compliance.module', 'ComplianceModule');
     UploadModule,
     MediaModule,
     VehicleModule,
+    AppPolicyModule,
     ...optionalModules,
   ],
   providers: [

@@ -35,6 +35,7 @@ import {
 import { NotificationProvider, useNotificationBanner } from '../src/contexts/NotificationContext';
 import { InAppBanner } from '../src/components/InAppBanner';
 import { NotificationPermissionBanner } from '../src/components/NotificationPermissionBanner';
+import { AppUpdateGate } from '../src/components/AppUpdateGate';
 import { initSentry, setSentryUser } from '../src/lib/sentry';
 import { ErrorBoundary } from '../src/components/ErrorBoundary';
 import { NetworkBanner } from '../src/components/NetworkBanner';
@@ -182,7 +183,12 @@ export default function RootLayout() {
             <QueryClientProvider client={queryClient}>
               <NotificationProvider>
                 <NetworkBanner />
-                <Stack screenOptions={{ headerShown: false }} />
+                {/* Update gate wraps the navigation Stack: when the policy
+                    is 'immediate' the Stack is replaced with the blocker
+                    screen — staff cannot bypass even before PIN login. */}
+                <AppUpdateGate>
+                  <Stack screenOptions={{ headerShown: false }} />
+                </AppUpdateGate>
                 {/* Global "notifications are off" strip — zIndex 8000.
                     Beneath InAppBanner (9999) so a foreground push overlays
                     it. Only rendered while authenticated. */}
