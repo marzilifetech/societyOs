@@ -10,9 +10,12 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { IsBoolean, IsOptional, IsString } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import * as fs from 'fs';
+import * as path from 'path';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
 import { PushService } from '../../common/notification/push.service';
+import { PrismaService } from '../../prisma/prisma.service';
 
 /**
  * Sample fixtures used to exercise the full client-side rendering path
@@ -116,7 +119,70 @@ export class DevController {
   constructor(
     private config: ConfigService,
     private push: PushService,
+    private prisma: PrismaService,
   ) {}
+
+  /**
+   * Re-runs the seed-test-users.sql fixture in the dev DB. Idempotent — the
+   * SQL uses ON CONFLICT ... DO UPDATE so repeat calls just refresh fields.
+   *
+   * Needed because the deploy pipeline runs `prisma db push` but NOT the
+   * seed, so test users can fall out of sync (e.g. a fresh OTP login
+   * auto-creates the user as RESIDENT before the seed has had a chance to
+   * pin their role to STAFF). Calling this endpoint after deploy promotes
+   * the 11111-series staff users to role=STAFF + creates the staff_members
+   * rows so /staff/* endpoints work.
+   *
+   * Hard-gated on NODE_ENV — 403 in production regardless of caller.
+   */
+  @Post('seed-test-users')
+  @ApiOperation({ summary: 'Run the dev seed-test-users SQL (dev only).' })
+  async seedTestUsers() {
+    const env = this.config.get<string>('NODE_ENV') ?? 'development';
+    if (env === 'production') {
+      throw new ForbiddenException({
+        code: 'DEV_ENDPOINT_DISABLED',
+        message: 'Dev endpoints are disabled in production',
+      });
+    }
+
+    // The container has the source rsync'd to /repo. Locate the SQL relative
+    // to the project root so the lookup works in both `pnpm dev` (cwd =
+    // backend/) and the Docker image (cwd = /repo/backend).
+    const candidatePaths = [
+      path.resolve(process.cwd(), '../infra/instance/seed-test-users.sql'),
+      path.resolve(process.cwd(), 'infra/instance/seed-test-users.sql'),
+      '/repo/infra/instance/seed-test-users.sql',
+    ];
+    const sqlPath = candidatePaths.find((p) => fs.existsSync(p));
+    if (!sqlPath) {
+      throw new BadRequestException({
+        code: 'SEED_FILE_MISSING',
+        message: `Could not find seed-test-users.sql in any of: ${candidatePaths.join(', ')}`,
+      });
+    }
+    const sql = fs.readFileSync(sqlPath, 'utf8');
+    // Prisma's $executeRawUnsafe wants a SINGLE statement. The seed SQL is
+    // two top-level `DO $$ ... END $$;` blocks (residents, then staff). We
+    // split on the block-end marker and run each one individually. The
+    // dollar-quoted body inside each block is safe — Prisma forwards the
+    // whole string to the driver as-is. The SQL is trusted (read from
+    // disk, NOT from user input) so we don't worry about injection.
+    const blocks = sql
+      .split(/END\s+\$\$\s*;/i)
+      .map((chunk, i, arr) => {
+        // Re-attach the terminator we split on, except on the trailing piece
+        // which is just whitespace / comments after the last block.
+        if (i === arr.length - 1) return chunk.trim();
+        return chunk.trim() + '\nEND $$;';
+      })
+      .filter((b) => b.length > 0 && /\bDO\s+\$\$/i.test(b));
+
+    for (const block of blocks) {
+      await this.prisma.$executeRawUnsafe(block);
+    }
+    return { ok: true, sqlPath, blocks: blocks.length, length: sql.length };
+  }
 
   @Post('push-test')
   @ApiOperation({ summary: 'Fire a sample push to the current user (dev only).' })
