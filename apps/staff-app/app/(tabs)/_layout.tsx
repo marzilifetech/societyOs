@@ -1,5 +1,6 @@
 import { Tabs } from 'expo-router';
 import { View, Text } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import i18nInstance from '../../src/lib/i18n';
 import { useColorScheme } from 'nativewind';
@@ -66,6 +67,18 @@ export default function TabLayout() {
   const { colorScheme } = useColorScheme();
   const isDark = colorScheme === 'dark';
   const badges = useSettingsStore((s) => s.badges);
+  const insets = useSafeAreaInsets();
+
+  // Honour the device's safe-area inset (home indicator on iPhone, gesture
+  // pill on Android). Previously paddingBottom was a hardcoded 10px, which
+  // OVERRODE React Navigation's auto safe-area handling — on devices with
+  // a non-zero bottom inset the system pill drew on top of the tab content,
+  // leaving a visible "line" at the bottom of the screen. We also flatten
+  // the default top hairline (borderTopWidth=0): it was near-invisible in
+  // dark mode but turned into a stark horizontal line once light became
+  // the default theme.
+  const bottomPad = Math.max(insets.bottom, 8);
+  const tabBarHeight = 56 + bottomPad;
 
   return (
     <Tabs
@@ -76,11 +89,14 @@ export default function TabLayout() {
         tabBarInactiveTintColor: isDark ? INACTIVE_DARK : INACTIVE_LIGHT,
         tabBarIconStyle: { marginTop: 4 },
         tabBarStyle: {
+          height: tabBarHeight,
           paddingTop: 6,
-          paddingBottom: 10,
+          paddingBottom: bottomPad,
           paddingHorizontal: 0,
           backgroundColor: isDark ? '#030712' : '#ffffff',
-          borderTopColor: isDark ? '#1f2937' : '#F3F4F6',
+          borderTopWidth: 0,
+          elevation: 0,
+          shadowOpacity: 0,
         },
       }}
     >
