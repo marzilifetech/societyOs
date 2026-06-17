@@ -32,6 +32,7 @@ import {
   detachNotificationTapHandler,
   subscribeToForegroundReceived,
 } from '../src/lib/notifications';
+import { registerForegroundFullScreen } from '../src/lib/fullScreenNotifications';
 import { NotificationProvider, useNotificationBanner } from '../src/contexts/NotificationContext';
 import { InAppBanner } from '../src/components/InAppBanner';
 import { NotificationPermissionBanner } from '../src/components/NotificationPermissionBanner';
@@ -234,7 +235,13 @@ function ForegroundBannerBridge({ active }: { active: boolean }) {
         data,
       });
     });
-    return () => sub.remove();
+    // Foreground full-screen (Notifee + RN-Firebase); background/killed handlers
+    // are registered at module scope from the app entry.
+    const unsubFullScreen = registerForegroundFullScreen();
+    return () => {
+      sub.remove();
+      unsubFullScreen();
+    };
   }, [active, showBanner]);
   return null;
 }

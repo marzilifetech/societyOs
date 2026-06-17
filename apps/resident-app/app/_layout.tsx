@@ -13,6 +13,7 @@ import {
   subscribeToTokenRotation,
   subscribeToForegroundReceived,
 } from '../src/lib/push';
+import { registerForegroundFullScreen } from '../src/lib/fullScreenNotifications';
 import { NotificationProvider, useNotificationBanner } from '../src/contexts/NotificationContext';
 import { InAppBanner } from '../src/components/InAppBanner';
 import { NotificationPermissionBanner } from '../src/components/NotificationPermissionBanner';
@@ -170,6 +171,11 @@ export default function RootLayout() {
     const sub = setupTapRouting();
     return () => sub.remove();
   }, []);
+
+  // Foreground full-screen handling (Notifee + RN-Firebase). The background/
+  // killed handlers are registered at module scope from the app entry; this
+  // wires the in-app foreground path. Idempotent; safe to mount once.
+  useEffect(() => registerForegroundFullScreen(), []);
 
   // Register the NATIVE FCM device token with the backend once per token, and
   // re-register whenever the token rotates. Runs only after auth has hydrated

@@ -31,7 +31,14 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
-      "../../plugins/withFullScreenNotifications",
+      "@react-native-firebase/app",
+      "@react-native-firebase/messaging",
+      [
+        "expo-build-properties",
+        {
+          "ios": { "useFrameworks": "static" }
+        }
+      ],
       [
         "expo-camera",
         {

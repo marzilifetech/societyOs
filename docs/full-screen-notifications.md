@@ -1,115 +1,88 @@
 # Full-screen (call-style) notifications — SOS (staff) & Visitor (resident)
 
 Goal: MyGate/NoBrokerHood-style alerts that **wake the screen and show over the
-lock screen** for two events:
+lock screen**:
 
-- **SOS** → on-duty guards (staff app) — View/Acknowledge.
+- **SOS** → on-duty guards (staff app) — Acknowledge.
 - **Visitor approval** → resident (resident app) — Approve / Reject.
 
-## What the platforms allow
+## Platform reality
 
-- **Android**: true full-screen via a notification `fullScreenIntent`. The only
-  mainstream way; well-supported.
-- **iOS**: **no** full-screen-from-push API exists **except CallKit + PushKit
-  (VoIP)** — the native incoming-call screen (separate, heavy: VoIP APNs cert,
-  PushKit token, Apple review). For non-call alerts, iOS uses **time-sensitive /
-  critical** interruption levels (loud heads-up over the lock screen), which the
-  backend already sends. **Decision: Android full-screen now; iOS stays loud
-  time-sensitive/critical; CallKit deferred.**
+- **Android**: true full-screen via a notification `fullScreenIntent`. Supported.
+- **iOS**: no full-screen-from-push API except CallKit + PushKit (VoIP). Deferred.
+  iOS uses time-sensitive / critical interruption levels (sent server-side).
 
-## How others do it (research)
+## Approach (the standard, clean way — chosen)
 
-The common RN/Expo stacks for full-screen "incoming-call" notifications:
+`@notifee/react-native` + `@react-native-firebase/messaging`:
 
-1. `@notifee/react-native` `fullScreenAction` + `@react-native-firebase/messaging`
-   `setBackgroundMessageHandler` (the dominant pattern), or
-2. `react-native-full-screen-notification-incoming-call` (Android-only, Expo
-   plugin, Android-12 CallStyle), or
-3. `react-native-callkeep` for true iOS CallKit (+ Android ConnectionService).
+- **Still 100% Firebase/FCM.** RN-Firebase is only the client library that
+  exposes `setBackgroundMessageHandler` — receiving a **data-only** FCM message
+  in background/killed, which `expo-notifications` cannot do.
+- **Notifee** renders the full-screen notification (`fullScreenAction` +
+  `AndroidCategory.CALL` + `AndroidImportance.HIGH`) with Approve/Reject (visitor)
+  or Acknowledge (SOS) buttons, handled **in JS** (no native Activity, no
+  deep-link round-trip). Notifee's Expo config plugin adds `USE_FULL_SCREEN_INTENT`
+  - the activity flags at prebuild.
 
-All three add libraries and (for 1/2) a Firebase-messaging background handler
-that can **take over FCM and sideline `expo-notifications`' own handlers**
-(invertase/react-native-firebase#8840, expo/expo#36419).
+### Trade-off accepted
 
-Sources: Notifee fullScreenAction (notifee.app/react-native/docs/android/behaviour),
-linhvovan29546/react-native-full-screen-notification-incoming-call,
-react-native-callkeep, invertase/react-native-firebase#8840.
+RN-Firebase's messaging service becomes the FCM entry point, which can sideline
+`expo-notifications`' own receive handlers (invertase/react-native-firebase#8840,
+expo/expo#36419). FCM/the token are unchanged. **This coexistence is the main
+thing to validate on a device** — confirm normal notifications (notices,
+complaints, etc.) still display, and the device token still registers.
 
-## Our approach — keep FCM + expo-notifications untouched, no new libs
+## What was implemented
 
-Constraint: **stay on FCM and keep the existing expo-notifications pipeline.**
-So instead of adding RNFirebase/notifee (which would sideline expo-notifications),
-we add a thin **Expo config plugin** — `plugins/withFullScreenNotifications.js` —
-that **subclasses Expo's own FCM service**:
+### Backend (done + unit-tested)
 
-- `FullScreenMessagingService extends ExpoFirebaseMessagingService` (Expo's class
-  is `open`). It is registered as the single `MESSAGING_EVENT` handler (Expo's
-  default registration is removed via `tools:node="remove"`).
-- `onMessageReceived`: if `data.fullScreen == "true"` → build a `NotificationCompat`
-  with `setFullScreenIntent(...)` (`CATEGORY_CALL`, `PRIORITY_MAX`) targeting
-  `FullScreenAlertActivity` (`showWhenLocked` / `turnScreenOn`). **Every other
-  message is forwarded to `super`**, so the existing expo-notifications flow is
-  completely unchanged.
-- `FullScreenAlertActivity` renders title/body + buttons; buttons deep-link into
-  the RN app (`<scheme>://notification?type=&id=&action=`) so existing JS handles
-  the decision. Permission `USE_FULL_SCREEN_INTENT` is added.
+- `PushService.fullScreen` → data-only delivery + `data.fullScreen='true'`
+  (`push.service.ts`). Wired into SOS→guards and visitor→resident sends.
 
-No `@react-native-firebase`, no `notifee`, no change to existing JS. Reuses the
-`firebase-messaging` SDK that `expo-notifications` already bundles. Relies on
-Expo internals that are `open` today — re-validate on major expo-notifications
-upgrades.
+### Client (both apps)
 
-## Backend contract
+- Deps added: `@notifee/react-native`, `@react-native-firebase/app`,
+  `@react-native-firebase/messaging`, `expo-build-properties`
+  (`ios.useFrameworks: "static"`, required by RN-Firebase on Expo). staff-app
+  also gets `expo-dev-client`.
+- `app.json` plugins: `@react-native-firebase/app`, `@react-native-firebase/messaging`,
+  `expo-build-properties`.
+- `index.js` is now the entry (`main`): imports
+  `src/lib/fullScreenNotifications` (module-scope `setBackgroundMessageHandler`
+  - `notifee.onBackgroundEvent`) **before** `expo-router/entry`.
+- `src/lib/fullScreenNotifications.ts`: `displayFullScreen(data)`,
+  action→endpoint mapping (`POST /visitors/:id/decision`, `PATCH /sos/:id/acknowledge`),
+  background handlers (module scope), and `registerForegroundFullScreen()`.
+- `app/_layout.tsx`: calls `registerForegroundFullScreen()` for the foreground path.
+- Device-token registration is unchanged (expo-notifications still returns the
+  same FCM token); revisit if the coexistence pushes us to register via
+  `messaging().getToken()`.
 
-Full-screen pushes are sent **data-only** (no FCM `notification` block) so the
-service's `onMessageReceived` runs in background/killed and can raise the intent.
-`PushService` does this when `fullScreen: true` (see `push.service.ts`):
+## Required to finish (not doable in this repo/CI)
 
-```
-data = { type, fullScreen: 'true', title, body, channelId, entityId/alertId/visitId, actions? }
-```
+1. `pnpm install` then `npx expo install --check` in each app to pin
+   RN-Firebase/notifee/build-properties to the exact SDK-52-compatible versions.
+2. Provide Firebase config files at build (gitignored):
+   `apps/<app>/google-services.json` (Android) + `GoogleService-Info.plist` (iOS),
+   referenced via `android.googleServicesFile` / `ios.googleServicesFile`.
+3. `npx expo prebuild` (staff-app is currently managed; resident-app re-prebuild)
+   and build a **dev client** — full-screen is native; Expo Go cannot run it.
+4. Device verification (see test plan).
 
-- SOS → guards: `category: emergency_sos`, `critical: true`, `fullScreen: true`.
-- Visitor → resident: `category: visitors_gate|deliveries`, `actions`, `fullScreen: true`.
+## Test plan (device required)
 
-Implemented + unit-tested (`push.service.spec.ts`: data-only + `data.fullScreen`).
-
-## Client wiring
-
-- `plugins/withFullScreenNotifications.js` added to both apps' `app.json` plugins
-  (`../../plugins/withFullScreenNotifications`). It runs at **prebuild**.
-- **resident-app**: already prebuilt + has `expo-dev-client`. Re-run
-  `expo prebuild` (or apply on next native build) so the plugin emits the service
-  /activity + manifest entries. Scheme `societyos`.
-- **staff-app**: managed → needs `expo prebuild` and `expo-dev-client` for a dev
-  build. `USE_FULL_SCREEN_INTENT` already declared. Scheme `societyos-staff`.
-- **Deep link**: the full-screen Activity opens `<scheme>://notification?...`.
-  The app should route this (Approve/Reject → `POST /visitors/:id/decision`;
-  View → SOS screen). Wire into the existing notification-response routing in
-  `src/lib/push.ts` / `src/lib/notifications.ts`. (Pending — see TODO.)
-
-## TODO before this is user-ready
-
-- [ ] Build a dev client for each app and verify on a device (see test plan).
-- [ ] Handle the `<scheme>://notification` deep link in JS to perform the action.
-- [ ] Provide `google-services.json` at build (gitignored → EAS file/secret).
-- [ ] Decide on iOS: ship time-sensitive/critical (done server-side) or invest
-      in CallKit+PushKit later.
-
-## Test plan (device required — cannot be validated in CI/unit)
-
-- Android, app **killed** + screen **locked**: trigger SOS → guard phone wakes,
-  full-screen alert; View opens the SOS screen.
-- Android, killed + locked: walk-in/pre-approved visitor → resident phone wakes,
-  Approve/Reject hit `/visitors/:id/decision`.
-- Android background + foreground: alert still raised.
+- Android, app **killed** + screen **locked**: SOS → guard phone wakes, full-screen
+  alert, Acknowledge → `PATCH /sos/:id/acknowledge`.
+- Android killed + locked: walk-in/pre-approved visitor → resident phone wakes,
+  Approve/Reject → `POST /visitors/:id/decision`.
+- Foreground: same UI via `registerForegroundFullScreen`.
+- **Coexistence regression**: normal notifications still display; token still
+  registers; no duplicate notifications.
 - iOS: loud time-sensitive (visitor) / critical (SOS) heads-up — NOT full-screen.
-- Regression: normal notifications (notices, complaints, etc.) still show via
-  expo-notifications and are not affected by the subclassed service.
 
 ## Status
 
-- Backend `fullScreen` flag: **done + unit-tested**.
-- Config plugin + manifest/Kotlin: **written**; emitted at prebuild. **Not yet
-  verified on a device** — requires a dev/EAS build.
-- Deep-link JS handler + device validation: **pending**.
+- Backend: done + unit-tested.
+- Client wiring: written; **not verified on device** — needs install + prebuild +
+  Firebase config files + a dev build. iOS full-screen (CallKit) intentionally deferred.
