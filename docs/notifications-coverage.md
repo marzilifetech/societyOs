@@ -13,74 +13,83 @@ Category keys: `visitors_gate`, `deliveries`, `daily_help`, `family_vehicle`, `c
 `notices`, `notices_urgent`, `community`, `payments_dues`, `emergency_sos`, `staff_tasks`,
 `approval_results`, `account_auth`.
 
-Legend: ✅ already wired · ➕ added in this work · ⬜ intentionally out of scope.
+**Status legend:**
+
+- ✅ **pre-existing** — was already wired before this work.
+- 🆕 **added** — wired in this change (and unit-tested).
+- ❌ **not done** — not implemented; reason in the Notes column.
 
 ## Residents
 
-| Module           | Event                                              | Status | Target             | Category                   | data.type                  |
-| ---------------- | -------------------------------------------------- | ------ | ------------------ | -------------------------- | -------------------------- |
-| visitor          | arrival / approval / decision                      | ✅     | resident           | visitors_gate / deliveries | VISITOR\_\*                |
-| complaint        | status changed                                     | ✅     | resident           | complaints                 | COMPLAINT_UPDATED          |
-| notice           | emergency broadcast                                | ✅     | society RESIDENT   | notices_urgent             | NOTICE_URGENT              |
-| resident         | onboarding approved / rejected                     | ✅     | resident           | account_auth               | RESIDENT_APPROVED/REJECTED |
-| notice           | normal notice published                            | ➕     | society RESIDENT   | notices                    | NOTICE_PUBLISHED           |
-| service-request  | created (ack)                                      | ➕     | resident           | complaints                 | SERVICE_REQUEST_CREATED    |
-| service-request  | assigned                                           | ➕     | resident           | complaints                 | SERVICE_REQUEST_ASSIGNED   |
-| service-request  | completed                                          | ➕     | resident           | complaints                 | SERVICE_REQUEST_COMPLETED  |
-| service-request  | awaiting rating                                    | ➕     | resident           | complaints                 | SERVICE_REQUEST_RATE       |
-| maintenance      | bill generated                                     | ➕     | resident           | payments_dues              | BILL_GENERATED             |
-| maintenance      | payment received                                   | ➕     | resident           | payments_dues              | PAYMENT_RECEIVED           |
-| maintenance      | payment failed                                     | ➕     | resident           | payments_dues              | PAYMENT_FAILED             |
-| maintenance      | bill overdue                                       | ➕     | resident           | payments_dues              | BILL_OVERDUE               |
-| package          | parcel arrived / collected                         | ➕     | resident           | deliveries                 | PACKAGE_ARRIVED/COLLECTED  |
-| amenity          | booking confirmed / cancelled / reminder           | ➕     | resident           | community                  | AMENITY\_\*                |
-| event            | created / reminder / cancelled / waitlist-promoted | ➕     | resident / society | community                  | EVENT\_\*                  |
-| medical          | appointment confirmed / reminder / cancelled       | ➕     | resident           | community                  | APPOINTMENT\_\*            |
-| document-request | verified / rejected                                | ➕     | resident           | account_auth               | DOCUMENT\_\*               |
-| wallet           | credited / debited                                 | ➕     | resident           | payments_dues              | WALLET\_\*                 |
-| laundry          | ready / picked up / cancelled                      | ➕     | resident           | daily_help                 | LAUNDRY\_\*                |
-| canteen          | order ready / collected                            | ➕     | resident           | daily_help                 | CANTEEN\_\*                |
-| housekeeping     | scheduled / completed                              | ➕     | resident           | daily_help                 | HOUSEKEEPING\_\*           |
-| pest-control     | scheduled / completed                              | ➕     | resident           | daily_help                 | PEST*CONTROL*\*            |
-| concierge        | request updated / completed                        | ➕     | resident           | daily_help                 | CONCIERGE\_\*              |
-| community        | reply / comment / reaction on own post             | ➕     | post owner         | community                  | COMMUNITY\_\*              |
+| Module           | Event                          | Status | Category                   | data.type                  | Notes                                                        |
+| ---------------- | ------------------------------ | ------ | -------------------------- | -------------------------- | ------------------------------------------------------------ |
+| visitor          | arrival / approval / decision  | ✅     | visitors_gate / deliveries | VISITOR\_\*                | Heads-up + action buttons — see "Visitor UX" note below      |
+| complaint        | status changed                 | ✅     | complaints                 | COMPLAINT_UPDATED          |                                                              |
+| notice           | emergency broadcast            | ✅     | notices_urgent             | NOTICE_URGENT              | critical; bypasses quiet hours                               |
+| resident         | onboarding approved / rejected | ✅     | account_auth               | RESIDENT_APPROVED/REJECTED |                                                              |
+| notice           | normal notice published        | 🆕     | notices                    | NOTICE_PUBLISHED           | society RESIDENT broadcast; emergency path unchanged         |
+| service-request  | created (ack)                  | 🆕     | complaints                 | SERVICE_REQUEST_CREATED    |                                                              |
+| service-request  | assigned                       | 🆕     | complaints                 | SERVICE_REQUEST_ASSIGNED   |                                                              |
+| service-request  | completed (+ rate prompt)      | 🆕     | complaints                 | SERVICE_REQUEST_COMPLETED  | rate prompt folded into completion (no separate status)      |
+| maintenance      | bill generated                 | 🆕     | payments_dues              | BILL_GENERATED             | in `admin.service.generateBills`                             |
+| maintenance      | payment received               | 🆕     | payments_dues              | PAYMENT_RECEIVED           | verifyPayment + Razorpay webhook                             |
+| maintenance      | payment failed                 | 🆕     | payments_dues              | PAYMENT_FAILED             | webhook failed branch                                        |
+| maintenance      | bill overdue                   | ❌     | payments_dues              | —                          | overdue computed on read; no job writes OVERDUE — needs cron |
+| package          | parcel arrived                 | 🆕     | deliveries                 | PACKAGE_ARRIVED            | was realtime-socket-only                                     |
+| package          | parcel collected               | 🆕     | deliveries                 | PACKAGE_COLLECTED          |                                                              |
+| amenity          | booking confirmed              | 🆕     | community                  | AMENITY_BOOKING_CONFIRMED  |                                                              |
+| amenity          | booking cancelled              | 🆕     | community                  | AMENITY_BOOKING_CANCELLED  |                                                              |
+| amenity          | booking reminder               | ❌     | community                  | —                          | no scheduler — needs cron                                    |
+| event            | created                        | 🆕     | community                  | EVENT_CREATED              | society RESIDENT broadcast                                   |
+| event            | cancelled                      | 🆕     | community                  | EVENT_CANCELLED            | loops registrations                                          |
+| event            | waitlist promoted              | 🆕     | community                  | EVENT_WAITLIST_PROMOTED    | was silent                                                   |
+| event            | reminder                       | ❌     | community                  | —                          | no scheduler — needs cron                                    |
+| medical          | appointment confirmed          | 🆕     | community                  | APPOINTMENT_CONFIRMED      |                                                              |
+| medical          | appointment cancelled          | 🆕     | community                  | APPOINTMENT_CANCELLED      |                                                              |
+| medical          | appointment rescheduled        | 🆕     | community                  | APPOINTMENT_RESCHEDULED    |                                                              |
+| medical          | appointment reminder           | ❌     | community                  | —                          | no scheduler — needs cron                                    |
+| document-request | verified (approved)            | 🆕     | account_auth               | DOCUMENT_VERIFIED          |                                                              |
+| document-request | rejected                       | 🆕     | account_auth               | DOCUMENT_REJECTED          |                                                              |
+| wallet           | credited                       | 🆕     | payments_dues              | WALLET_CREDITED            | topUp / verifyTopupAndCredit / refund                        |
+| wallet           | debited                        | 🆕     | payments_dues              | WALLET_DEBITED             | deduct / deductForMaintenance                                |
+| laundry          | ready / picked up / cancelled  | 🆕     | daily_help                 | LAUNDRY\_\*                |                                                              |
+| canteen          | order ready / collected        | 🆕     | daily_help                 | CANTEEN\_\*                |                                                              |
+| housekeeping     | scheduled / completed          | 🆕     | daily_help                 | HOUSEKEEPING\_\*           |                                                              |
+| concierge        | request updated / completed    | 🆕     | daily_help                 | CONCIERGE\_\*              |                                                              |
+| community        | comment on own post            | 🆕     | community                  | COMMUNITY_COMMENT          | skips self-comment                                           |
+| community        | like on own post               | 🆕     | community                  | COMMUNITY_REACTION         | via `toggleLike` (carries actor)                             |
+| community        | reaction via `reactToPost`     | ❌     | community                  | —                          | that overload carries no actor id; only `toggleLike` wired   |
 
 ## Staff
 
-| Area            | Event                             | Status             | Target                            | Category         | data.type               |
-| --------------- | --------------------------------- | ------------------ | --------------------------------- | ---------------- | ----------------------- |
-| visitor         | resident decision relayed to gate | ✅                 | staff                             | approval_results | VISITOR_DECISION        |
-| service-request | scheduled-visit reminder          | ✅                 | staff                             | staff_tasks      | SR_REMINDER             |
-| service-request | task assigned                     | ➕                 | assignee                          | staff_tasks      | TASK_ASSIGNED           |
-| sos             | SOS raised                        | ➕                 | society SECURITY (push, critical) | emergency_sos    | SOS_TRIGGERED           |
-| staff/leave     | leave approved / rejected         | ➕                 | staff                             | account_auth     | LEAVE_APPROVED/REJECTED |
-| staff           | dismissed / offboarded            | ➕                 | staff                             | account_auth     | STAFF_DISMISSED         |
-| staff           | salary slip published             | ➕ (if write path) | staff                             | payments_dues    | SALARY_SLIP             |
-| staff           | document verified / rejected      | ➕ (if write path) | staff                             | account_auth     | STAFF*DOC*\*            |
+| Area            | Event                             | Status | Target              | Category         | data.type               | Notes                                              |
+| --------------- | --------------------------------- | ------ | ------------------- | ---------------- | ----------------------- | -------------------------------------------------- |
+| visitor         | resident decision relayed to gate | ✅     | staff               | approval_results | VISITOR_DECISION        |                                                    |
+| service-request | scheduled-visit reminder          | ✅     | staff (assignee)    | staff_tasks      | SR_REMINDER             | existing cron                                      |
+| service-request | task assigned                     | 🆕     | staff (assignee)    | staff_tasks      | TASK_ASSIGNED           | was realtime-socket-only                           |
+| sos             | SOS raised                        | 🆕     | role STAFF (guards) | emergency_sos    | SOS_TRIGGERED           | critical; ADMIN push pre-existing & retained       |
+| staff / leave   | leave approved / rejected         | 🆕     | staff               | account_auth     | LEAVE_APPROVED/REJECTED |                                                    |
+| staff           | dismissed / offboarded            | 🆕     | staff               | account_auth     | STAFF_DISMISSED         | sent after soft-deactivate so token still resolves |
+| staff           | salary slip published             | ❌     | staff               | payments_dues    | —                       | read-only today; no publish endpoint               |
+| staff           | document verified / rejected      | ❌     | staff               | account_auth     | —                       | read-only today; no admin verify endpoint          |
 
-## Implemented in this change
+## Not done — summary (revisit later)
 
-All ➕ rows above were wired to `push.send` / `push.sendToSociety` (fire-and-forget,
-also lands in the in-app inbox), EXCEPT the skips below. Highlights:
+These need a backend write path or a scheduler that doesn't exist yet:
 
-- **service-request**: created/assigned/completed (+rate prompt) → resident; assigned → staff push (was socket-only).
-- **sos**: now also pushes role `STAFF` (guards) with `critical: true` — was ADMIN-only.
-- **maintenance**: bill generated (in `admin.service.generateBills`), payment received, payment failed.
-- **package**: parcel arrived/collected now push (were socket-only).
-- **notice**: normal notices push (`notices`) alongside the existing emergency path.
-- **event/amenity/medical**: create/cancel/confirm/reschedule + waitlist-promoted.
-- **wallet/laundry/canteen/housekeeping/concierge**: status changes → resident.
-- **community**: comment + like (via `toggleLike`, which carries the actor) → post owner.
-- **document-request**: approve (ready) / reject → requesting resident.
-- **staff**: leave approved/rejected, dismissal.
+- **Bill overdue** — add a cron that flips PENDING→OVERDUE and notifies.
+- **Amenity / event / medical reminders** — add a reminder scheduler (BullMQ / cron).
+- **Salary slip published, staff document verified/rejected** — currently read-only; add the publish/verify endpoints first.
+- **Pest control** — `PestControlSchedule` is society-wide with no resident link, so there is no per-resident target.
+- **`reactToPost` overload** — only the actor-aware `toggleLike` path notifies.
 
-## Skipped — no backend write path / no target (revisit later)
+## Visitor UX note (not full-screen / call-style)
 
-- **BILL_OVERDUE** — overdue is computed on read; no job writes an OVERDUE status. Needs a cron.
-- **Event / amenity / medical reminders** — no scheduler exists; would need a cron.
-- **Salary slip published, staff document verified/rejected** — read-only today; no publish/verify endpoint.
-- **pest-control** — society-wide (`PestControlSchedule` has no resident), so no per-resident target.
-- **community `reactToPost`** — that overload carries no actor id; only the `toggleLike` path is wired.
+The visitor-approval push is **high-priority heads-up with Approve/Reject buttons** — it is **not** a full-screen, screen-waking, call-style notification like MyGate/NoBrokerHood.
+
+- Backend sends it data-only (`actions` present) with Android `priority: high` and iOS `interruption-level: time-sensitive` — **no `fullScreenIntent`**.
+- The resident app uses `expo-notifications` only (no `notifee` / `@react-native-firebase/messaging` / CallKeep), and has **no background data-message handler**, so on Android in background/killed state the action buttons (and possibly the notification) do not reliably render. `USE_FULL_SCREEN_INTENT` is not declared.
+- To make it MyGate-style: add `@notifee/react-native` + `@react-native-firebase/messaging`, a `setBackgroundMessageHandler` that calls `notifee.displayNotification` with `android.fullScreenAction` + action buttons, a full-screen `showWhenLocked`/`turnScreenOn` Activity, the `USE_FULL_SCREEN_INTENT` permission, and a full-screen flag on the backend payload. (Tracked separately — not part of this change.)
 
 ## Out of scope
 
