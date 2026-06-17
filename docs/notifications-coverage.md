@@ -71,6 +71,7 @@ also lands in the in-app inbox), EXCEPT the skips below. Highlights:
 - **event/amenity/medical**: create/cancel/confirm/reschedule + waitlist-promoted.
 - **wallet/laundry/canteen/housekeeping/concierge**: status changes → resident.
 - **community**: comment + like (via `toggleLike`, which carries the actor) → post owner.
+- **document-request**: approve (ready) / reject → requesting resident.
 - **staff**: leave approved/rejected, dismissal.
 
 ## Skipped — no backend write path / no target (revisit later)
