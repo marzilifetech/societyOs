@@ -527,12 +527,12 @@ export default function StaffDetailPage() {
             {shiftTemplates.length === 0 ? (
               <p className="text-sm text-gray-600">
                 No shift timings defined yet.{' '}
-                <a
+                <Link
                   href="/staff/shift-timings"
                   className="text-primary-600 font-medium underline"
                 >
                   Define them here
-                </a>{' '}
+                </Link>{' '}
                 first, then assign a shift to this staff member.
               </p>
             ) : (
@@ -563,12 +563,12 @@ export default function StaffDetailPage() {
                   >
                     {updateShiftMutation.isPending ? 'Saving…' : 'Save shift'}
                   </button>
-                  <a
+                  <Link
                     href="/staff/shift-timings"
                     className="text-[12px] text-gray-500 hover:text-primary-600"
                   >
                     Edit shift timings →
-                  </a>
+                  </Link>
                 </div>
               </>
             )}
