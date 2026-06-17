@@ -166,8 +166,6 @@ export class VisitorService {
             ...(visitor.photoUrl ? { imageUrl: visitor.photoUrl } : {}),
             collapseKey: `visitor:${visitor.id}`,
             actions,
-            // Full-screen, screen-waking approval prompt on the resident's phone.
-            fullScreen: true,
           },
           {
             type: isDelivery ? 'DELIVERY_APPROVAL_REQUEST' : 'VISITOR_APPROVAL_REQUEST',

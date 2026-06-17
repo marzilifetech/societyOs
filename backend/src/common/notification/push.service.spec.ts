@@ -253,26 +253,6 @@ describe('PushService', () => {
     expect(arg.apns.payload.aps.category).toBe('complaints');
   });
 
-  it('full-screen forces data-only delivery and sets data.fullScreen=true', async () => {
-    const prisma = makePrisma();
-    prisma.user.findUnique.mockResolvedValue({ id: 'u1', phone: '+910000000000' });
-    prisma.device.findMany.mockResolvedValue([{ token: 'tok' }]);
-
-    const svc = makeService(prisma);
-    await (svc as any).sendNow(
-      'u1',
-      { ...baseNotification, fullScreen: true },
-      { type: 'SOS_TRIGGERED' },
-    );
-
-    const arg = mockSendEachForMulticast.mock.calls[0][0];
-    // data-only: no top-level notification block, so the app's background
-    // handler fires and raises the full-screen intent.
-    expect(arg.notification).toBeUndefined();
-    expect(arg.data.fullScreen).toBe('true');
-    expect(arg.data.title).toBe('Hello');
-  });
-
   it('applies collapse key to both android and apns headers', async () => {
     const prisma = makePrisma();
     prisma.user.findUnique.mockResolvedValue({ id: 'u1', phone: '+910000000000' });

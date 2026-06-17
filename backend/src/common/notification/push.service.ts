@@ -35,17 +35,6 @@ export interface PushNotification {
    * notification + action buttons itself.
    */
   dataOnly?: boolean;
-  /**
-   * Request a full-screen, screen-waking alert on Android (call-style, like
-   * MyGate). Implies data-only delivery: FCM only invokes the app's background
-   * `onMessageReceived` (which raises the full-screen intent) when there is NO
-   * `notification` block. The native handler reads `data.fullScreen === 'true'`.
-   * Requires the app's custom full-screen messaging service to be installed; on
-   * clients without it, a data-only message renders nothing — so only set this
-   * for builds that ship the native handler. No effect on iOS (no full-screen
-   * API without CallKit); iOS relies on the interruption level instead.
-   */
-  fullScreen?: boolean;
 }
 
 const QUIET_START_HOUR = 22; // 22:00 IST
@@ -311,10 +300,7 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
     const apnsSound = ntype === 'MARKETING' ? undefined : 'default';
 
     const hasActions = !!notification.actions && notification.actions.length > 0;
-    // Full-screen alerts MUST be data-only: a `notification` block makes the OS
-    // display the message itself in background and the app's onMessageReceived
-    // (which raises the full-screen intent) never fires.
-    const dataOnly = !!notification.dataOnly || hasActions || !!notification.fullScreen;
+    const dataOnly = !!notification.dataOnly || hasActions;
     // High FCM priority for anything except MARKETING — DELIVERY + EMERGENCY
     // need to wake the device + show heads-up instead of being batched in doze.
     const highPriority = ntype !== 'MARKETING' || dataOnly;
@@ -347,7 +333,6 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
       richData.title = notification.title;
       richData.body = notification.body;
       richData.channelId = channelId;
-      if (notification.fullScreen) richData.fullScreen = 'true';
       if (notification.imageUrl) richData.imageUrl = notification.imageUrl;
       if (hasActions) richData.actions = JSON.stringify(notification.actions);
       message.data = richData;
