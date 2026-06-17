@@ -42,6 +42,7 @@
       "expo-router",
       "expo-font",
       "expo-secure-store",
+      "../../plugins/withFullScreenNotifications",
       [
         "expo-notifications",
         {
