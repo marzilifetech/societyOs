@@ -62,6 +62,8 @@ export class SosService {
           body,
           category: 'emergency_sos',
           critical: true,
+          // Wake the screen with a full-screen alert on guards' devices (Android).
+          fullScreen: true,
         },
         { type: 'SOS_TRIGGERED', alertId: String(alert.id) },
       )
