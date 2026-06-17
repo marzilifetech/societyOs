@@ -28,13 +28,18 @@ describe('LaundryService — cross-tenant guard', () => {
     getPresignedUploadUrl: jest.fn().mockResolvedValue({ uploadUrl: 'u', key: 'k', publicUrl: 'p' }),
   } as any;
 
+  const mockPush = {
+    send: jest.fn().mockResolvedValue({ ok: true }),
+    sendToSociety: jest.fn().mockResolvedValue({ sent: 0, failed: 0, cleaned: 0 }),
+  };
+
   beforeEach(async () => {
     const moduleRef: TestingModule = await Test.createTestingModule({
       providers: [
         LaundryService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: S3Service, useValue: mockS3 },
-        { provide: PushService, useValue: { send: jest.fn().mockResolvedValue({ ok: true }), sendToSociety: jest.fn().mockResolvedValue({ sent: 0, failed: 0, cleaned: 0 }) } },
+        { provide: PushService, useValue: mockPush },
       ],
     }).compile();
     service = moduleRef.get(LaundryService);
@@ -78,6 +83,21 @@ describe('LaundryService — cross-tenant guard', () => {
       mockPrisma.laundryBooking.findUnique.mockResolvedValue({ id: 'b1', societyId: 'soc-other' });
       await expect(service.markPickedUp('b1', 'soc-1')).rejects.toThrow(ForbiddenException);
       expect(mockPrisma.laundryBooking.update).not.toHaveBeenCalled();
+    });
+
+    it('fires a LAUNDRY_PICKED_UP push to the booking resident', async () => {
+      mockPrisma.laundryBooking.findUnique.mockResolvedValue({ id: 'b1', societyId: 'soc-1' });
+      mockPrisma.laundryBooking.update.mockResolvedValue({ id: 'b1', residentId: 'r1', status: 'PICKED_UP' });
+      mockPrisma.resident.findUnique.mockResolvedValue({ userId: 'u1' });
+
+      await service.markPickedUp('b1', 'soc-1');
+      await new Promise((r) => setImmediate(r));
+
+      expect(mockPush.send).toHaveBeenCalledWith(
+        'u1',
+        expect.objectContaining({ category: 'daily_help' }),
+        expect.objectContaining({ type: 'LAUNDRY_PICKED_UP' }),
+      );
     });
   });
 

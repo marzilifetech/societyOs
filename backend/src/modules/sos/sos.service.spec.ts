@@ -17,6 +17,12 @@ const mockPrisma = {
   },
 };
 
+const mockPush = {
+  sendToSociety: jest.fn().mockResolvedValue({ sent: 0, failed: 0, cleaned: 0 }),
+};
+
+const flush = () => new Promise((r) => setImmediate(r));
+
 describe('SosService', () => {
   let service: SosService;
   let config: { get: jest.Mock };
@@ -33,13 +39,14 @@ describe('SosService', () => {
         SosService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: RealtimeGateway, useValue: { emitSosAlert: jest.fn() } },
-        { provide: PushService, useValue: { sendToSociety: jest.fn().mockResolvedValue(undefined) } },
+        { provide: PushService, useValue: mockPush },
         { provide: ConfigService, useValue: config },
       ],
     }).compile();
 
     service = module.get<SosService>(SosService);
     jest.clearAllMocks();
+    mockPush.sendToSociety.mockResolvedValue({ sent: 0, failed: 0, cleaned: 0 });
     config.get.mockImplementation((key: string) => {
       if (key === 'SOS_CANCEL_WINDOW_MS') return '5000';
       return undefined;
@@ -63,6 +70,27 @@ describe('SosService', () => {
           status: SosStatus.ACTIVE,
         },
       });
+    });
+
+    it('pushes SOS_TRIGGERED to STAFF (critical emergency_sos) and keeps the ADMIN push', async () => {
+      const alert = { id: 'sos-1', status: SosStatus.ACTIVE };
+      mockPrisma.sosAlert.create.mockResolvedValue(alert);
+
+      await service.trigger('res-1', 'soc-1', 12.9716, 77.5946);
+      await flush();
+
+      expect(mockPush.sendToSociety).toHaveBeenCalledWith(
+        'soc-1',
+        'STAFF',
+        expect.objectContaining({ category: 'emergency_sos', critical: true }),
+        expect.objectContaining({ type: 'SOS_TRIGGERED' }),
+      );
+      expect(mockPush.sendToSociety).toHaveBeenCalledWith(
+        'soc-1',
+        'ADMIN',
+        expect.objectContaining({ category: 'sos' }),
+        expect.objectContaining({ type: 'SOS' }),
+      );
     });
   });
 

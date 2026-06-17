@@ -43,6 +43,13 @@ const mockGateway = {
   emitTaskUpdated: jest.fn(),
 };
 
+const mockPush = {
+  send: jest.fn().mockResolvedValue({ ok: true }),
+  sendToSociety: jest.fn().mockResolvedValue({ sent: 0, failed: 0, cleaned: 0 }),
+};
+
+const flush = () => new Promise((r) => setImmediate(r));
+
 describe('ServiceRequestService', () => {
   let service: ServiceRequestService;
 
@@ -54,12 +61,14 @@ describe('ServiceRequestService', () => {
         { provide: S3Service, useValue: mockS3 },
         { provide: ServiceRequestGateway, useValue: mockGateway },
         { provide: NotificationService, useValue: mockNotification },
-        { provide: PushService, useValue: { send: jest.fn().mockResolvedValue({ ok: true }), sendToSociety: jest.fn().mockResolvedValue({ sent: 0, failed: 0, cleaned: 0 }) } },
+        { provide: PushService, useValue: mockPush },
       ],
     }).compile();
 
     service = module.get<ServiceRequestService>(ServiceRequestService);
     jest.clearAllMocks();
+    mockPush.send.mockResolvedValue({ ok: true });
+    mockPush.sendToSociety.mockResolvedValue({ sent: 0, failed: 0, cleaned: 0 });
     mockPrisma.$transaction.mockImplementation(async (cb: (tx: any) => Promise<unknown>) => cb(mockPrisma));
   });
 
@@ -1004,6 +1013,96 @@ describe('ServiceRequestService', () => {
 
       const result = await service.assignStaffWithSchedule('sr-1', 'soc-1', ['s1']);
       expect(result).toMatchObject({ assignedToIds: ['s1'] });
+    });
+  });
+
+  describe('notifications', () => {
+    it('create: pushes SERVICE_REQUEST_CREATED to the resident (category complaints)', async () => {
+      const dto = { category: 'PLUMBING', description: 'Leaking pipe' };
+      mockPrisma.resident.findUnique.mockResolvedValue({ id: 'res-1', userId: 'user-1', flatId: 'flat-1' });
+      mockPrisma.flat.findUnique.mockResolvedValue({ id: 'flat-1', societyId: 'soc-1' });
+      mockPrisma.serviceRequest.create.mockResolvedValue({ id: 'sr-1', residentId: 'res-1', societyId: 'soc-1', assignedToIds: [], category: 'PLUMBING' });
+
+      await service.create('user-1', 'soc-1', dto as any);
+      await flush();
+
+      expect(mockPush.send).toHaveBeenCalledWith(
+        'user-1',
+        expect.objectContaining({ category: 'complaints' }),
+        expect.objectContaining({ type: 'SERVICE_REQUEST_CREATED' }),
+      );
+    });
+
+    it('assignStaff: pushes TASK_ASSIGNED to staff and SERVICE_REQUEST_ASSIGNED to resident', async () => {
+      const baseReq = { id: 'sr-1', societyId: 'soc-1', status: ServiceRequestStatus.PENDING, category: 'PLUMBING', description: 'Fix' };
+      mockPrisma.staffMember.findMany.mockResolvedValue([{ id: 's1', societyId: 'soc-1', deletedAt: null, userId: 'staff-user-1' }]);
+      mockPrisma.serviceRequest.count.mockResolvedValue(0);
+      mockPrisma.serviceRequest.findUnique
+        .mockResolvedValueOnce(baseReq) // assignStaff initial lookup
+        .mockResolvedValueOnce({ id: 'sr-1', resident: { userId: 'res-user-1' } }); // pushResident lookup
+      mockPrisma.serviceRequest.update.mockResolvedValue({
+        ...baseReq,
+        assignedToIds: ['s1'],
+        status: ServiceRequestStatus.ASSIGNED,
+      });
+
+      await service.assignStaff('sr-1', 'soc-1', ['s1']);
+      await flush();
+
+      expect(mockPush.send).toHaveBeenCalledWith(
+        'staff-user-1',
+        expect.objectContaining({ category: 'staff_tasks' }),
+        expect.objectContaining({ type: 'TASK_ASSIGNED' }),
+      );
+      expect(mockPush.send).toHaveBeenCalledWith(
+        'res-user-1',
+        expect.objectContaining({ category: 'complaints' }),
+        expect.objectContaining({ type: 'SERVICE_REQUEST_ASSIGNED' }),
+      );
+    });
+
+    it('assignStaffWithSchedule: also pushes TASK_ASSIGNED to staff', async () => {
+      const baseReq = { id: 'sr-1', societyId: 'soc-1', status: ServiceRequestStatus.PENDING, category: 'PLUMBING', description: 'Fix' };
+      mockPrisma.staffMember.findMany.mockResolvedValue([{ id: 's1', societyId: 'soc-1', deletedAt: null, userId: 'staff-user-1' }]);
+      mockPrisma.serviceRequest.count.mockResolvedValue(0);
+      mockPrisma.serviceRequest.findUnique
+        .mockResolvedValueOnce(baseReq)
+        .mockResolvedValueOnce({ id: 'sr-1', resident: { userId: 'res-user-1' } });
+      mockPrisma.serviceRequest.update.mockResolvedValue({
+        ...baseReq,
+        assignedToIds: ['s1'],
+        status: ServiceRequestStatus.ASSIGNED,
+      });
+
+      await service.assignStaffWithSchedule('sr-1', 'soc-1', ['s1']);
+      await flush();
+
+      expect(mockPush.send).toHaveBeenCalledWith(
+        'staff-user-1',
+        expect.objectContaining({ category: 'staff_tasks' }),
+        expect.objectContaining({ type: 'TASK_ASSIGNED' }),
+      );
+    });
+
+    it('updateStatus → COMPLETED: pushes SERVICE_REQUEST_COMPLETED to resident', async () => {
+      mockPrisma.serviceRequest.findUnique
+        .mockResolvedValueOnce({
+          id: 'sr-1',
+          societyId: 'soc-1',
+          status: ServiceRequestStatus.IN_PROGRESS,
+          acceptedAt: new Date(),
+        })
+        .mockResolvedValue({ id: 'sr-1', category: 'PLUMBING', resident: { userId: 'res-user-1' } });
+      mockPrisma.serviceRequest.update.mockResolvedValue({ id: 'sr-1', status: 'COMPLETED', category: 'PLUMBING' });
+
+      await service.updateStatus('sr-1', 'soc-1', { status: ServiceRequestStatus.COMPLETED });
+      await flush();
+
+      expect(mockPush.send).toHaveBeenCalledWith(
+        'res-user-1',
+        expect.objectContaining({ category: 'complaints' }),
+        expect.objectContaining({ type: 'SERVICE_REQUEST_COMPLETED' }),
+      );
     });
   });
 });

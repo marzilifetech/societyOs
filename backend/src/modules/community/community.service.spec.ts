@@ -7,7 +7,13 @@ import { PushService } from '../../common/notification/push.service';
 
 const mockPrisma: Record<string, any> = {
   communityPost: { findUnique: jest.fn(), update: jest.fn() },
+  postComment: { create: jest.fn(), findMany: jest.fn(), count: jest.fn() },
   resident: { findUnique: jest.fn() },
+};
+
+const mockPush = {
+  send: jest.fn().mockResolvedValue({ ok: true }),
+  sendToSociety: jest.fn().mockResolvedValue({ sent: 0, failed: 0, cleaned: 0 }),
 };
 
 describe('CommunityService', () => {
@@ -18,7 +24,7 @@ describe('CommunityService', () => {
       providers: [
         CommunityService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: PushService, useValue: { send: jest.fn().mockResolvedValue({ ok: true }), sendToSociety: jest.fn().mockResolvedValue({ sent: 0, failed: 0, cleaned: 0 }) } },
+        { provide: PushService, useValue: mockPush },
       ],
     }).compile();
     service = module.get<CommunityService>(CommunityService);
@@ -75,6 +81,47 @@ describe('CommunityService', () => {
       await expect(service.deletePost('missing', 'admin', UserRole.ADMIN)).rejects.toThrow(
         NotFoundException,
       );
+    });
+  });
+
+  describe('addComment', () => {
+    it('notifies the post owner with a COMMUNITY_COMMENT push', async () => {
+      // actor resident (resolved via requireResidentByUserId)
+      mockPrisma.resident.findUnique.mockResolvedValue({ id: 'r-actor', user: { name: 'Bob' } });
+      mockPrisma.communityPost.findUnique.mockResolvedValue({
+        id: 'p1',
+        resident: { id: 'r-owner', userId: 'owner-user' },
+      });
+      mockPrisma.postComment.create.mockResolvedValue({
+        id: 'c1',
+        resident: { user: { name: 'Bob' } },
+      });
+
+      await service.addComment('p1', 'actor-user', { content: 'hi' } as any);
+      await new Promise((r) => setImmediate(r));
+
+      expect(mockPush.send).toHaveBeenCalledWith(
+        'owner-user',
+        expect.objectContaining({ category: 'community' }),
+        expect.objectContaining({ type: 'COMMUNITY_COMMENT' }),
+      );
+    });
+
+    it('does NOT notify when the commenter is the post owner', async () => {
+      mockPrisma.resident.findUnique.mockResolvedValue({ id: 'r-owner', user: { name: 'Owner' } });
+      mockPrisma.communityPost.findUnique.mockResolvedValue({
+        id: 'p1',
+        resident: { id: 'r-owner', userId: 'owner-user' },
+      });
+      mockPrisma.postComment.create.mockResolvedValue({
+        id: 'c1',
+        resident: { user: { name: 'Owner' } },
+      });
+
+      await service.addComment('p1', 'owner-user', { content: 'hi' } as any);
+      await new Promise((r) => setImmediate(r));
+
+      expect(mockPush.send).not.toHaveBeenCalled();
     });
   });
 

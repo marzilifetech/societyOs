@@ -31,6 +31,10 @@ const mockPrisma: Record<string, any> = {
   pestControlSchedule: { findMany: jest.fn() },
   infrastructureItem: { findFirst: jest.fn(), findMany: jest.fn(), create: jest.fn() },
 };
+const mockPush = {
+  send: jest.fn().mockResolvedValue({ ok: true }),
+  sendToSociety: jest.fn().mockResolvedValue({ sent: 0, failed: 0, cleaned: 0 }),
+};
 mockPrisma.$transaction = jest.fn((arg: unknown) => {
   if (typeof arg === 'function') return (arg as (tx: typeof mockPrisma) => unknown)(mockPrisma);
   if (Array.isArray(arg)) return Promise.all(arg);
@@ -48,7 +52,7 @@ describe('AdminService', () => {
         AdminService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: NotificationService, useValue: { sendToToken: jest.fn() } },
-        { provide: PushService, useValue: { send: jest.fn().mockResolvedValue({ ok: true }), sendToSociety: jest.fn().mockResolvedValue({ sent: 0, failed: 0, cleaned: 0 }) } },
+        { provide: PushService, useValue: mockPush },
         { provide: ComplianceService, useValue: { dataExport: jest.fn() } },
         { provide: AuditService, useValue: { write: auditWriteSpy } },
         { provide: SocietySeederService, useValue: { buildDefaultConfig: jest.fn(() => ({})) } },
@@ -746,6 +750,48 @@ describe('AdminService', () => {
 
       expect(result.status).toBe(LeaveStatus.APPROVED);
       expect(mockPrisma.leaveRequest.update).toHaveBeenCalled();
+    });
+
+    it('fires a LEAVE_APPROVED push to the staff member', async () => {
+      mockPrisma.leaveRequest.findUnique.mockResolvedValue({
+        id: 'lv1',
+        status: LeaveStatus.PENDING,
+        type: 'CASUAL',
+        staffId: 'sm-1',
+        staff: { societyId: 'soc-1', userId: 'u-staff' },
+      });
+      mockPrisma.leaveRequest.update.mockResolvedValue({ id: 'lv1', status: LeaveStatus.APPROVED });
+
+      await service.approveLeave('lv1', 'soc-1');
+      await new Promise((r) => setImmediate(r));
+
+      expect(mockPush.send).toHaveBeenCalledWith(
+        'u-staff',
+        expect.objectContaining({ category: 'account_auth' }),
+        expect.objectContaining({ type: 'LEAVE_APPROVED' }),
+      );
+    });
+  });
+
+  describe('rejectLeave push', () => {
+    it('fires a LEAVE_REJECTED push to the staff member', async () => {
+      mockPrisma.leaveRequest.findUnique.mockResolvedValue({
+        id: 'lv1',
+        status: LeaveStatus.PENDING,
+        type: 'CASUAL',
+        staffId: 'sm-1',
+        staff: { societyId: 'soc-1', userId: 'u-staff' },
+      });
+      mockPrisma.leaveRequest.update.mockResolvedValue({ id: 'lv1', status: LeaveStatus.REJECTED });
+
+      await service.rejectLeave('lv1', 'soc-1');
+      await new Promise((r) => setImmediate(r));
+
+      expect(mockPush.send).toHaveBeenCalledWith(
+        'u-staff',
+        expect.objectContaining({ category: 'account_auth' }),
+        expect.objectContaining({ type: 'LEAVE_REJECTED' }),
+      );
     });
   });
 

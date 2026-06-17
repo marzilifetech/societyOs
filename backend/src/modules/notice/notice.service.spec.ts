@@ -86,6 +86,38 @@ describe('NoticeService', () => {
       await new Promise((r) => setImmediate(r));
       expect(mockWhatsapp.broadcastToSociety).toHaveBeenCalled();
     });
+
+    it('fires a NOTICE_PUBLISHED push to society residents for a normal notice', async () => {
+      const dto = { title: 'New Notice', content: 'Content', category: 'GENERAL', isPinned: false };
+      mockPrisma.notice.create.mockResolvedValue({ id: 'notice-1', societyId: 'society-1', ...dto });
+      mockPrisma.user.findMany.mockResolvedValue([]);
+
+      await service.createNotice('society-1', dto);
+      await new Promise((r) => setImmediate(r));
+
+      expect(mockPush.sendToSociety).toHaveBeenCalledWith(
+        'society-1',
+        'RESIDENT',
+        expect.objectContaining({ category: 'notices' }),
+        expect.objectContaining({ type: 'NOTICE_PUBLISHED' }),
+      );
+    });
+
+    it('does NOT fire the normal notices push for an EMERGENCY notice', async () => {
+      const dto = { title: 'Fire', content: 'Evacuate', category: 'EMERGENCY', isPinned: true };
+      mockPrisma.notice.create.mockResolvedValue({ id: 'notice-2', societyId: 'society-1', ...dto });
+      mockPrisma.user.findMany.mockResolvedValue([]);
+
+      await service.createNotice('society-1', dto);
+      await new Promise((r) => setImmediate(r));
+
+      expect(mockPush.sendToSociety).not.toHaveBeenCalledWith(
+        'society-1',
+        'RESIDENT',
+        expect.objectContaining({ category: 'notices' }),
+        expect.objectContaining({ type: 'NOTICE_PUBLISHED' }),
+      );
+    });
   });
 
   describe('pinNotice', () => {
