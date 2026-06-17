@@ -24,8 +24,8 @@ const mockRealtime = {
   emitToUser: jest.fn(),
 };
 const mockPush = {
-  sendToUser: jest.fn(),
-  sendToSociety: jest.fn(),
+  send: jest.fn().mockResolvedValue({ ok: true }),
+  sendToSociety: jest.fn().mockResolvedValue({ sent: 0, failed: 0, cleaned: 0 }),
 };
 const mockWhatsapp = {
   broadcastToSociety: jest.fn().mockResolvedValue({ sent: true }),

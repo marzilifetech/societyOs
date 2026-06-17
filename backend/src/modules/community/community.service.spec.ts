@@ -3,6 +3,7 @@ import { NotFoundException, ForbiddenException } from '@nestjs/common';
 import { CommunityPostStatus, UserRole } from '@prisma/client';
 import { CommunityService } from './community.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { PushService } from '../../common/notification/push.service';
 
 const mockPrisma: Record<string, any> = {
   communityPost: { findUnique: jest.fn(), update: jest.fn() },
@@ -17,6 +18,7 @@ describe('CommunityService', () => {
       providers: [
         CommunityService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: PushService, useValue: { send: jest.fn().mockResolvedValue({ ok: true }), sendToSociety: jest.fn().mockResolvedValue({ sent: 0, failed: 0, cleaned: 0 }) } },
       ],
     }).compile();
     service = module.get<CommunityService>(CommunityService);

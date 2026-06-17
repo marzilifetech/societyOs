@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nest
 import { PrismaService } from '../../prisma/prisma.service';
 import { requireResidentByUserId } from '../../common/utils/resident-context';
 import { PackageGateway } from './package.gateway';
+import { PushService } from '../../common/notification/push.service';
 
 @Injectable()
 export class PackageService {
@@ -9,6 +10,7 @@ export class PackageService {
   constructor(
     private prisma: PrismaService,
     private packageGateway: PackageGateway,
+    private push: PushService,
   ) {}
 
   async logArrival(
@@ -50,6 +52,23 @@ export class PackageService {
       trackingNumber: pkg.trackingNumber ?? null,
       arrivedAt: pkg.arrivedAt.toISOString(),
     });
+
+    if (resident.userId) {
+      void this.push
+        .send(
+          resident.userId,
+          {
+            title: 'Parcel arrived',
+            body: 'A parcel has arrived for you at the gate.',
+            category: 'deliveries',
+            collapseKey: `package:${pkg.id}`,
+          },
+          { type: 'PACKAGE_ARRIVED', entityId: pkg.id, packageId: pkg.id },
+        )
+        .catch((err) => {
+          this.logger.warn(`package arrived push failed id=${pkg.id}: ${(err as Error).message}`);
+        });
+    }
 
     return pkg;
   }
@@ -113,9 +132,29 @@ export class PackageService {
     if (pkg.societyId !== societyId) {
       throw new ForbiddenException({ code: 'PACKAGE_SOCIETY_MISMATCH', message: 'Package belongs to another society' });
     }
-    return this.prisma.package.update({
+    const updated = await this.prisma.package.update({
       where: { id: packageId },
       data: { status: 'COLLECTED', collectedAt: new Date() },
+      include: { resident: { select: { userId: true } } },
     });
+
+    if (updated.resident?.userId) {
+      void this.push
+        .send(
+          updated.resident.userId,
+          {
+            title: 'Parcel collected',
+            body: 'Your parcel has been marked as collected.',
+            category: 'deliveries',
+            collapseKey: `package:${updated.id}`,
+          },
+          { type: 'PACKAGE_COLLECTED', entityId: updated.id, packageId: updated.id },
+        )
+        .catch((err) => {
+          this.logger.warn(`package collected push failed id=${updated.id}: ${(err as Error).message}`);
+        });
+    }
+
+    return updated;
   }
 }

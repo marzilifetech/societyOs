@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   ForbiddenException,
   ConflictException,
@@ -19,16 +20,19 @@ import { SERVICE_REQUEST_TRANSITIONS } from './service-request.transitions';
 import { S3Service } from '../../common/storage/s3.service';
 import { ServiceRequestGateway } from './service-request.gateway';
 import { NotificationService } from '../notification/notification.service';
+import { PushService } from '../../common/notification/push.service';
 
 const SOCIETY_MISMATCH = { code: 'SERVICE_REQUEST_SOCIETY_MISMATCH', message: 'Service request belongs to another society' };
 
 @Injectable()
 export class ServiceRequestService {
+  private readonly logger = new Logger(ServiceRequestService.name);
   constructor(
     private prisma: PrismaService,
     private s3: S3Service,
     private serviceRequestGateway: ServiceRequestGateway,
     private notificationService: NotificationService,
+    private push: PushService,
   ) {}
 
   private async findOneRaw(id: string) {
@@ -110,12 +114,25 @@ export class ServiceRequestService {
 
     const slaDeadline = await this.computeSlaDeadline(societyId, dto.category);
 
-    return this.enrichWithAssignedStaff(
-      await this.prisma.serviceRequest.create({
-        data: { residentId: resident.id, societyId, ...dto, ...(slaDeadline && { slaDeadline }) },
-        include: { photos: true },
-      }),
-    );
+    const created = await this.prisma.serviceRequest.create({
+      data: { residentId: resident.id, societyId, ...dto, ...(slaDeadline && { slaDeadline }) },
+      include: { photos: true },
+    });
+
+    void this.push
+      .send(
+        userId,
+        {
+          title: 'Request logged',
+          body: `We've logged your ${created.category} request.`,
+          category: 'complaints',
+          collapseKey: `service-request:${created.id}`,
+        },
+        { type: 'SERVICE_REQUEST_CREATED', entityId: created.id, serviceRequestId: created.id },
+      )
+      .catch((e) => this.logger.warn(`push failed: ${e?.message ?? e}`));
+
+    return this.enrichWithAssignedStaff(created);
   }
 
   private async computeSlaDeadline(societyId: string, category: string): Promise<Date | null> {
@@ -353,10 +370,42 @@ export class ServiceRequestService {
       data.acceptedAt = new Date();
     }
 
-    return this.prisma.serviceRequest.update({
+    const result = await this.prisma.serviceRequest.update({
       where: { id },
       data: data as any,
     });
+
+    if (next === ServiceRequestStatus.COMPLETED) {
+      this.notifyCompleted(result.id, result.category);
+    }
+
+    return result;
+  }
+
+  /**
+   * COMPLETED is the state in which the resident is asked to rate/confirm
+   * (see rate / confirmCompletion). We send a single completion push that
+   * doubles as the rate prompt. Fire-and-forget.
+   */
+  private notifyCompleted(requestId: string, category: string): void {
+    void this.pushResident(
+      requestId,
+      {
+        title: 'Request completed',
+        body: `Your ${category} request is complete.`,
+        category: 'complaints',
+      },
+      { type: 'SERVICE_REQUEST_COMPLETED', entityId: requestId, serviceRequestId: requestId },
+    );
+    void this.pushResident(
+      requestId,
+      {
+        title: 'Rate your request',
+        body: `Please rate your completed ${category} request.`,
+        category: 'complaints',
+      },
+      { type: 'SERVICE_REQUEST_RATE', entityId: requestId, serviceRequestId: requestId },
+    );
   }
 
   private async countActiveAssignments(staffMemberId: string): Promise<number> {
@@ -367,6 +416,52 @@ export class ServiceRequestService {
         deletedAt: null,
       },
     });
+  }
+
+  /** Best-effort push to the request's resident. Never awaits, never throws. */
+  private async pushResident(
+    requestId: string,
+    notification: { title: string; body: string; category: string },
+    data: Record<string, string>,
+  ): Promise<void> {
+    try {
+      const req = await this.prisma.serviceRequest.findUnique({
+        where: { id: requestId },
+        include: { resident: { include: { user: true } } },
+      });
+      const userId = req?.resident?.userId;
+      if (!userId) return;
+      void this.push
+        .send(userId, { ...notification, collapseKey: `service-request:${requestId}` }, data)
+        .catch((e) => this.logger.warn(`push failed: ${e?.message ?? e}`));
+    } catch (e: any) {
+      this.logger.warn(`push failed: ${e?.message ?? e}`);
+    }
+  }
+
+  /** Best-effort task push to assigned staff members. Never awaits, never throws. */
+  private async pushAssignedStaff(staffMemberIds: string[], category: string, requestId: string): Promise<void> {
+    if (!staffMemberIds.length) return;
+    try {
+      const staff = await this.prisma.staffMember.findMany({ where: { id: { in: staffMemberIds } } });
+      for (const s of staff) {
+        if (!s.userId) continue;
+        void this.push
+          .send(
+            s.userId,
+            {
+              title: 'New task assigned',
+              body: `New task assigned: ${category}`,
+              category: 'staff_tasks',
+              collapseKey: `service-request:${requestId}`,
+            },
+            { type: 'TASK_ASSIGNED', entityId: requestId, serviceRequestId: requestId },
+          )
+          .catch((e) => this.logger.warn(`push failed: ${e?.message ?? e}`));
+      }
+    } catch (e: any) {
+      this.logger.warn(`push failed: ${e?.message ?? e}`);
+    }
   }
 
   private emitAssignedToStaff(staffIds: string[], payload: { taskId: string; title: string; address: string; urgency: string | null }) {
@@ -430,6 +525,17 @@ export class ServiceRequestService {
       address: updated.description,
       urgency: null,
     });
+
+    void this.pushResident(
+      updated.id,
+      {
+        title: 'Request assigned',
+        body: `Your ${updated.category} request has been assigned.`,
+        category: 'complaints',
+      },
+      { type: 'SERVICE_REQUEST_ASSIGNED', entityId: updated.id, serviceRequestId: updated.id },
+    );
+    void this.pushAssignedStaff(staffMemberIds, updated.category, updated.id);
 
     return this.enrichWithAssignedStaff(updated);
   }
@@ -541,6 +647,17 @@ export class ServiceRequestService {
       address: updated.description,
       urgency: null,
     });
+
+    void this.pushResident(
+      updated.id,
+      {
+        title: 'Request assigned',
+        body: `Your ${updated.category} request has been assigned.`,
+        category: 'complaints',
+      },
+      { type: 'SERVICE_REQUEST_ASSIGNED', entityId: updated.id, serviceRequestId: updated.id },
+    );
+    void this.pushAssignedStaff([chosen.id], updated.category, updated.id);
 
     return this.enrichWithAssignedStaff(updated);
   }
@@ -742,6 +859,8 @@ export class ServiceRequestService {
         data: data as any,
       });
     });
+
+    this.notifyCompleted(requestId, sr.category);
 
     return this.findOne(requestId, { societyId });
   }

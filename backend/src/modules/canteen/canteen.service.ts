@@ -1,11 +1,13 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { PushService } from '../../common/notification/push.service';
 import { requireResidentByUserId } from '../../common/utils/resident-context';
 import { CreatePreOrderDto, UpdatePreOrderStatusDto } from './dto/pre-order.dto';
 
 @Injectable()
 export class CanteenService {
-  constructor(private prisma: PrismaService) {}
+  private readonly logger = new Logger(CanteenService.name);
+  constructor(private prisma: PrismaService, private push: PushService) {}
 
   async getMenu(societyId: string, date: string) {
     return this.prisma.canteenMenu.findMany({
@@ -297,7 +299,29 @@ export class CanteenService {
   async updatePreOrderStatus(id: string, dto: UpdatePreOrderStatusDto) {
     const order = await this.prisma.canteenPreOrder.findUnique({ where: { id } });
     if (!order) throw new NotFoundException('Pre-order not found');
-    return this.prisma.canteenPreOrder.update({ where: { id }, data: { status: dto.status as any } });
+    const updated = await this.prisma.canteenPreOrder.update({ where: { id }, data: { status: dto.status as any } });
+
+    const bodyByStatus: Record<string, { type: string; body: string }> = {
+      READY: { type: 'CANTEEN_READY', body: 'Your canteen order is ready for pickup.' },
+      COLLECTED: { type: 'CANTEEN_COLLECTED', body: 'Your canteen order has been collected.' },
+    };
+    const mapped = bodyByStatus[String(dto.status)];
+    if (mapped) {
+      void this.prisma.resident
+        .findUnique({ where: { id: order.residentId }, select: { userId: true } })
+        .then((resident) => {
+          const userId = resident?.userId;
+          if (!userId) return;
+          return this.push.send(
+            userId,
+            { title: 'Canteen update', body: mapped.body, category: 'daily_help', collapseKey: `canteen:${id}` },
+            { type: mapped.type, entityId: id, preOrderId: id, status: String(dto.status) },
+          );
+        })
+        .catch((e) => this.logger.warn(`canteen push failed id=${id}: ${(e as Error).message}`));
+    }
+
+    return updated;
   }
 
   async listAdminDishRatings(

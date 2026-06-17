@@ -48,7 +48,7 @@ describe('AdminService', () => {
         AdminService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: NotificationService, useValue: { sendToToken: jest.fn() } },
-        { provide: PushService, useValue: { send: jest.fn() } },
+        { provide: PushService, useValue: { send: jest.fn().mockResolvedValue({ ok: true }), sendToSociety: jest.fn().mockResolvedValue({ sent: 0, failed: 0, cleaned: 0 }) } },
         { provide: ComplianceService, useValue: { dataExport: jest.fn() } },
         { provide: AuditService, useValue: { write: auditWriteSpy } },
         { provide: SocietySeederService, useValue: { buildDefaultConfig: jest.fn(() => ({})) } },

@@ -1,11 +1,16 @@
-import { BadRequestException, Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, ConflictException } from '@nestjs/common';
 import { AppointmentStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { requireResidentByUserId } from '../../common/utils/resident-context';
+import { PushService } from '../../common/notification/push.service';
 
 @Injectable()
 export class MedicalService {
-  constructor(private prisma: PrismaService) {}
+  private readonly logger = new Logger(MedicalService.name);
+  constructor(
+    private prisma: PrismaService,
+    private push: PushService,
+  ) {}
 
   async getDoctors(societyId: string) {
     const doctors = await this.prisma.medicalStaff.findMany({
@@ -53,9 +58,25 @@ export class MedicalService {
     });
     if (existing) throw new ConflictException('Slot already booked');
 
-    return this.prisma.appointment.create({
+    const appointment = await this.prisma.appointment.create({
       data: { residentId: resident.id, doctorId, date: new Date(date), timeSlot },
+      include: { doctor: { select: { name: true } } },
     });
+
+    void this.push
+      .send(
+        userId,
+        {
+          title: 'Appointment confirmed',
+          body: `Your appointment with ${appointment.doctor?.name ?? 'the doctor'} on ${appointment.date.toLocaleDateString('en-IN')} at ${timeSlot} is confirmed.`,
+          category: 'community',
+          collapseKey: `appointment:${appointment.id}`,
+        },
+        { type: 'APPOINTMENT_CONFIRMED', entityId: appointment.id, appointmentId: appointment.id },
+      )
+      .catch((e) => this.logger.warn(`appointment confirm push failed id=${appointment.id}: ${(e as Error).message}`));
+
+    return appointment;
   }
 
   async cancelAppointment(id: string, userId: string) {
@@ -66,10 +87,25 @@ export class MedicalService {
       throw new NotFoundException('Appointment not found');
     }
 
-    return this.prisma.appointment.update({
+    const cancelled = await this.prisma.appointment.update({
       where: { id },
       data: { status: 'CANCELLED', cancelReason: 'Cancelled by resident' },
     });
+
+    void this.push
+      .send(
+        userId,
+        {
+          title: 'Appointment cancelled',
+          body: `Your appointment on ${cancelled.date.toLocaleDateString('en-IN')} at ${cancelled.timeSlot} has been cancelled.`,
+          category: 'community',
+          collapseKey: `appointment:${cancelled.id}`,
+        },
+        { type: 'APPOINTMENT_CANCELLED', entityId: cancelled.id, appointmentId: cancelled.id },
+      )
+      .catch((e) => this.logger.warn(`appointment cancel push failed id=${cancelled.id}: ${(e as Error).message}`));
+
+    return cancelled;
   }
 
   async rescheduleAppointment(id: string, userId: string, date: string, timeSlot: string) {
@@ -82,10 +118,25 @@ export class MedicalService {
       where: { doctorId_date_timeSlot: { doctorId: appointment.doctorId, date: new Date(date), timeSlot } },
     });
     if (clash && clash.id !== id) throw new ConflictException('Slot already booked');
-    return this.prisma.appointment.update({
+    const rescheduled = await this.prisma.appointment.update({
       where: { id },
       data: { date: new Date(date), timeSlot, status: 'BOOKED' },
     });
+
+    void this.push
+      .send(
+        userId,
+        {
+          title: 'Appointment rescheduled',
+          body: `Your appointment is now on ${rescheduled.date.toLocaleDateString('en-IN')} at ${rescheduled.timeSlot}.`,
+          category: 'community',
+          collapseKey: `appointment:${rescheduled.id}`,
+        },
+        { type: 'APPOINTMENT_RESCHEDULED', entityId: rescheduled.id, appointmentId: rescheduled.id },
+      )
+      .catch((e) => this.logger.warn(`appointment reschedule push failed id=${rescheduled.id}: ${(e as Error).message}`));
+
+    return rescheduled;
   }
 
   async rateAppointment(id: string, userId: string, rating: number, comment?: string) {

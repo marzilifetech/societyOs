@@ -6,6 +6,7 @@ import { ServiceRequestStatus, ServicePhase } from '@prisma/client';
 import { S3Service } from '../../common/storage/s3.service';
 import { ServiceRequestGateway } from './service-request.gateway';
 import { NotificationService } from '../notification/notification.service';
+import { PushService } from '../../common/notification/push.service';
 
 const mockNotification = {
   notifyUser: jest.fn().mockResolvedValue(undefined),
@@ -53,6 +54,7 @@ describe('ServiceRequestService', () => {
         { provide: S3Service, useValue: mockS3 },
         { provide: ServiceRequestGateway, useValue: mockGateway },
         { provide: NotificationService, useValue: mockNotification },
+        { provide: PushService, useValue: { send: jest.fn().mockResolvedValue({ ok: true }), sendToSociety: jest.fn().mockResolvedValue({ sent: 0, failed: 0, cleaned: 0 }) } },
       ],
     }).compile();
 

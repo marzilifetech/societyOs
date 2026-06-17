@@ -3,11 +3,15 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { requireResidentByUserId } from '../../common/utils/resident-context';
 import { CreatePostDto, CreateCommentDto } from './dto/community.dto';
 import { CommunityPostStatus, UserRole } from '@prisma/client';
+import { PushService } from '../../common/notification/push.service';
 
 @Injectable()
 export class CommunityService {
   private readonly logger = new Logger(CommunityService.name);
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private push: PushService,
+  ) {}
 
   async createPost(userId: string, societyId: string, dto: CreatePostDto) {
     const resident = await requireResidentByUserId(this.prisma, userId);
@@ -84,7 +88,10 @@ export class CommunityService {
 
   async toggleLike(id: string, userId: string) {
     const resident = await requireResidentByUserId(this.prisma, userId);
-    const post = await this.prisma.communityPost.findUnique({ where: { id } });
+    const post = await this.prisma.communityPost.findUnique({
+      where: { id },
+      include: { resident: { select: { id: true, userId: true, user: { select: { name: true } } } } },
+    });
     if (!post) throw new NotFoundException('Post not found');
 
     // Schema has no PostLike table; reactions counter is the available persistent store.
@@ -94,6 +101,26 @@ export class CommunityService {
       where: { id },
       data: { reactions: { increment: 1 } },
     });
+
+    const ownerUserId = post.resident?.userId;
+    if (ownerUserId && post.resident?.id !== resident.id) {
+      const actor = resident.user?.name?.trim() || 'Someone';
+      void this.push
+        .send(
+          ownerUserId,
+          {
+            title: 'New reaction',
+            body: `${actor} reacted to your post.`,
+            category: 'community',
+            collapseKey: `post:${post.id}:reactions`,
+          },
+          { type: 'COMMUNITY_REACTION', entityId: String(post.id), postId: String(post.id) },
+        )
+        .catch((err) => {
+          this.logger.warn(`community reaction push failed post=${post.id}: ${(err as Error).message}`);
+        });
+    }
+
     return { liked: true, likeCount: updated.reactions, residentId: resident.id };
   }
 
@@ -108,13 +135,36 @@ export class CommunityService {
 
   async addComment(postId: string, userId: string, dto: CreateCommentDto) {
     const resident = await requireResidentByUserId(this.prisma, userId);
-    const post = await this.prisma.communityPost.findUnique({ where: { id: postId } });
+    const post = await this.prisma.communityPost.findUnique({
+      where: { id: postId },
+      include: { resident: { select: { id: true, userId: true } } },
+    });
     if (!post) throw new NotFoundException('Post not found');
 
-    return this.prisma.postComment.create({
+    const comment = await this.prisma.postComment.create({
       data: { postId, residentId: resident.id, content: dto.content },
       include: { resident: { include: { user: { select: { name: true } } } } },
     });
+
+    const ownerUserId = post.resident?.userId;
+    if (ownerUserId && post.resident?.id !== resident.id) {
+      const actor = comment.resident?.user?.name?.trim() || 'Someone';
+      void this.push
+        .send(
+          ownerUserId,
+          {
+            title: 'New comment',
+            body: `${actor} commented on your post.`,
+            category: 'community',
+          },
+          { type: 'COMMUNITY_COMMENT', entityId: String(post.id), postId: String(post.id) },
+        )
+        .catch((err) => {
+          this.logger.warn(`community comment push failed post=${post.id}: ${(err as Error).message}`);
+        });
+    }
+
+    return comment;
   }
 
   async getComments(postId: string, page = 1, limit = 20) {

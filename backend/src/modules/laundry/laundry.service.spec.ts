@@ -3,6 +3,7 @@ import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { LaundryService } from './laundry.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { S3Service } from '../../common/storage/s3.service';
+import { PushService } from '../../common/notification/push.service';
 import { LaundryBookingStatus } from '@prisma/client';
 
 /**
@@ -20,7 +21,7 @@ describe('LaundryService — cross-tenant guard', () => {
       create: jest.fn(),
       count: jest.fn(),
     },
-    resident: { findUnique: jest.fn() },
+    resident: { findUnique: jest.fn().mockResolvedValue(null) },
   } as any;
 
   const mockS3 = {
@@ -33,6 +34,7 @@ describe('LaundryService — cross-tenant guard', () => {
         LaundryService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: S3Service, useValue: mockS3 },
+        { provide: PushService, useValue: { send: jest.fn().mockResolvedValue({ ok: true }), sendToSociety: jest.fn().mockResolvedValue({ sent: 0, failed: 0, cleaned: 0 }) } },
       ],
     }).compile();
     service = moduleRef.get(LaundryService);
