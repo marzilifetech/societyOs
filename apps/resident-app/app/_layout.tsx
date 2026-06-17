@@ -172,9 +172,8 @@ export default function RootLayout() {
     return () => sub.remove();
   }, []);
 
-  // Foreground full-screen handling (Notifee + RN-Firebase). The background/
-  // killed handlers are registered at module scope from the app entry; this
-  // wires the in-app foreground path. Idempotent; safe to mount once.
+  // Foreground full-screen handling. The background/killed handler is registered
+  // at module scope from the app entry; this wires the in-app foreground path.
   useEffect(() => registerForegroundFullScreen(), []);
 
   // Register the NATIVE FCM device token with the backend once per token, and
