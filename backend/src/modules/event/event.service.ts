@@ -1,13 +1,13 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { requireResidentByUserId } from '../../common/utils/resident-context';
+import { findResidentByUserId, requireResidentByUserId } from '../../common/utils/resident-context';
 
 @Injectable()
 export class EventService {
   constructor(private prisma: PrismaService) {}
 
   async getEvents(societyId: string, userId?: string) {
-    const resident = userId ? await requireResidentByUserId(this.prisma, userId) : null;
+    const resident = userId ? await findResidentByUserId(this.prisma, userId) : null;
     const events = await this.prisma.event.findMany({
       where: { societyId, status: 'PUBLISHED' },
       include: {

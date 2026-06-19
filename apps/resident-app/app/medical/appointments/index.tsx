@@ -67,7 +67,13 @@ export default function AppointmentHistoryScreen() {
 
   const { data: appointments, isLoading, isError, refetch } = useQuery<Appointment[]>({
     queryKey: ['my-appointments'],
-    queryFn: () => api.get<Appointment[]>('/medical/appointments/mine'),
+    queryFn: async () => {
+      try {
+        return await api.get<Appointment[]>('/medical/appointments/mine');
+      } catch {
+        return api.get<Appointment[]>('/medical/appointments');
+      }
+    },
   });
 
   const handleRefresh = async () => {

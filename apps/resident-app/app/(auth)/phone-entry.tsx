@@ -71,6 +71,7 @@ export default function PhoneEntryScreen() {
         const result = await LocalAuthentication.authenticateAsync({
           promptMessage: 'Sign in to Society App',
           fallbackLabel: 'Use PIN',
+          cancelLabel: 'Use phone number',
         });
         if (result.success) {
           router.replace('/(tabs)');

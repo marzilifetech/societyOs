@@ -47,7 +47,7 @@ const QUICK_ACTIONS: QuickAction[] = [
   { icon: 'chatbubble-ellipses', label: 'Complaints', route: '/complaints', bg: '#FBF1D9', tint: '#B45309' },
   { icon: 'airplane', label: 'Travel', route: '/travel', bg: '#D9F2EA', tint: '#0F9D77' },
   { icon: 'home', label: 'Property', route: '/property', bg: '#FCE4EC', tint: '#C2185B' },
-  { icon: 'help-circle', label: 'Staff Help', route: '/help-requests', bg: '#E5EDFB', tint: '#2563EB' },
+  { icon: 'help-circle', label: 'Concierge', route: '/help-requests', bg: '#E5EDFB', tint: '#2563EB' },
   { icon: 'construct', label: 'Services', route: '/(tabs)/services', bg: '#FDE7D3', tint: '#EA6E1B' },
   { icon: 'calendar', label: 'Events', route: '/(tabs)/events', bg: '#EDE7FB', tint: '#7C3AED' },
   { icon: 'megaphone', label: 'Notices', route: '/(tabs)/notices', bg: '#D9F0F5', tint: '#0E8DA8' },
@@ -262,11 +262,11 @@ export default function HomeScreen() {
                   activeOpacity={0.85}
                   accessibilityRole="button"
                   accessibilityLabel={a.label}
-                  style={{ width: '31%' }}
+                  style={{ width: '31%', alignItems: 'stretch' }}
                 >
-                  <RoundCard tone="white" padding={14} style={{ alignItems: 'center', minHeight: 104, justifyContent: 'center' }}>
-                    <IconCircle icon={a.icon} size={54} bg={a.bg} color={a.tint} />
-                    <Text style={{ marginTop: 10, fontSize: t.fontSm, fontWeight: '600', color: t.textPrimary, textAlign: 'center' }}>{a.label}</Text>
+                  <RoundCard tone="white" padding={14} style={{ alignItems: 'center', minHeight: 108, justifyContent: 'center' }}>
+                    <IconCircle icon={a.icon} size={48} bg={a.bg} color={a.tint} />
+                    <Text style={{ marginTop: 10, fontSize: t.fontSm, fontWeight: '600', color: t.textPrimary, textAlign: 'center' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{a.label}</Text>
                   </RoundCard>
                 </TouchableOpacity>
               ))}

@@ -10,6 +10,7 @@ export enum ComplaintCategory {
   NEIGHBOR = 'NEIGHBOR',
   WATER = 'WATER',
   PETS = 'PETS',
+  COMMUNITY = 'COMMUNITY',
   OTHER = 'OTHER',
 }
 

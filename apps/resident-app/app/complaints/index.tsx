@@ -28,6 +28,7 @@ const CATEGORIES: { icon: IoniconName; label: string; bg: string }[] = [
   { icon: 'water-outline', label: 'Water', bg: '#EAF4FB' },
   { icon: 'construct-outline', label: 'Maintenance', bg: rd.inkSoft },
   { icon: 'people-outline', label: 'Neighbour', bg: rd.greenSoft },
+  { icon: 'business-outline', label: 'Community', bg: '#EAF4FB' },
   { icon: 'paw-outline', label: 'Pets', bg: rd.amberSoft },
   { icon: 'help-circle-outline', label: 'Other', bg: '#EAF4FB' },
 ];

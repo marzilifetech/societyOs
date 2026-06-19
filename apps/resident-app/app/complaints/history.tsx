@@ -85,7 +85,7 @@ export default function ComplaintHistoryScreen() {
           <PillButton
             label="Raise a Complaint"
             tone="dark"
-            onPress={() => router.push('/complaints' as any)}
+            onPress={() => router.back()}
             style={{ marginTop: 24, width: 200 }}
             fullWidth={false}
           />
