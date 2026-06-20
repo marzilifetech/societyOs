@@ -3,6 +3,7 @@ import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { LaundryService } from './laundry.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { S3Service } from '../../common/storage/s3.service';
+import { PushService } from '../../common/notification/push.service';
 import { LaundryBookingStatus } from '@prisma/client';
 
 /**
@@ -20,12 +21,17 @@ describe('LaundryService — cross-tenant guard', () => {
       create: jest.fn(),
       count: jest.fn(),
     },
-    resident: { findUnique: jest.fn() },
+    resident: { findUnique: jest.fn().mockResolvedValue(null) },
   } as any;
 
   const mockS3 = {
     getPresignedUploadUrl: jest.fn().mockResolvedValue({ uploadUrl: 'u', key: 'k', publicUrl: 'p' }),
   } as any;
+
+  const mockPush = {
+    send: jest.fn().mockResolvedValue({ ok: true }),
+    sendToSociety: jest.fn().mockResolvedValue({ sent: 0, failed: 0, cleaned: 0 }),
+  };
 
   beforeEach(async () => {
     const moduleRef: TestingModule = await Test.createTestingModule({
@@ -33,6 +39,7 @@ describe('LaundryService — cross-tenant guard', () => {
         LaundryService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: S3Service, useValue: mockS3 },
+        { provide: PushService, useValue: mockPush },
       ],
     }).compile();
     service = moduleRef.get(LaundryService);
@@ -76,6 +83,21 @@ describe('LaundryService — cross-tenant guard', () => {
       mockPrisma.laundryBooking.findUnique.mockResolvedValue({ id: 'b1', societyId: 'soc-other' });
       await expect(service.markPickedUp('b1', 'soc-1')).rejects.toThrow(ForbiddenException);
       expect(mockPrisma.laundryBooking.update).not.toHaveBeenCalled();
+    });
+
+    it('fires a LAUNDRY_PICKED_UP push to the booking resident', async () => {
+      mockPrisma.laundryBooking.findUnique.mockResolvedValue({ id: 'b1', societyId: 'soc-1' });
+      mockPrisma.laundryBooking.update.mockResolvedValue({ id: 'b1', residentId: 'r1', status: 'PICKED_UP' });
+      mockPrisma.resident.findUnique.mockResolvedValue({ userId: 'u1' });
+
+      await service.markPickedUp('b1', 'soc-1');
+      await new Promise((r) => setImmediate(r));
+
+      expect(mockPush.send).toHaveBeenCalledWith(
+        'u1',
+        expect.objectContaining({ category: 'daily_help' }),
+        expect.objectContaining({ type: 'LAUNDRY_PICKED_UP' }),
+      );
     });
   });
 

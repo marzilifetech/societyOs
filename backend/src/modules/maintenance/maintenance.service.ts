@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundEx
 import { PrismaService } from '../../prisma/prisma.service';
 import { PaymentStatus } from '@prisma/client';
 import { requireResidentByUserId } from '../../common/utils/resident-context';
+import { PushService } from '../../common/notification/push.service';
 import { createHmac } from 'crypto';
 
 @Injectable()
@@ -9,7 +10,10 @@ export class MaintenanceService {
   private readonly logger = new Logger(MaintenanceService.name);
   private razorpay: any = null;
 
-  constructor(private prisma: PrismaService) {
+  constructor(
+    private prisma: PrismaService,
+    private push: PushService,
+  ) {
     this.initRazorpay();
   }
 
@@ -228,7 +232,7 @@ export class MaintenanceService {
       this.logger.debug(`verifyPayment without signature; awaiting webhook for ${paymentId}`);
     }
 
-    return this.prisma.payment.update({
+    const updated = await this.prisma.payment.update({
       where: { id: paymentId },
       data: {
         status: PaymentStatus.SUCCESS,
@@ -237,6 +241,27 @@ export class MaintenanceService {
         paidAt: new Date(),
       },
     });
+
+    void this.push
+      .send(
+        userId,
+        {
+          title: 'Payment received',
+          body: `Payment of ₹${Number(updated.amount)} received. Thank you.`,
+          category: 'payments_dues',
+          collapseKey: `bill:${updated.billId}`,
+        },
+        {
+          type: 'PAYMENT_RECEIVED',
+          entityId: updated.id,
+          paymentId: String(updated.id),
+          billId: String(updated.billId),
+          amount: String(Number(updated.amount)),
+        },
+      )
+      .catch((e) => this.logger.warn(`payment received push failed payment=${updated.id}: ${(e as Error).message}`));
+
+    return updated;
   }
 
   async handleWebhookPayment(paymentId: string) {
@@ -336,7 +361,7 @@ export class MaintenanceService {
       const orderId = payload.order_id as string | undefined;
       const paymentId = payload.id as string | undefined;
       if (orderId) {
-        const payment = await this.prisma.payment.findFirst({ where: { gatewayRef: orderId } });
+        const payment = await this.prisma.payment.findFirst({ where: { gatewayRef: orderId }, include: { resident: true } });
         if (payment && payment.status !== PaymentStatus.SUCCESS) {
           await this.prisma.payment.update({
             where: { id: payment.id },
@@ -346,17 +371,59 @@ export class MaintenanceService {
               paidAt: new Date(),
             },
           });
+          const userId = payment.resident?.userId;
+          if (userId) {
+            void this.push
+              .send(
+                userId,
+                {
+                  title: 'Payment received',
+                  body: `Payment of ₹${Number(payment.amount)} received. Thank you.`,
+                  category: 'payments_dues',
+                  collapseKey: `bill:${payment.billId}`,
+                },
+                {
+                  type: 'PAYMENT_RECEIVED',
+                  entityId: payment.id,
+                  paymentId: String(payment.id),
+                  billId: String(payment.billId),
+                  amount: String(Number(payment.amount)),
+                },
+              )
+              .catch((e) => this.logger.warn(`payment received push failed payment=${payment.id}: ${(e as Error).message}`));
+          }
         }
       }
     } else if (eventType === 'payment.failed') {
       const orderId = payload.order_id as string | undefined;
       if (orderId) {
-        const payment = await this.prisma.payment.findFirst({ where: { gatewayRef: orderId } });
+        const payment = await this.prisma.payment.findFirst({ where: { gatewayRef: orderId }, include: { resident: true } });
         if (payment && payment.status === PaymentStatus.PENDING) {
           await this.prisma.payment.update({
             where: { id: payment.id },
             data: { status: PaymentStatus.FAILED },
           });
+          const userId = payment.resident?.userId;
+          if (userId) {
+            void this.push
+              .send(
+                userId,
+                {
+                  title: 'Payment failed',
+                  body: `Your payment of ₹${Number(payment.amount)} could not be completed. Please try again.`,
+                  category: 'payments_dues',
+                  collapseKey: `bill:${payment.billId}`,
+                },
+                {
+                  type: 'PAYMENT_FAILED',
+                  entityId: payment.id,
+                  paymentId: String(payment.id),
+                  billId: String(payment.billId),
+                  amount: String(Number(payment.amount)),
+                },
+              )
+              .catch((e) => this.logger.warn(`payment failed push failed payment=${payment.id}: ${(e as Error).message}`));
+          }
         }
       }
     }

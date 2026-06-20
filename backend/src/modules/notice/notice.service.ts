@@ -38,6 +38,22 @@ export class NoticeService {
       data: { societyId, category, ...rest, publishedAt: new Date() },
     });
 
+    // Emergency notices go through broadcastEmergency (notices_urgent / emergency).
+    // Normal published notices get a standard push; guard against EMERGENCY to avoid double-send.
+    if (category !== 'EMERGENCY') {
+      const body = (notice.body ?? notice.title ?? '').slice(0, 140);
+      void this.push
+        .sendToSociety(
+          societyId,
+          'RESIDENT',
+          { title: notice.title, body, category: 'notices' },
+          { type: 'NOTICE_PUBLISHED', entityId: String(notice.id) },
+        )
+        .catch(() => {
+          /* best-effort: notice publish must not fail on push */
+        });
+    }
+
     // WhatsApp side-effect: notify all residents with phone numbers
     // TODO: enable once WhatsApp/Twilio is configured (TWILIO_ACCOUNT_SID etc.)
     void this.prisma.user

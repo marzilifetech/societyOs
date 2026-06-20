@@ -1,12 +1,49 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { PushService } from '../../common/notification/push.service';
 import { requireResidentByUserId } from '../../common/utils/resident-context';
 import { CreateDocumentRequestDto, RateDocumentRequestDto } from './dto/document-request.dto';
 import { DocumentRequestStatus } from '@prisma/client';
 
 @Injectable()
 export class DocumentRequestService {
-  constructor(private prisma: PrismaService) {}
+  private readonly logger = new Logger(DocumentRequestService.name);
+  constructor(
+    private prisma: PrismaService,
+    private push: PushService,
+  ) {}
+
+  // Notify the requesting resident when their document request is decided.
+  private notifyResident(
+    residentId: string,
+    decided: 'DELIVERED' | 'REJECTED',
+    requestId: string,
+    note?: string,
+  ): void {
+    void this.prisma.resident
+      .findUnique({ where: { id: residentId }, select: { userId: true } })
+      .then((resident) => {
+        const userId = resident?.userId;
+        if (!userId) return;
+        const ready = decided === 'DELIVERED';
+        return this.push.send(
+          userId,
+          {
+            title: ready ? 'Document ready' : 'Document request rejected',
+            body: ready
+              ? 'Your requested document is ready to download.'
+              : `Your document request was rejected${note ? `: ${note}` : '.'}`,
+            category: 'account_auth',
+            collapseKey: `docreq:${requestId}`,
+          },
+          {
+            type: ready ? 'DOCUMENT_VERIFIED' : 'DOCUMENT_REJECTED',
+            entityId: requestId,
+          },
+        );
+      })
+      .catch((e) => this.logger.warn(`document-request push failed id=${requestId}: ${(e as Error).message}`));
+  }
 
   async create(userId: string, societyId: string, dto: CreateDocumentRequestDto) {
     const resident = await requireResidentByUserId(this.prisma, userId);
@@ -68,7 +105,7 @@ export class DocumentRequestService {
   async approve(id: string, documentUrl?: string, adminNotes?: string) {
     const req = await this.prisma.documentRequest.findUnique({ where: { id } });
     if (!req) throw new NotFoundException('Document request not found');
-    return this.prisma.documentRequest.update({
+    const updated = await this.prisma.documentRequest.update({
       where: { id },
       data: {
         status: DocumentRequestStatus.DELIVERED,
@@ -76,14 +113,18 @@ export class DocumentRequestService {
         ...(adminNotes ? { adminNotes } : {}),
       },
     });
+    this.notifyResident(req.residentId, 'DELIVERED', id);
+    return updated;
   }
 
   async reject(id: string, reason: string) {
     const req = await this.prisma.documentRequest.findUnique({ where: { id } });
     if (!req) throw new NotFoundException('Document request not found');
-    return this.prisma.documentRequest.update({
+    const updated = await this.prisma.documentRequest.update({
       where: { id },
       data: { status: 'REJECTED' as any, adminNotes: reason },
     });
+    this.notifyResident(req.residentId, 'REJECTED', id, reason);
+    return updated;
   }
 }

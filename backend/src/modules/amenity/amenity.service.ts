@@ -1,6 +1,7 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { requireResidentByUserId } from '../../common/utils/resident-context';
+import { PushService } from '../../common/notification/push.service';
 import {
   CreateAmenityBookingDto,
   RateAmenityBookingDto,
@@ -34,7 +35,11 @@ function packRules(prev: string | null | undefined, patch: AmenityScheduleRules)
 
 @Injectable()
 export class AmenityService {
-  constructor(private prisma: PrismaService) {}
+  private readonly logger = new Logger(AmenityService.name);
+  constructor(
+    private prisma: PrismaService,
+    private push: PushService,
+  ) {}
 
   async findAll(societyId: string) {
     return this.prisma.amenity.findMany({
@@ -114,7 +119,7 @@ export class AmenityService {
     const amenity = await this.findOne(dto.amenityId);
     if (!amenity.isActive) throw new BadRequestException('Amenity is not active');
 
-    return this.prisma.amenityBooking.create({
+    const booking = await this.prisma.amenityBooking.create({
       data: {
         amenityId: dto.amenityId,
         residentId: resident.id,
@@ -125,6 +130,21 @@ export class AmenityService {
       },
       include: { amenity: true },
     });
+
+    void this.push
+      .send(
+        userId,
+        {
+          title: 'Booking confirmed',
+          body: `${booking.amenity.name} is booked for ${booking.date.toLocaleDateString('en-IN')}.`,
+          category: 'community',
+          collapseKey: `amenity-booking:${booking.id}`,
+        },
+        { type: 'AMENITY_BOOKING_CONFIRMED', entityId: booking.id, bookingId: booking.id },
+      )
+      .catch((e) => this.logger.warn(`amenity booking push failed id=${booking.id}: ${(e as Error).message}`));
+
+    return booking;
   }
 
   async myBookings(userId: string) {
@@ -142,10 +162,26 @@ export class AmenityService {
     if (!booking || booking.residentId !== resident.id) throw new NotFoundException('Booking not found');
     if (booking.status === AmenityBookingStatus.CANCELLED) throw new BadRequestException('Already cancelled');
 
-    return this.prisma.amenityBooking.update({
+    const cancelled = await this.prisma.amenityBooking.update({
       where: { id },
       data: { status: AmenityBookingStatus.CANCELLED },
+      include: { amenity: true },
     });
+
+    void this.push
+      .send(
+        userId,
+        {
+          title: 'Booking cancelled',
+          body: `Your booking for ${cancelled.amenity.name} on ${cancelled.date.toLocaleDateString('en-IN')} was cancelled.`,
+          category: 'community',
+          collapseKey: `amenity-booking:${cancelled.id}`,
+        },
+        { type: 'AMENITY_BOOKING_CANCELLED', entityId: cancelled.id, bookingId: cancelled.id },
+      )
+      .catch((e) => this.logger.warn(`amenity cancel push failed id=${cancelled.id}: ${(e as Error).message}`));
+
+    return cancelled;
   }
 
   async rateBooking(id: string, userId: string, dto: RateAmenityBookingDto) {

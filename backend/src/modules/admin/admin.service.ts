@@ -349,15 +349,49 @@ export class AdminService {
       await this.dismissStaff(societyId, leave.staffId);
     }
 
+    if (leave.staff?.userId) {
+      void this.push
+        .send(
+          leave.staff.userId,
+          {
+            title: 'Leave approved',
+            body: 'Your leave request has been approved.',
+            category: 'account_auth',
+            collapseKey: `leave:${leaveId}`,
+          },
+          { type: 'LEAVE_APPROVED', entityId: leaveId, leaveId },
+        )
+        .catch((e) => this.logger.warn(`leave-approved push failed leave=${leaveId}: ${(e as Error).message}`));
+    }
+
     return updated;
   }
 
   async rejectLeave(leaveId: string, societyId: string, adminNote?: string) {
-    await requireLeavePendingInSociety(this.prisma, leaveId, societyId);
-    return this.prisma.leaveRequest.update({
+    const leave = await requireLeavePendingInSociety(this.prisma, leaveId, societyId);
+    const updated = await this.prisma.leaveRequest.update({
       where: { id: leaveId },
       data: { status: 'REJECTED', ...(adminNote ? { adminNote } : {}) },
     });
+
+    if (leave.staff?.userId) {
+      void this.push
+        .send(
+          leave.staff.userId,
+          {
+            title: 'Leave rejected',
+            body: adminNote
+              ? `Your leave request was rejected: ${adminNote}`
+              : 'Your leave request has been rejected.',
+            category: 'account_auth',
+            collapseKey: `leave:${leaveId}`,
+          },
+          { type: 'LEAVE_REJECTED', entityId: leaveId, leaveId },
+        )
+        .catch((e) => this.logger.warn(`leave-rejected push failed leave=${leaveId}: ${(e as Error).message}`));
+    }
+
+    return updated;
   }
 
   async getVisitors(societyId: string, status?: string, date?: string) {
@@ -655,6 +689,7 @@ export class AdminService {
     const existingKeys = new Set(existingBills.map((b) => `${b.flatId}:${b.residentId}`));
 
     const toCreate: any[] = [];
+    const toNotify: Array<{ userId: string; total: number }> = [];
     for (const flat of flats) {
       for (const resident of flat.residents) {
         const key = `${flat.id}:${resident.id}`;
@@ -672,15 +707,17 @@ export class AdminService {
           breakdown.travelPauseCredit = travelPauseCredit;
           breakdown.pausedDays = pausedDays;
         }
+        const total = Math.max(0, baseAmount - travelPauseCredit);
         toCreate.push({
           flatId: flat.id,
           residentId: resident.id,
           period,
           breakdown,
-          total: Math.max(0, baseAmount - travelPauseCredit),
+          total,
           dueDate,
           status: 'PENDING',
         });
+        if (resident.userId) toNotify.push({ userId: resident.userId, total });
       }
     }
 
@@ -691,6 +728,22 @@ export class AdminService {
       await this.prisma.$transaction(async (tx) => {
         await tx.maintenanceBill.createMany({ data: toCreate });
       });
+
+      // Notify each resident their bill is ready (fire-and-forget).
+      for (const n of toNotify) {
+        void this.push
+          .send(
+            n.userId,
+            {
+              title: 'Maintenance bill ready',
+              body: `Your maintenance bill of ₹${n.total} for ${period} is ready.`,
+              category: 'payments_dues',
+              collapseKey: `bill-period:${period}`,
+            },
+            { type: 'BILL_GENERATED', period, amount: String(n.total) },
+          )
+          .catch((e) => this.logger.warn(`bill push failed user=${n.userId}: ${(e as Error).message}`));
+      }
     }
 
     return { created: toCreate.length, period };
@@ -1324,6 +1377,22 @@ async createStaff(
       data: { leavingDate: now, deletedAt: now },
     });
     await this.prisma.user.update({ where: { id: staff.userId }, data: { status: 'SUSPENDED' } });
+
+    // Soft-deactivate (status SUSPENDED) leaves the Device token intact, so the
+    // push can still resolve a token after the DB write.
+    void this.push
+      .send(
+        staff.userId,
+        {
+          title: 'Access deactivated',
+          body: 'Your access has been deactivated.',
+          category: 'account_auth',
+          collapseKey: `staff-dismissed:${staffId}`,
+        },
+        { type: 'STAFF_DISMISSED', entityId: staffId, staffId },
+      )
+      .catch((e) => this.logger.warn(`staff-dismissed push failed staff=${staffId}: ${(e as Error).message}`));
+
     return { ok: true };
   }
 

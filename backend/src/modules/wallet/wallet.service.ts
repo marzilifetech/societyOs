@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { PushService } from '../../common/notification/push.service';
 import { createHmac } from 'crypto';
 
 @Injectable()
@@ -7,8 +8,41 @@ export class WalletService {
   private readonly logger = new Logger(WalletService.name);
   private razorpay: any = null;
 
-  constructor(private prisma: PrismaService) {
+  constructor(
+    private prisma: PrismaService,
+    private push: PushService,
+  ) {
     this.initRazorpay();
+  }
+
+  private notifyWalletCredited(userId: string, amount: number, txnId: string): void {
+    void this.push
+      .send(
+        userId,
+        {
+          title: 'Wallet credited',
+          body: `₹${amount} added to your wallet.`,
+          category: 'payments_dues',
+          collapseKey: `wallet-txn:${txnId}`,
+        },
+        { type: 'WALLET_CREDITED', entityId: txnId, transactionId: String(txnId), amount: String(amount) },
+      )
+      .catch((e) => this.logger.warn(`wallet credited push failed txn=${txnId}: ${(e as Error).message}`));
+  }
+
+  private notifyWalletDebited(userId: string, amount: number, txnId: string): void {
+    void this.push
+      .send(
+        userId,
+        {
+          title: 'Wallet debited',
+          body: `₹${amount} debited from your wallet.`,
+          category: 'payments_dues',
+          collapseKey: `wallet-txn:${txnId}`,
+        },
+        { type: 'WALLET_DEBITED', entityId: txnId, transactionId: String(txnId), amount: String(amount) },
+      )
+      .catch((e) => this.logger.warn(`wallet debited push failed txn=${txnId}: ${(e as Error).message}`));
   }
 
   private initRazorpay() {
@@ -204,6 +238,8 @@ export class WalletService {
       }),
     ]);
 
+    this.notifyWalletCredited(userId, amount, txn.id);
+
     return { success: true, transactionId: txn.id, amount };
   }
 
@@ -229,6 +265,8 @@ export class WalletService {
         data: { walletBalance: { increment: dto.amount } },
       }),
     ]);
+
+    this.notifyWalletCredited(userId, dto.amount, txn.id);
 
     return { success: true, transactionId: txn.id, amount: dto.amount };
   }
@@ -258,6 +296,8 @@ export class WalletService {
       }),
     ]);
 
+    this.notifyWalletDebited(userId, dto.amount, txn.id);
+
     return { success: true, transactionId: txn.id, amount: dto.amount };
   }
 
@@ -284,6 +324,9 @@ export class WalletService {
         data: { walletBalance: { increment: dto.amount } },
       }),
     ]);
+
+    const resident = await this.prisma.resident.findUnique({ where: { id: residentId }, select: { userId: true } });
+    if (resident?.userId) this.notifyWalletCredited(resident.userId, dto.amount, txn.id);
 
     return { success: true, transactionId: txn.id };
   }
@@ -325,6 +368,8 @@ export class WalletService {
         data: { walletBalance: { decrement: amount } },
       }),
     ]);
+
+    if (resident.userId) this.notifyWalletDebited(resident.userId, amount, txn.id);
 
     return { success: true, transactionId: txn.id, amount };
   }

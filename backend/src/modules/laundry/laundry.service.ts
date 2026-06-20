@@ -1,7 +1,8 @@
-import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { Injectable, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
 import { LaundryBookingStatus, LaundryType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { S3Service } from '../../common/storage/s3.service';
+import { PushService } from '../../common/notification/push.service';
 import { requireResidentByUserId } from '../../common/utils/resident-context';
 import { requireOwnedById } from '../../common/tenancy/require-owned.util';
 
@@ -9,7 +10,23 @@ const SLOTS = ['09:00', '11:00', '14:00', '16:00'];
 
 @Injectable()
 export class LaundryService {
-  constructor(private prisma: PrismaService, private s3: S3Service) {}
+  private readonly logger = new Logger(LaundryService.name);
+  constructor(private prisma: PrismaService, private s3: S3Service, private push: PushService) {}
+
+  private notifyResident(booking: { id: string; residentId: string; status: string }, type: string, body: string): void {
+    void this.prisma.resident
+      .findUnique({ where: { id: booking.residentId }, select: { userId: true } })
+      .then((resident) => {
+        const userId = resident?.userId;
+        if (!userId) return;
+        return this.push.send(
+          userId,
+          { title: 'Laundry update', body, category: 'daily_help', collapseKey: `laundry:${booking.id}` },
+          { type, entityId: booking.id, bookingId: booking.id, status: String(booking.status) },
+        );
+      })
+      .catch((e) => this.logger.warn(`laundry push failed id=${booking.id}: ${(e as Error).message}`));
+  }
 
   async getBookingById(id: string, societyId: string) {
     return requireOwnedById(
@@ -29,10 +46,12 @@ export class LaundryService {
       societyId,
       'Booking',
     );
-    return this.prisma.laundryBooking.update({
+    const updated = await this.prisma.laundryBooking.update({
       where: { id },
       data: { status: LaundryBookingStatus.PICKED_UP },
     });
+    this.notifyResident(updated, 'LAUNDRY_PICKED_UP', 'Your laundry has been picked up.');
+    return updated;
   }
 
   async getPhotoUploadUrl(id: string, societyId: string, contentType?: string) {
@@ -131,9 +150,17 @@ export class LaundryService {
       societyId,
       'Booking',
     );
-    return this.prisma.laundryBooking.update({
+    const updated = await this.prisma.laundryBooking.update({
       where: { id },
       data: { status },
     });
+    const bodyByStatus: Record<string, { type: string; body: string }> = {
+      [LaundryBookingStatus.READY]: { type: 'LAUNDRY_READY', body: 'Your laundry is ready.' },
+      [LaundryBookingStatus.PICKED_UP]: { type: 'LAUNDRY_PICKED_UP', body: 'Your laundry has been picked up.' },
+      [LaundryBookingStatus.CANCELLED]: { type: 'LAUNDRY_CANCELLED', body: 'Your laundry booking has been cancelled.' },
+    };
+    const mapped = bodyByStatus[status];
+    if (mapped) this.notifyResident(updated, mapped.type, mapped.body);
+    return updated;
   }
 }

@@ -1,10 +1,15 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { requireResidentByUserId } from '../../common/utils/resident-context';
+import { PushService } from '../../common/notification/push.service';
 
 @Injectable()
 export class EventService {
-  constructor(private prisma: PrismaService) {}
+  private readonly logger = new Logger(EventService.name);
+  constructor(
+    private prisma: PrismaService,
+    private push: PushService,
+  ) {}
 
   async getEvents(societyId: string, userId?: string) {
     const resident = userId ? await requireResidentByUserId(this.prisma, userId) : null;
@@ -76,10 +81,27 @@ export class EventService {
         orderBy: { registeredAt: 'asc' },
       });
       if (nextInLine) {
-        await this.prisma.eventRegistration.update({
+        const promoted = await this.prisma.eventRegistration.update({
           where: { id: nextInLine.id },
           data: { waitlisted: false },
+          include: { resident: { select: { userId: true } }, event: { select: { title: true } } },
         });
+        const promotedUserId = promoted.resident?.userId;
+        if (promotedUserId) {
+          const eventTitle = promoted.event?.title ?? 'the event';
+          void this.push
+            .send(
+              promotedUserId,
+              {
+                title: 'You\'re off the waitlist',
+                body: `A spot opened up — you're now registered for ${eventTitle}.`,
+                category: 'community',
+                collapseKey: `event:${eventId}:promote`,
+              },
+              { type: 'EVENT_WAITLIST_PROMOTED', entityId: eventId, eventId },
+            )
+            .catch((e) => this.logger.warn(`event waitlist push failed event=${eventId}: ${(e as Error).message}`));
+        }
       }
     }
 
@@ -87,7 +109,7 @@ export class EventService {
   }
 
   async create(societyId: string, data: any) {
-    return this.prisma.event.create({
+    const event = await this.prisma.event.create({
       data: {
         societyId,
         title: data.title,
@@ -100,12 +122,53 @@ export class EventService {
         status: 'PUBLISHED',
       },
     });
+
+    void this.push
+      .sendToSociety(
+        societyId,
+        'RESIDENT',
+        {
+          title: `New event: ${event.title}`,
+          body: event.description?.trim() || `${event.venue} · ${event.date.toLocaleDateString('en-IN')}`,
+          category: 'community',
+          collapseKey: `event:${event.id}`,
+        },
+        { type: 'EVENT_CREATED', entityId: event.id, eventId: event.id },
+      )
+      .catch((e) => this.logger.warn(`event created push failed event=${event.id}: ${(e as Error).message}`));
+
+    return event;
   }
 
   async cancelEvent(id: string) {
     const event = await this.prisma.event.findUnique({ where: { id } });
     if (!event) throw new NotFoundException('Event not found');
-    return this.prisma.event.update({ where: { id }, data: { status: 'CANCELLED' } });
+    const updated = await this.prisma.event.update({ where: { id }, data: { status: 'CANCELLED' } });
+
+    void (async () => {
+      const registrations = await this.prisma.eventRegistration.findMany({
+        where: { eventId: id },
+        include: { resident: { select: { userId: true } } },
+      });
+      for (const reg of registrations) {
+        const userId = reg.resident?.userId;
+        if (!userId) continue;
+        void this.push
+          .send(
+            userId,
+            {
+              title: 'Event cancelled',
+              body: `"${event.title}" has been cancelled.`,
+              category: 'community',
+              collapseKey: `event:${id}:cancel`,
+            },
+            { type: 'EVENT_CANCELLED', entityId: id, eventId: id },
+          )
+          .catch((e) => this.logger.warn(`event cancelled push failed event=${id}: ${(e as Error).message}`));
+      }
+    })().catch((e) => this.logger.warn(`event cancelled fanout failed event=${id}: ${(e as Error).message}`));
+
+    return updated;
   }
 
   async update(id: string, data: any) {
