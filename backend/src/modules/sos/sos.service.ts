@@ -51,6 +51,22 @@ export class SosService {
       { type: 'SOS', alertId: String(alert.id) },
     );
 
+    // On-duty guards/security are role STAFF (no SECURITY role exists). critical
+    // so it bypasses quiet hours / opt-out. Fire-and-forget; never block trigger.
+    void this.push
+      .sendToSociety(
+        societyId,
+        'STAFF',
+        {
+          title,
+          body,
+          category: 'emergency_sos',
+          critical: true,
+        },
+        { type: 'SOS_TRIGGERED', alertId: String(alert.id) },
+      )
+      .catch(() => {});
+
     return alert;
   }
 

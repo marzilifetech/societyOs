@@ -1,6 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { S3Service } from '../../common/storage/s3.service';
+import { PushService } from '../../common/notification/push.service';
 import { requireResidentByUserId } from '../../common/utils/resident-context';
 import { requireOwnedById } from '../../common/tenancy/require-owned.util';
 import { CreateHousekeepingDto } from './dto/create-housekeeping.dto';
@@ -10,7 +11,7 @@ import { UpdateHousekeepingStatusDto } from './dto/update-housekeeping-status.dt
 @Injectable()
 export class HousekeepingService {
   private readonly logger = new Logger(HousekeepingService.name);
-  constructor(private prisma: PrismaService, private s3: S3Service) {}
+  constructor(private prisma: PrismaService, private s3: S3Service, private push: PushService) {}
 
   async getPhotoUploadUrl(id: string, societyId: string, phase?: string, contentType?: string) {
     // Cross-tenant guard: only mint upload URLs for requests in the caller's society.
@@ -141,9 +142,28 @@ export class HousekeepingService {
 
   async updateStatus(id: string, societyId: string, dto: UpdateHousekeepingStatusDto) {
     const request = await this.findOneAsAdmin(id, societyId);
-    return this.prisma.housekeepingRequest.update({
+    const updated = await this.prisma.housekeepingRequest.update({
       where: { id: request.id },
       data: { status: dto.status as any },
     });
+
+    const bodyByStatus: Record<string, { type: string; body: string }> = {
+      CONFIRMED: { type: 'HOUSEKEEPING_SCHEDULED', body: 'Your housekeeping request has been scheduled.' },
+      SCHEDULED: { type: 'HOUSEKEEPING_SCHEDULED', body: 'Your housekeeping request has been scheduled.' },
+      COMPLETED: { type: 'HOUSEKEEPING_COMPLETED', body: 'Your housekeeping request has been completed.' },
+    };
+    const mapped = bodyByStatus[String(dto.status)];
+    const userId = request.resident?.userId;
+    if (mapped && userId) {
+      void this.push
+        .send(
+          userId,
+          { title: 'Housekeeping update', body: mapped.body, category: 'daily_help', collapseKey: `housekeeping:${request.id}` },
+          { type: mapped.type, entityId: request.id, requestId: request.id, status: String(dto.status) },
+        )
+        .catch((e) => this.logger.warn(`housekeeping push failed id=${request.id}: ${(e as Error).message}`));
+    }
+
+    return updated;
   }
 }

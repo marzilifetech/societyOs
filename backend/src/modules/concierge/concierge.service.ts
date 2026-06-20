@@ -1,11 +1,13 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { RateConciergeDto } from './dto/concierge.dto';
 import { PrismaService } from '../../prisma/prisma.service';
+import { PushService } from '../../common/notification/push.service';
 import { requireOwnedById } from '../../common/tenancy/require-owned.util';
 
 @Injectable()
 export class ConciergeService {
-  constructor(private prisma: PrismaService) {}
+  private readonly logger = new Logger(ConciergeService.name);
+  constructor(private prisma: PrismaService, private push: PushService) {}
 
   async createRequest(userId: string, societyId: string, dto: { type: string; description?: string }) {
     const resident = await this.prisma.resident.findFirst({ where: { user: { id: userId } } });
@@ -51,10 +53,29 @@ export class ConciergeService {
       societyId,
       'Request',
     );
-    return this.prisma.conciergeRequest.update({
+    const updated = await this.prisma.conciergeRequest.update({
       where: { id },
       data: { status: status as any, ...(note ? { note } : {}) },
+      include: { resident: { select: { userId: true } } },
     });
+
+    const type = String(status) === 'COMPLETED' ? 'CONCIERGE_COMPLETED' : 'CONCIERGE_UPDATED';
+    const body =
+      String(status) === 'COMPLETED'
+        ? 'Your concierge request has been completed.'
+        : `Your concierge request is now ${String(status).replace(/_/g, ' ').toLowerCase()}.`;
+    const userId = updated.resident?.userId;
+    if (userId) {
+      void this.push
+        .send(
+          userId,
+          { title: 'Concierge update', body, category: 'daily_help', collapseKey: `concierge:${id}` },
+          { type, entityId: id, requestId: id, status: String(status) },
+        )
+        .catch((e) => this.logger.warn(`concierge push failed id=${id}: ${(e as Error).message}`));
+    }
+
+    return updated;
   }
 
   async getMyRequest(userId: string, id: string, societyId: string) {
