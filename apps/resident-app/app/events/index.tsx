@@ -33,7 +33,7 @@ type ResidentEvent = {
 export default function EventsScreen() {
   const qc = useQueryClient();
 
-  const { data: events, isLoading } = useQuery<ResidentEvent[]>({
+  const { data: events, isLoading, isError, refetch } = useQuery<ResidentEvent[]>({
     queryKey: ['events'],
     queryFn: () => api.get<ResidentEvent[]>('/events'),
   });
@@ -68,6 +68,14 @@ export default function EventsScreen() {
       {isLoading ? (
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator color="#3B3FBF" />
+        </View>
+      ) : isError ? (
+        <View className="flex-1 items-center justify-center px-8">
+          <Text className="text-5xl mb-4">⚠️</Text>
+          <Text className="text-gray-900 text-lg font-semibold mb-2 text-center">Failed to load events</Text>
+          <TouchableOpacity className="bg-primary-500 rounded-2xl px-6 py-3 mt-2" onPress={() => refetch()}>
+            <Text className="text-white font-semibold">Retry</Text>
+          </TouchableOpacity>
         </View>
       ) : !events?.length ? (
         <View className="flex-1 items-center justify-center px-8">

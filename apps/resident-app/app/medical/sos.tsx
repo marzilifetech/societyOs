@@ -17,7 +17,7 @@ import * as Location from 'expo-location';
 import * as Haptics from 'expo-haptics';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -95,6 +95,7 @@ export default function SosScreen() {
 
 function SosScreenInner() {
   const t = useTheme();
+  const insets = useSafeAreaInsets();
 
   const [phase, setPhase] = useState<Phase>('form');
   const [details, setDetails] = useState('');
@@ -141,7 +142,10 @@ function SosScreenInner() {
       let lat: number | undefined;
       let lng: number | undefined;
       try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
+        let { status } = await Location.getForegroundPermissionsAsync();
+        if (status !== 'granted') {
+          ({ status } = await Location.requestForegroundPermissionsAsync());
+        }
         if (status === 'granted') {
           const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
           lat = loc.coords.latitude;
@@ -298,12 +302,12 @@ function SosScreenInner() {
         keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
       >
         <ScrollView
-          contentContainerStyle={{ paddingHorizontal: t.screenPadding, paddingTop: 12, paddingBottom: 24 }}
+          contentContainerStyle={{ paddingHorizontal: t.screenPadding, paddingTop: 8, paddingBottom: 24 }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
           {/* Beacon */}
-          <View style={{ alignItems: 'center', marginTop: 12, marginBottom: 20 }}>
+          <View style={{ alignItems: 'center', marginTop: 4, marginBottom: 12 }}>
             <SosBeacon tone={phase === 'active' || phase === 'resolved' ? 'green' : 'red'} pulse={phase === 'sending' || phase === 'active'}>
               {phase === 'sending' ? (
                 <Display size="xl" color="#FFFFFF" weight="bold">{countdown}</Display>
@@ -445,7 +449,7 @@ function SosScreenInner() {
       </KeyboardAvoidingView>
 
       {/* Footer */}
-      <SafeAreaView edges={['bottom']} style={{ backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: rd.cardBorder }}>
+      <View style={{ backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: rd.cardBorder, paddingBottom: insets.bottom }}>
         <View style={{ paddingHorizontal: t.screenPadding, paddingTop: 12, paddingBottom: 6, gap: 10 }}>
           {phase === 'form' && (
             <PillButton label="Send Alert" tone="dark" onPress={startSending} loading={busy} />
@@ -463,14 +467,14 @@ function SosScreenInner() {
             <PillButton label="Back to Home" tone="dark" onPress={backHome} />
           )}
         </View>
-      </SafeAreaView>
+      </View>
 
       {/* Cancel-reason bottom sheet */}
       <Modal visible={showCancel} transparent animationType="slide" onRequestClose={() => setShowCancel(false)}>
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' }}>
           <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setShowCancel(false)} />
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-            <SafeAreaView edges={['bottom']} style={{ backgroundColor: '#FFFFFF', borderTopLeftRadius: 24, borderTopRightRadius: 24 }}>
+            <View style={{ backgroundColor: '#FFFFFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingBottom: insets.bottom }}>
               <View style={{ paddingHorizontal: t.screenPadding, paddingTop: 24, paddingBottom: 8 }}>
                 <Display size="md">Cancel SOS Alert?</Display>
                 <Text style={{ color: t.textMuted, fontSize: t.fontSm, marginTop: 6, marginBottom: 18 }}>
@@ -535,7 +539,7 @@ function SosScreenInner() {
                   <PillButton label="Keep SOS Active" tone="light" onPress={() => setShowCancel(false)} />
                 </View>
               </View>
-            </SafeAreaView>
+            </View>
           </KeyboardAvoidingView>
         </View>
       </Modal>
@@ -547,9 +551,9 @@ function SosScreenInner() {
 // SosBeacon — concentric rings + radial-gradient core (red active / green sent)
 // ---------------------------------------------------------------------------
 function SosBeacon({ tone, pulse, children }: { tone: 'red' | 'green'; pulse?: boolean; children: React.ReactNode }) {
-  const OUTER = 224;
-  const MID = 178;
-  const CORE = 140;
+  const OUTER = 180;
+  const MID = 148;
+  const CORE = 112;
   const base = tone === 'red' ? '196,40,71' : '46,158,91';
   const coreColors: [string, string] =
     tone === 'red' ? ['#D6537A', '#A81B3C'] : ['#5FB983', '#1F7A45'];

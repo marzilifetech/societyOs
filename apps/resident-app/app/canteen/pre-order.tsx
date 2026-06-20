@@ -51,9 +51,17 @@ type Menu = {
 type CartItem = { dishId: string; quantity: number; name: string; price: number };
 type PreOrderItem = { dishId: string; quantity: number };
 
+type PreOrderItemRow = {
+  dishId?: string;
+  name?: string;
+  quantity: number;
+  unitPrice?: number;
+  dish?: Dish;
+};
+
 type PreOrder = {
   id: string;
-  items: { dish: Dish; quantity: number }[];
+  items: PreOrderItemRow[];
   pickupAt: string;
   notes?: string;
   status: 'PENDING' | 'CONFIRMED' | 'READY' | 'COLLECTED' | 'CANCELLED';
@@ -82,6 +90,19 @@ function formatPickupTime(iso: string) {
   } catch {
     return iso;
   }
+}
+
+function normalizeOrderItems(items: unknown): PreOrderItemRow[] {
+  if (!Array.isArray(items)) return [];
+  return items as PreOrderItemRow[];
+}
+
+function lineItemName(item: PreOrderItemRow): string {
+  return item.name ?? item.dish?.name ?? 'Dish';
+}
+
+function lineItemPrice(item: PreOrderItemRow): number {
+  return Number(item.unitPrice ?? item.dish?.price ?? 0);
 }
 
 // ── Order status pill tone ────────────────────────────────────────────────────
@@ -142,7 +163,7 @@ export default function PreOrderScreen() {
       const newQty = (existing?.quantity ?? 0) + delta;
       if (newQty <= 0) return prev.filter((c) => c.dishId !== dish.id);
       if (existing) return prev.map((c) => c.dishId === dish.id ? { ...c, quantity: newQty } : c);
-      return [...prev, { dishId: dish.id, quantity: 1, name: dish.name, price: dish.price }];
+      return [...prev, { dishId: dish.id, quantity: 1, name: dish.name, price: Number(dish.price) }];
     });
   };
 
@@ -419,7 +440,7 @@ function NewOrderView({
               }}
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <IconCircle icon="bag-handle-outline" size={36} bg={rd.crimsonSoft} color={t.accentPrimary} />
+                <IconCircle icon="bag-outline" size={36} bg={rd.crimsonSoft} color={t.accentPrimary} />
                 <View>
                   <Text style={{ fontSize: t.fontBase, fontWeight: '700', color: t.textPrimary }}>
                     {cartItemCount} item{cartItemCount > 1 ? 's' : ''}
@@ -575,7 +596,7 @@ function MyOrdersView({
   if (!orders || orders.length === 0) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40 }}>
-        <IconCircle icon="bag-handle-outline" size={72} bg={rd.inkSoft} color="rgba(0,0,0,0.3)" style={{ marginBottom: 16 }} />
+        <IconCircle icon="bag-outline" size={72} bg={rd.inkSoft} color="rgba(0,0,0,0.3)" style={{ marginBottom: 16 }} />
         <Display size="sm" align="center">No orders yet</Display>
         <Text style={{ color: t.textMuted, fontSize: t.fontSm, marginTop: 8, textAlign: 'center' }}>
           Place your first pre-order from the New Order tab.
@@ -594,8 +615,9 @@ function MyOrdersView({
     >
       <View style={{ gap: 12, marginTop: 4 }}>
         {orders.map((order) => {
-          const itemCount = order.items.reduce((s, i) => s + i.quantity, 0);
-          const total = order.totalAmount ?? order.items.reduce((s, i) => s + (i.dish?.price ?? 0) * i.quantity, 0);
+          const items = normalizeOrderItems(order.items);
+          const itemCount = items.reduce((s, i) => s + i.quantity, 0);
+          const total = order.totalAmount ?? items.reduce((s, i) => s + lineItemPrice(i) * i.quantity, 0);
           return (
             <RoundCard key={order.id} tone="white" padding={t.cardPaddingLg}>
               <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 10 }}>
@@ -613,13 +635,13 @@ function MyOrdersView({
                 <StatusPill label={orderStatusLabel(order.status)} tone={orderStatusTone(order.status)} />
               </View>
 
-              {order.items.slice(0, 3).map((item, idx) => (
-                <Text key={item.dish?.id ?? idx} style={{ fontSize: t.fontSm, color: t.textSecondary, marginBottom: 2 }}>
-                  {item.dish?.name ?? 'Dish'} × {item.quantity}
+              {items.slice(0, 3).map((item, idx) => (
+                <Text key={item.dishId ?? item.dish?.id ?? idx} style={{ fontSize: t.fontSm, color: t.textSecondary, marginBottom: 2 }}>
+                  {lineItemName(item)} × {item.quantity}
                 </Text>
               ))}
-              {order.items.length > 3 ? (
-                <Text style={{ fontSize: t.fontXs, color: t.textMuted }}>+{order.items.length - 3} more</Text>
+              {items.length > 3 ? (
+                <Text style={{ fontSize: t.fontXs, color: t.textMuted }}>+{items.length - 3} more</Text>
               ) : null}
 
               <View

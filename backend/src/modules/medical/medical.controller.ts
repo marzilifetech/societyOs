@@ -42,6 +42,16 @@ export class MedicalController {
     return this.medicalService.getDoctorById(id, societyId);
   }
 
+  @Get('appointments/mine')
+  getMyAppointmentsMine(@CurrentUser() user: JwtPayload) {
+    return this.medicalService.getMyAppointments(user.sub);
+  }
+
+  @Get('appointments')
+  getMyAppointments(@CurrentUser() user: JwtPayload) {
+    return this.medicalService.getMyAppointments(user.sub);
+  }
+
   @Get('appointments/:id')
   getAppointmentById(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.medicalService.getAppointmentById(id, user.sub);
@@ -56,16 +66,6 @@ export class MedicalController {
   @Post('appointments')
   bookAppointment(@CurrentUser() user: JwtPayload, @Body() dto: CreateAppointmentDto) {
     return this.medicalService.bookAppointment(user.sub, dto.doctorId, dto.date, dto.timeSlot);
-  }
-
-  @Get('appointments/mine')
-  getMyAppointmentsMine(@CurrentUser() user: JwtPayload) {
-    return this.medicalService.getMyAppointments(user.sub);
-  }
-
-  @Get('appointments')
-  getMyAppointments(@CurrentUser() user: JwtPayload) {
-    return this.medicalService.getMyAppointments(user.sub);
   }
 
   @Patch('appointments/:id/cancel')

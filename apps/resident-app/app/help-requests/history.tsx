@@ -61,8 +61,8 @@ export default function HelpRequestHistoryScreen() {
   const [tab, setTab] = useState<Tab>('all');
 
   const { data, isLoading } = useQuery<HelpRequest[]>({
-    queryKey: ['help-requests'],
-    queryFn: () => api.get<HelpRequest[]>('/help-requests'),
+    queryKey: ['concierge-requests'],
+    queryFn: () => api.get<HelpRequest[]>('/concierge/my'),
     retry: false,
     initialData: [],
   });
@@ -150,7 +150,7 @@ export default function HelpRequestHistoryScreen() {
                           numberOfLines={1}
                           style={{ fontSize: t.fontBase, fontWeight: '700', color: t.textPrimary }}
                         >
-                          {item.category}
+                          {item.category ?? (item as any).type ?? 'Request'}
                         </Text>
                         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 4 }}>
                           <Ionicons name="calendar-outline" size={13} color={t.textMuted} />

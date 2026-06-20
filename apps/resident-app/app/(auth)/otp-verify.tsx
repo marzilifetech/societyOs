@@ -135,13 +135,12 @@ export default function OtpVerifyScreen() {
       // also guards against this, but routing them straight there causes a
       // visible 404-then-redirect flicker. Probe /residents/me first so the
       // user lands on the correct screen on the first frame.
-      let routeTarget: '/(tabs)' | '/(auth)/pending-approval' = '/(auth)/pending-approval';
+      let routeTarget: '/(tabs)' | '/(auth)/profile-setup' | '/(auth)/pending-approval' = '/(auth)/profile-setup';
       if (res.user.status === 'ACTIVE') {
         try {
           await api.get<any>('/residents/me');
           routeTarget = '/(tabs)';
         } catch {
-          // 404 means no Resident — pending-approval will surface the next step.
           routeTarget = '/(auth)/pending-approval';
         }
       }

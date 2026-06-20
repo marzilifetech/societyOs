@@ -68,6 +68,7 @@ export default function AddEntryScreen() {
   const [residentPhone, setResidentPhone] = useState('');
   const [visitorName, setVisitorName] = useState('');
   const [visitorPhone, setVisitorPhone] = useState('');
+  const [purpose, setPurpose] = useState('');
   const [type, setType] = useState<'GUEST' | 'DELIVERY'>('GUEST');
   const [partner, setPartner] = useState<string>('');
   const [otherPartner, setOtherPartner] = useState('');
@@ -168,6 +169,7 @@ export default function AddEntryScreen() {
         residentId,
         name: visitorName.trim(),
         phone: visitorPhone.trim() || undefined,
+        purpose: purpose.trim() || undefined,
         type,
         deliveryPartner: finalPartner,
         photoUrl: photoUploadedUrl,
@@ -322,6 +324,15 @@ export default function AddEntryScreen() {
                   <ActivityIndicator color={PRIMARY} style={{ marginLeft: 8 }} />
                 )}
               </View>
+            </Field>
+            <Field label="Purpose of visit (optional)">
+              <TextInput
+                value={purpose}
+                onChangeText={setPurpose}
+                placeholder="e.g. Delivery, Guest, Housekeeping"
+                placeholderTextColor="#9CA3AF"
+                className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 px-4 py-3 text-gray-900 dark:text-gray-100"
+              />
             </Field>
           </Section>
 

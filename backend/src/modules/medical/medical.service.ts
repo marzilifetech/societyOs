@@ -48,7 +48,17 @@ export class MedicalService {
     const bookedSlots = booked.map((a) => a.timeSlot);
 
     const allSlots = ['09:00', '09:30', '10:00', '10:30', '11:00', '11:30', '14:00', '14:30', '15:00', '15:30'];
-    return allSlots.map((slot) => ({ timeSlot: slot, available: !bookedSlots.includes(slot) }));
+    const today = new Date();
+    const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const nowMinutes = today.getHours() * 60 + today.getMinutes();
+    const slots =
+      date === todayIso
+        ? allSlots.filter((slot) => {
+            const [h, m] = slot.split(':').map(Number);
+            return h * 60 + m > nowMinutes;
+          })
+        : allSlots;
+    return slots.map((slot) => ({ timeSlot: slot, available: !bookedSlots.includes(slot) }));
   }
 
   async bookAppointment(userId: string, doctorId: string, date: string, timeSlot: string) {

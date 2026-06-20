@@ -17,6 +17,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as Notifications from 'expo-notifications';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
+import { filterPastTimeSlots } from '../../src/lib/time-slots';
 import { useTheme } from '../../src/hooks/useTheme';
 import {
   ScreenHeader,
@@ -262,7 +263,8 @@ export default function BookAppointmentScreen() {
             </RoundCard>
           ) : (
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
-              {slots.map((slot) => {
+              {filterPastTimeSlots(slots.map((s) => s.timeSlot), selectedDate).map((timeSlot) => {
+                const slot = slots.find((s) => s.timeSlot === timeSlot)!;
                 const selected = selectedSlot === slot.timeSlot;
                 return (
                   <TouchableOpacity

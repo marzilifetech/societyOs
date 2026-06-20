@@ -80,10 +80,12 @@ export default function PendingApprovalScreen() {
             </Animated.View>
           </View>
 
-          <Text className="text-3xl font-bold text-gray-900 text-center mb-3">Under Review</Text>
+          <Text className="text-3xl font-bold text-gray-900 text-center mb-3">
+            {needsSetup ? 'Complete Your Profile' : 'Under Review'}
+          </Text>
           <Text className="text-base text-gray-500 text-center leading-6 mb-2">
             {needsSetup
-              ? 'We still need your flat details before the society team can approve access.'
+              ? 'Please add your flat details and documents so the society team can verify your access.'
               : 'Your resident profile has been received. The society team will verify your access soon.'}
           </Text>
 

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, Platform } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
@@ -38,6 +38,10 @@ function formatDisplay(value: string | null, mode: Mode, timeAsHHMM?: boolean): 
  */
 export function DateField({ label, value, onChange, mode = 'date', placeholder, minimumDate, maximumDate, timeAsHHMM }: Props) {
   const [show, setShow] = useState(false);
+  // Android has no native 'datetime' picker — chain date then time. Tracks which
+  // leg of the chain is showing and the date chosen in the first leg.
+  const [androidStage, setAndroidStage] = useState<'date' | 'time'>('date');
+  const androidDatePart = useRef<Date | null>(null);
 
   const initial = (() => {
     if (value) {
@@ -55,9 +59,36 @@ export function DateField({ label, value, onChange, mode = 'date', placeholder, 
     return new Date();
   })();
 
+  // Android can't render mode='datetime' — split it into a date leg then a time leg.
+  const androidDatetime = Platform.OS !== 'ios' && mode === 'datetime';
+  const pickerMode: Mode = androidDatetime ? androidStage : mode;
+
+  const openPicker = () => {
+    if (androidDatetime) {
+      androidDatePart.current = null;
+      setAndroidStage('date');
+    }
+    setShow(true);
+  };
+
   const handleChange = (_: unknown, selected?: Date) => {
     if (Platform.OS !== 'ios') setShow(false);
     if (!selected) return;
+    if (androidDatetime) {
+      if (androidStage === 'date') {
+        androidDatePart.current = selected;
+        setAndroidStage('time');
+        // Re-open for the time leg after the date dialog closes.
+        setTimeout(() => setShow(true), 0);
+        return;
+      }
+      const base = androidDatePart.current ?? selected;
+      const combined = new Date(base);
+      combined.setHours(selected.getHours(), selected.getMinutes(), 0, 0);
+      setAndroidStage('date');
+      onChange(combined.toISOString());
+      return;
+    }
     if (mode === 'time' && timeAsHHMM) {
       const hh = String(selected.getHours()).padStart(2, '0');
       const mm = String(selected.getMinutes()).padStart(2, '0');
@@ -74,7 +105,7 @@ export function DateField({ label, value, onChange, mode = 'date', placeholder, 
     <View>
       {label && <Text className="text-gray-500 text-xs font-semibold mb-2 uppercase tracking-wide">{label}</Text>}
       <TouchableOpacity
-        onPress={() => setShow(true)}
+        onPress={openPicker}
         className="bg-gray-100 border border-gray-200 rounded-xl px-4 flex-row items-center"
         style={{ minHeight: 52, paddingVertical: 14 }}
         accessibilityRole="button"
@@ -88,12 +119,12 @@ export function DateField({ label, value, onChange, mode = 'date', placeholder, 
 
       {show && (
         <DateTimePicker
-          value={initial}
-          mode={mode}
+          value={androidDatetime && androidStage === 'time' ? (androidDatePart.current ?? initial) : initial}
+          mode={pickerMode}
           display={Platform.OS === 'ios' ? 'spinner' : 'default'}
           onChange={handleChange}
-          minimumDate={minimumDate}
-          maximumDate={maximumDate}
+          minimumDate={androidDatetime && androidStage === 'time' ? undefined : minimumDate}
+          maximumDate={androidDatetime && androidStage === 'time' ? undefined : maximumDate}
         />
       )}
 

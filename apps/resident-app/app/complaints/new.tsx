@@ -43,6 +43,7 @@ const CATEGORY_ENUM: Record<string, string> = {
   Maintenance: 'MAINTENANCE',
   Neighbour: 'NEIGHBOR',
   Pets: 'PETS',
+  Community: 'COMMUNITY',
   Other: 'OTHER',
 };
 
@@ -56,6 +57,7 @@ const CATEGORIES: { icon: IoniconName; label: string; bg: string }[] = [
   { icon: 'construct-outline', label: 'Maintenance', bg: rd.inkSoft },
   { icon: 'people-outline', label: 'Neighbour', bg: rd.greenSoft },
   { icon: 'paw-outline', label: 'Pets', bg: rd.amberSoft },
+  { icon: 'business-outline', label: 'Community', bg: '#EAF4FB' },
   { icon: 'help-circle-outline', label: 'Other', bg: '#EAF4FB' },
 ];
 

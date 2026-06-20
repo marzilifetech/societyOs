@@ -1,13 +1,14 @@
-import { ScrollView, View, Text, TouchableOpacity, ActivityIndicator, RefreshControl, Switch } from 'react-native';
-import { router } from 'expo-router';
+import { ScrollView, View, Text, TouchableOpacity, Alert, ActivityIndicator, RefreshControl, Switch } from 'react-native';
+import { router, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
 
 const AUTO_PAY_KEY = 'maintenance_auto_pay_enabled';
+const PAYMENT_METHOD_KEY = 'maintenance_payment_method_label';
 
 type Bill = {
   id: string;
@@ -22,18 +23,46 @@ export default function MaintenanceScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [autoPayEnabled, setAutoPayEnabled] = useState(false);
   const [autoPayLoaded, setAutoPayLoaded] = useState(false);
+  const [paymentMethodLabel, setPaymentMethodLabel] = useState<string | null>(null);
 
-  useEffect(() => {
-    AsyncStorage.getItem(AUTO_PAY_KEY).then((val) => {
-      setAutoPayEnabled(val === 'true');
+  const loadPaymentState = useCallback(() => {
+    Promise.all([
+      AsyncStorage.getItem(AUTO_PAY_KEY),
+      AsyncStorage.getItem(PAYMENT_METHOD_KEY),
+    ]).then(([autoVal, methodVal]) => {
+      setAutoPayEnabled(autoVal === 'true');
+      setPaymentMethodLabel(methodVal);
       setAutoPayLoaded(true);
     });
   }, []);
 
+  // Reload when returning from the payment-method screen so the new method/state shows.
+  useFocusEffect(loadPaymentState);
+
   const handleAutoPayToggle = async (val: boolean) => {
+    if (val && !paymentMethodLabel) {
+      router.push('/maintenance/payment-method' as any);
+      return;
+    }
     setAutoPayEnabled(val);
     await AsyncStorage.setItem(AUTO_PAY_KEY, String(val));
     api.post('/maintenance/auto-pay', { enabled: val }).catch(() => {});
+  };
+
+  const handleRemoveMethod = () => {
+    Alert.alert('Remove payment method?', 'Auto-pay will be turned off until you add a method again.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          setAutoPayEnabled(false);
+          setPaymentMethodLabel(null);
+          await AsyncStorage.multiRemove([PAYMENT_METHOD_KEY, AUTO_PAY_KEY]);
+          api.post('/maintenance/auto-pay', { enabled: false }).catch(() => {});
+        },
+      },
+    ]);
   };
 
   const { data: bills, isLoading, isError, refetch } = useQuery<Bill[]>({
@@ -98,7 +127,9 @@ export default function MaintenanceScreen() {
                     <Text className="text-base font-semibold text-gray-900">Auto-Pay</Text>
                     <Text className={`text-sm mt-0.5 ${autoPayEnabled ? 'text-primary-500' : 'text-gray-500'}`}>
                       {autoPayEnabled
-                        ? 'Auto-pay active — bills will be paid automatically on due date'
+                        ? paymentMethodLabel
+                          ? `Auto-pay active — charges ${paymentMethodLabel} on due date`
+                          : 'Auto-pay active — bills will be paid automatically on due date'
                         : 'Enable to pay bills automatically on the due date'}
                     </Text>
                   </View>
@@ -110,6 +141,33 @@ export default function MaintenanceScreen() {
                   thumbColor={autoPayEnabled ? '#821A52' : '#9CA3AF'}
                 />
               </View>
+
+              {paymentMethodLabel && (
+                <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-primary-200/60">
+                  <View className="flex-row items-center flex-1 mr-3 gap-2">
+                    <Ionicons name="card-outline" size={16} color="#6B7280" />
+                    <Text className="text-sm text-gray-700 flex-1" numberOfLines={1}>
+                      Method: <Text className="font-semibold text-gray-900">{paymentMethodLabel}</Text>
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => router.push('/maintenance/payment-method' as any)}
+                    className="px-2 py-1"
+                    accessibilityRole="button"
+                    accessibilityLabel="Change auto-pay payment method"
+                  >
+                    <Text className="text-primary-500 text-sm font-semibold">Change</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={handleRemoveMethod}
+                    className="px-2 py-1"
+                    accessibilityRole="button"
+                    accessibilityLabel="Remove auto-pay payment method"
+                  >
+                    <Text className="text-red-500 text-sm font-semibold">Remove</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
           )}
 

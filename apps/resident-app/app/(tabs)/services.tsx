@@ -51,7 +51,6 @@ const CATEGORIES: {
   { label: 'Carpenter', icon: 'hammer-outline', bg: '#FBF3E4', iconColor: '#A16207' },
   { label: 'Electrician', icon: 'flash-outline', bg: '#FFFAEB', iconColor: '#D97706' },
   { label: 'Painter', icon: 'color-palette-outline', bg: '#F3F0FF', iconColor: '#7C3AED' },
-  { label: 'Pest Control', icon: 'bug-outline', bg: '#F0FDF4', iconColor: '#16A34A' },
   { label: 'Appliance Repair', icon: 'construct-outline', bg: '#FFF1F2', iconColor: '#E11D48' },
 ];
 

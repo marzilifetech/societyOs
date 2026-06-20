@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 
+import { filterPastAmPmSlots } from '../../src/lib/time-slots';
 import { api } from '../../src/lib/api';
 import { useTheme } from '../../src/hooks/useTheme';
 import { pickImageFromLibrary, uploadToPresignedUrl } from '../../src/lib/photo-upload';
@@ -231,7 +232,7 @@ export default function NewServiceRequestScreen() {
             marginBottom: 24,
           }}
         >
-          {TIME_SLOTS.map((slot) => {
+          {filterPastAmPmSlots(TIME_SLOTS, selectedDay.date).map((slot) => {
             const selected = selectedTime === slot;
             return (
               <TouchableOpacity

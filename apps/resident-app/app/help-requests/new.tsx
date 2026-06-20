@@ -122,9 +122,10 @@ export default function NewHelpRequestScreen() {
   const [createdAt, setCreatedAt] = useState('');
 
   const mutation = useMutation({
-    mutationFn: (body: object) => api.post('/help-requests', body),
+    mutationFn: (body: { type: string; description?: string }) =>
+      api.post('/concierge', body),
     onSuccess: (raw: any) => {
-      qc.invalidateQueries({ queryKey: ['help-requests'] });
+      qc.invalidateQueries({ queryKey: ['concierge-requests'] });
       const unwrapped = unwrapApiEnvelope<{ id: string }>(raw);
       const id = unwrapped?.id ?? null;
       setCreatedId(id ? String(id) : null);
@@ -139,9 +140,8 @@ export default function NewHelpRequestScreen() {
   const handleSubmit = () => {
     if (!isValid || mutation.isPending) return;
     mutation.mutate({
-      category,
+      type: category,
       description: description.trim() || category,
-      ...(preferredTime ? { preferredTime } : {}),
     });
   };
 

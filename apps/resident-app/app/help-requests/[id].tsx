@@ -118,15 +118,15 @@ export default function TrackRequestScreen() {
 
   const { data: request, isLoading } = useQuery<HelpRequest>({
     queryKey: ['help-request', id],
-    queryFn: () => api.get<HelpRequest>(`/help-requests/${id}`),
+    queryFn: () => api.get<HelpRequest>(`/concierge-requests/${id}`),
     enabled: !!id,
     retry: false,
   });
 
   const cancelMutation = useMutation({
-    mutationFn: (body: { reason?: string }) => api.patch(`/help-requests/${id}/cancel`, body),
+    mutationFn: (body: { reason?: string }) => api.patch(`/concierge/${id}/cancel`, body),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['help-requests'] });
+      qc.invalidateQueries({ queryKey: ['concierge-requests'] });
       qc.invalidateQueries({ queryKey: ['help-request', id] });
       setShowCancel(false);
       setPhase('cancelled');
@@ -139,9 +139,9 @@ export default function TrackRequestScreen() {
 
   const rateMutation = useMutation({
     mutationFn: (body: { rating: number; comment?: string }) =>
-      api.post(`/help-requests/${id}/rate`, body),
+      api.post(`/concierge-requests/${id}/rate`, body),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['help-requests'] });
+      qc.invalidateQueries({ queryKey: ['concierge-requests'] });
       setPhase('rated');
     },
     onError: (err: any) => {
@@ -358,7 +358,7 @@ export default function TrackRequestScreen() {
 
   const detailRows = [
     { label: 'Requested on:', value: fmtDate(request?.createdAt ?? '') },
-    { label: 'Request Type:', value: request?.category ?? '—' },
+    { label: 'Request Type:', value: request?.category ?? (request as any)?.type ?? '—' },
     { label: 'Preferred Time:', value: request?.preferredTime ?? 'Not specified' },
     { label: 'Staff:', value: request?.staffName ?? 'Not Assigned' },
     ...(request?.description ? [{ label: 'Description:', value: request.description }] : []),
@@ -381,7 +381,7 @@ export default function TrackRequestScreen() {
               </IconCircle>
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: t.fontBase, fontWeight: '700', color: t.textPrimary }}>
-                  {request.category}
+                  {request.category ?? (request as any).type ?? 'Help request'}
                 </Text>
                 <Text style={{ fontSize: t.fontSm, color: t.textMuted, marginTop: 2 }}>
                   {fmtDate(request.createdAt)}

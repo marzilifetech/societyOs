@@ -17,7 +17,6 @@ const ALL_DAYS: readonly Day[] = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun
 type VisitorForm = {
   name: string;
   phone: string;
-  purpose: string;
   vehicleNo: string;
 };
 
@@ -41,7 +40,7 @@ async function uploadPhoto(
 export default function NewVisitorScreen() {
   const t = useTheme();
   const qc = useQueryClient();
-  const [form, setForm] = useState<VisitorForm>({ name: '', phone: '', purpose: '', vehicleNo: '' });
+  const [form, setForm] = useState<VisitorForm>({ name: '', phone: '', vehicleNo: '' });
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [photoType, setPhotoType] = useState<string | undefined>(undefined);
   const [photoName, setPhotoName] = useState<string | undefined>(undefined);
@@ -59,8 +58,7 @@ export default function NewVisitorScreen() {
       }
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [3, 4],
+        allowsEditing: false,
         quality: 0.7,
       });
       if (!result.canceled) {
@@ -77,8 +75,7 @@ export default function NewVisitorScreen() {
       }
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [3, 4],
+        allowsEditing: false,
         quality: 0.7,
       });
       if (!result.canceled) {
@@ -158,7 +155,6 @@ export default function NewVisitorScreen() {
 
           <Field label="Name" value={form.name} onChange={(v) => setForm((f) => ({ ...f, name: v }))} placeholder="e.g. Rajan Mehta" />
           <Field label="Phone" value={form.phone} onChange={(v) => setForm((f) => ({ ...f, phone: v }))} placeholder="e.g. 9876543210" keyboardType="phone-pad" />
-          <Field label="Purpose of Visit" value={form.purpose} onChange={(v) => setForm((f) => ({ ...f, purpose: v }))} placeholder="e.g. Delivery, Housekeeping, Guest" />
           <Field label="Vehicle Number" value={form.vehicleNo} onChange={(v) => setForm((f) => ({ ...f, vehicleNo: v }))} placeholder="e.g. MH 01 AB 1234" />
 
           {/* Photo KYC */}

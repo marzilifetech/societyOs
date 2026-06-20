@@ -25,7 +25,8 @@ import {
 
 type HelpRequest = {
   id: string;
-  category: string;
+  category?: string;
+  type?: string;
   description: string;
   urgency?: string;
   status: string;
@@ -115,8 +116,8 @@ export default function HelpRequestsScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   const { data, isLoading, refetch } = useQuery<HelpRequest[]>({
-    queryKey: ['help-requests'],
-    queryFn: () => api.get<HelpRequest[]>('/help-requests'),
+    queryKey: ['concierge-requests'],
+    queryFn: () => api.get<HelpRequest[]>('/concierge/my'),
     retry: false,
     initialData: [],
   });
@@ -151,7 +152,7 @@ export default function HelpRequestsScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
-      <ScreenHeader title="Staff Help" trailing={historyBtn} />
+      <ScreenHeader title="Concierge" trailing={historyBtn} />
 
       <ScrollView
         showsVerticalScrollIndicator={false}
@@ -203,13 +204,14 @@ export default function HelpRequestsScreen() {
             <View style={{ gap: 12 }}>
               {activeRequests.map((item) => {
                 const status = mapStatus(item.status);
-                const cat = CATEGORIES.find((c) => c.value === item.category);
+                const label = item.category ?? item.type ?? 'Request';
+                const cat = CATEGORIES.find((c) => c.value === label);
                 return (
                   <RoundCard key={item.id} tone="white" padding={t.cardPaddingLg}>
                     <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 8 }}>
                       <View style={{ flex: 1, marginRight: 10 }}>
                         <Text style={{ fontSize: t.fontBase, fontWeight: '700', color: t.textPrimary }}>
-                          {item.category}
+                          {label}
                         </Text>
                         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 4 }}>
                           <Ionicons name="calendar-outline" size={13} color={t.textMuted} />

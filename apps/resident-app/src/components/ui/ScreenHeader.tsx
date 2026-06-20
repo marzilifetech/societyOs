@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StatusBar } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useTheme } from '../../hooks/useTheme';
@@ -24,6 +24,7 @@ export function ScreenHeader({
   variant = 'default',
 }: ScreenHeaderProps) {
   const t = useTheme();
+  const insets = useSafeAreaInsets();
   const showBack = onBack !== null;
   const handleBack = () => {
     if (typeof onBack === 'function') return onBack();
@@ -33,7 +34,7 @@ export function ScreenHeader({
   const bg = variant === 'transparent' ? 'transparent' : t.bgPrimary;
 
   return (
-    <SafeAreaView edges={['top']} style={{ backgroundColor: bg }}>
+    <View style={{ backgroundColor: bg, paddingTop: insets.top }}>
       <StatusBar barStyle="dark-content" backgroundColor={bg} />
       <View
         style={{
@@ -96,6 +97,6 @@ export function ScreenHeader({
           <View style={{ marginLeft: 8, alignItems: 'flex-end' }}>{trailing}</View>
         ) : null}
       </View>
-    </SafeAreaView>
+    </View>
   );
 }

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -18,6 +18,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
 import { useAuthStore } from '../../src/store/auth.store';
+import * as Location from 'expo-location';
 
 type Flat = {
   id: string;
@@ -49,6 +50,27 @@ export default function ProfileSetupScreen() {
   // moved it into a search-filtered modal that opens on demand.
   const [flatPickerOpen, setFlatPickerOpen] = useState(false);
   const [flatSearch, setFlatSearch] = useState('');
+
+  // Ask for location up front so emergency responders can find the resident
+  // during an SOS — far better than first-prompting in the middle of a crisis.
+  // Denial never blocks onboarding; we just explain why it matters.
+  useEffect(() => {
+    (async () => {
+      try {
+        const existing = await Location.getForegroundPermissionsAsync();
+        if (existing.status === 'granted') return;
+        const { status, canAskAgain } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted' && canAskAgain) {
+          Alert.alert(
+            'Allow location access',
+            'Sharing your location helps emergency responders reach you quickly if you ever raise an SOS. You can still continue without it.',
+          );
+        }
+      } catch {
+        /* location is optional — never block signup */
+      }
+    })();
+  }, []);
 
   const { data: flats, isLoading } = useQuery<Flat[]>({
     queryKey: ['society-flats', societyId],
