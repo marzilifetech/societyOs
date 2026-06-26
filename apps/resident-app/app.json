@@ -2,7 +2,7 @@
   "expo": {
     "name": "SocietyOS",
     "slug": "societyos-resident",
-    "version": "1.0.0",
+    "version": "1.0.2",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -22,7 +22,7 @@
       }
     },
     "android": {
-      "versionCode": 1,
+      "versionCode": 4,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#3B3FBF"
@@ -35,7 +35,8 @@
         "ACCESS_FINE_LOCATION",
         "RECEIVE_BOOT_COMPLETED",
         "VIBRATE",
-        "POST_NOTIFICATIONS"
+        "POST_NOTIFICATIONS",
+        "SYSTEM_ALERT_WINDOW"
       ]
     },
     "plugins": [
@@ -50,7 +51,9 @@
           "sounds": []
         }
       ],
-      "@sentry/react-native"
+      "@sentry/react-native",
+      "expo-web-browser",
+      "@react-native-community/datetimepicker"
     ],
     "scheme": "societyos",
     "extra": {},

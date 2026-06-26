@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
+import { HEALTH_ENABLED } from '../../src/lib/features';
 import { useAuthStore } from '../../src/store/auth.store';
 import { useAccessibilityStore } from '../../src/store/accessibility.store';
 import { useTheme } from '../../src/hooks/useTheme';
@@ -122,7 +123,10 @@ const MENU_ITEMS: MenuItem[] = [
   { icon: 'card', label: 'Maintenance & Dues', route: '/maintenance', tint: '#0EA5E9' },
   { icon: 'restaurant', label: 'Canteen Menu', route: '/canteen', tint: '#D97706' },
   { icon: 'sparkles', label: 'Events', route: '/events', tint: '#DB2777' },
-  { icon: 'medkit', label: 'Medical Appointments', route: '/medical', tint: '#16A34A' },
+  // 'Medical Appointments' is gated by HEALTH_ENABLED (Play health-policy) — see src/lib/features.ts.
+  ...(HEALTH_ENABLED
+    ? [{ icon: 'medkit', label: 'Medical Appointments', route: '/medical', tint: '#16A34A' } as MenuItem]
+    : []),
   { icon: 'chatbubble-ellipses', label: 'Complaints & Support', route: '/complaints', tint: '#7C3AED' },
   // Always-on entry to the troubleshoot screen — even when permission is
   // granted users may need to tweak battery saver / DnD / lockscreen.
