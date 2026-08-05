@@ -51,7 +51,7 @@ describe('AdminService', () => {
       providers: [
         AdminService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: NotificationService, useValue: { sendToToken: jest.fn() } },
+        { provide: NotificationService, useValue: { sendToToken: jest.fn(), notifyUser: jest.fn() } },
         { provide: PushService, useValue: mockPush },
         { provide: ComplianceService, useValue: { dataExport: jest.fn() } },
         { provide: AuditService, useValue: { write: auditWriteSpy } },

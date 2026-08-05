@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, Alert, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { colors } from '@societyos/theme';
 import { api } from '../../src/lib/api';
 
 export default function PhoneEntryScreen() {
@@ -37,13 +38,13 @@ export default function PhoneEntryScreen() {
         <View className="flex-1 px-8 justify-center">
           <View className="mb-10">
             <Text className="text-4xl font-bold text-white mb-2">Staff Login</Text>
-            <Text className="text-blue-200 text-base">
+            <Text className="text-primary-100 text-base">
               {societyName ?? 'SocietyOS Staff Portal'}
             </Text>
           </View>
 
           <View className="mb-6">
-            <Text className="text-blue-200 text-sm mb-2">Mobile Number</Text>
+            <Text className="text-primary-100 text-sm mb-2">Mobile Number</Text>
             <View className="flex-row bg-white/10 border border-white/20 rounded-2xl overflow-hidden">
               <View className="px-4 py-4 border-r border-white/20 justify-center">
                 <Text className="text-white font-semibold text-base">+91</Text>
@@ -66,7 +67,7 @@ export default function PhoneEntryScreen() {
             disabled={!isValid || loading}
           >
             {loading ? (
-              <ActivityIndicator color="#821A52" />
+              <ActivityIndicator color={colors.primary[500]} />
             ) : (
               <Text className={`font-bold text-base ${isValid ? 'text-primary-500' : 'text-white/50'}`}>
                 Get OTP

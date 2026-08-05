@@ -79,17 +79,35 @@ const spacing = {
   '5xl': 48,
 };
 
-// Paper design — keep corners flat. See spacing.ts for the source of truth.
-// Note: `full` is intentionally NOT 9999 here — capsule pills and circular
-// avatars should become slight-rounded paper rectangles too.
+// 2026 redesign geometry — soft rounded surfaces. Mirrors spacing.ts (the
+// source of truth): 16-20px cards, true capsule pills (`rounded-full` is a
+// real circle again), circular avatars.
 const borderRadius = {
-  sm: 2,
-  md: 4,
-  lg: 6,
-  xl: 8,
-  '2xl': 10,
-  full: 6,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 20,
+  '2xl': 24,
+  full: 9999,
 };
+
+// Redesign soft tones (mirrors apps/resident-app redesign kit `rd` palette) —
+// semantic surfaces + status tints usable from nativewind as e.g.
+// `bg-surface`, `border-subtle`, `bg-sos-soft`, `text-warn-ink`.
+const semantic = {
+  surface: '#FFFFFF',
+  'surface-muted': '#F5F5F6',
+  'surface-raised': '#FFFFFF',
+  ink: '#141414',
+  'ink-soft': '#F2F2F3',
+  subtle: 'rgba(0,0,0,0.07)',
+  'sos-soft': '#FCE9EE',
+  'success-soft': '#E7F4EC',
+  'success-ink': '#1F7A45',
+  'warn-soft': '#FBF1D9',
+  'warn-ink': '#9A6B00',
+};
+Object.assign(colors, semantic);
 
 const tailwindThemeExtend = {
   colors,

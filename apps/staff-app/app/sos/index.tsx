@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { colors } from '@societyos/theme';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useTranslation } from 'react-i18next';
@@ -110,7 +111,7 @@ export default function SosScreen() {
           accessibilityRole="button"
           accessibilityLabel={t('common.back') ?? 'Back'}
         >
-          <Ionicons name="chevron-back" size={24} color="#1E3A5F" />
+          <Ionicons name="chevron-back" size={24} color={colors.primary[500]} />
         </TouchableOpacity>
         <Text className="ml-2 text-lg font-bold text-gray-900 dark:text-gray-100">
           {t('home.sosModalTitle')}

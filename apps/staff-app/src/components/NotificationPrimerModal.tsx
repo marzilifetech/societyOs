@@ -53,7 +53,9 @@ export function NotificationPrimerModal({ visible, onClose }: Props) {
           allowAlert: true,
           allowBadge: true,
           allowSound: true,
-          allowCriticalAlerts: true,
+          // allowCriticalAlerts deliberately omitted until the critical-alerts
+          // entitlement is granted and declared in app.json — requesting it
+          // unentitled risks burning the one-shot iOS permission dialog.
           allowProvisional: false,
         },
       });

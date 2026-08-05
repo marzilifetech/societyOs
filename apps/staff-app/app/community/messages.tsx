@@ -39,6 +39,9 @@ export default function MessagesScreen() {
         <FlatList
           data={data}
           keyExtractor={(g) => g.id}
+          initialNumToRender={10}
+          maxToRenderPerBatch={10}
+          windowSize={7}
           contentContainerStyle={{ paddingHorizontal: 24, paddingVertical: 16 }}
           ItemSeparatorComponent={() => <View className="h-3" />}
           renderItem={({ item }) => (

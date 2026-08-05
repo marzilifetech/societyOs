@@ -59,7 +59,7 @@ export default function PinLoginScreen() {
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} className="flex-1">
         <View className="flex-1 px-8 justify-center">
           <Text className="text-3xl font-bold text-white mb-2">Enter PIN</Text>
-          <Text className="text-blue-200 text-base mb-10">Use your 4-digit PIN to continue.</Text>
+          <Text className="text-primary-100 text-base mb-10">Use your 4-digit PIN to continue.</Text>
           <TextInput
             className="bg-white/10 border border-white/20 rounded-2xl px-5 py-4 text-white text-2xl tracking-widest text-center"
             value={pin}
@@ -88,7 +88,7 @@ export default function PinLoginScreen() {
               router.replace('/(auth)/society-select' as any);
             }}
           >
-            <Text className="text-blue-200 text-sm">Forgot PIN? Log in with phone</Text>
+            <Text className="text-primary-100 text-sm">Forgot PIN? Log in with phone</Text>
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>

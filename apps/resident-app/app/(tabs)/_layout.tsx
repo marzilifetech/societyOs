@@ -1,9 +1,11 @@
 import { useEffect } from 'react';
 import { Tabs, router } from 'expo-router';
 import { View, Text } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../src/lib/api';
+import { useTheme } from '../../src/hooks/useTheme';
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
 
@@ -14,7 +16,8 @@ interface TabIconProps {
 }
 
 function TabIcon({ focused, name, label }: TabIconProps) {
-  const color = focused ? '#821A52' : '#9CA3AF';
+  const t = useTheme();
+  const color = focused ? t.accentPrimary : t.textMuted;
   return (
     <View className="items-center pt-1" style={{ width: 64 }}>
       <Ionicons name={name} size={22} color={color} />
@@ -38,23 +41,31 @@ function TabIcon({ focused, name, label }: TabIconProps) {
  * profile not found" message. This guard catches all of them in one place and
  * sends the user back to pending-approval where they can complete profile-setup.
  *
- * No retry — a single 404 is enough signal; a transient network error would
- * leave them on a broken tab, which is preferable to a flicker loop.
+ * Redirect ONLY on a genuine 404 (no Resident row). A transient network / 5xx
+ * error must NOT bounce — otherwise this guard fights pending-approval's
+ * `status === 'ACTIVE' → /(tabs)` redirect and the app flicker-loops forever
+ * (ACTIVE user without a profile ping-pongs between the two screens). 401 is
+ * handled by the api-client's onUnauthorized (→ society-select), not here.
  */
 function ResidentProfileGuard() {
-  const { isError } = useQuery({
+  const { isError, error } = useQuery({
     queryKey: ['residents-me-guard'],
     queryFn: () => api.get('/residents/me'),
     retry: false,
     staleTime: 60_000,
   });
   useEffect(() => {
-    if (isError) router.replace('/(auth)/pending-approval' as any);
-  }, [isError]);
+    if (isError && (error as { status?: number } | null)?.status === 404) {
+      router.replace('/(auth)/pending-approval' as any);
+    }
+  }, [isError, error]);
   return null;
 }
 
 export default function TabsLayout() {
+  const t = useTheme();
+  const insets = useSafeAreaInsets();
+  const bottomPad = Math.max(insets.bottom, 10);
   return (
     <>
     <ResidentProfileGuard />
@@ -64,9 +75,9 @@ export default function TabsLayout() {
         tabBarShowLabel: false,
         tabBarStyle: {
           backgroundColor: '#FFFFFF',
-          borderTopColor: '#F1F1F3',
-          height: 84,
-          paddingBottom: 18,
+          borderTopColor: t.borderSubtle,
+          height: 66 + bottomPad,
+          paddingBottom: bottomPad,
           paddingTop: 6,
         },
       }}

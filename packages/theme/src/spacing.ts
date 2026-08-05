@@ -11,19 +11,18 @@ export const spacing = {
   '5xl': 48,
 };
 
-// Paper design: surfaces are flat with minimal corner rounding. Anything
-// that previously used `rounded-xl` / `rounded-2xl` / `rounded-full` gets a
-// sharp paper edge instead. We intentionally retire the fully-circular
-// option — capsule pills and circular avatars become slight-rounded
-// rectangles to match the paper aesthetic. If a truly circular element is
-// ever needed, set `borderRadius: 9999` inline at the call site.
+// 2026 redesign geometry: soft, rounded surfaces (the Figma "RoundCard"
+// language — 16-20px cards, true capsule pills, circular avatars). This
+// retires the earlier flat-paper scale (2-10px, full:6) that made both apps
+// read as dated: `rounded-full` is a real circle again and `rounded-2xl`
+// matches the redesign card radius.
 export const radius = {
-  sm: 2,
-  md: 4,
-  lg: 6,
-  xl: 8,
-  '2xl': 10,
-  full: 6,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 20,
+  '2xl': 24,
+  full: 9999,
 };
 
 export const fontSize = {

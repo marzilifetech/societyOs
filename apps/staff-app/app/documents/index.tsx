@@ -1,11 +1,14 @@
-import { useState } from 'react';
+import { useState, type ComponentProps } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, Modal, Image, Dimensions } from 'react-native';
 import { router, Stack } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import WebView from 'react-native-webview';
+import { Ionicons } from '@expo/vector-icons';
+import { colors } from '@societyos/theme';
 import { api } from '../../src/lib/api';
 import { ErrorCard } from '../../src/components/ErrorCard';
+import { AppHeader, Button, Card, EmptyState as EmptyStateBase } from '../../src/components/ui';
 
 interface StaffDocument {
   id: string;
@@ -16,12 +19,14 @@ interface StaffDocument {
   uploadedAt?: string;
 }
 
-const ICONS: Record<string, string> = {
-  AADHAAR: '🆔',
-  PAN: '💳',
-  CONTRACT: '📄',
-  CERTIFICATION: '🎓',
-  OTHER: '📎',
+type DocIcon = ComponentProps<typeof Ionicons>['name'];
+
+const ICONS: Record<string, DocIcon> = {
+  AADHAAR: 'id-card-outline',
+  PAN: 'card-outline',
+  CONTRACT: 'document-text-outline',
+  CERTIFICATION: 'school-outline',
+  OTHER: 'attach-outline',
 };
 
 export default function DocumentsScreen() {
@@ -34,18 +39,19 @@ export default function DocumentsScreen() {
   return (
     <SafeAreaView className="flex-1 bg-gray-50" edges={['top']}>
       <Stack.Screen options={{ headerShown: false }} />
-      <View className="bg-primary-500 px-5 py-4 flex-row items-center justify-between">
-        <TouchableOpacity onPress={() => router.back()} className="w-10 h-10 items-center justify-center">
-          <Text className="text-white text-2xl">‹</Text>
-        </TouchableOpacity>
-        <Text className="text-white text-lg font-bold">Documents</Text>
-        <TouchableOpacity
-          onPress={() => router.push('/documents/upload' as any)}
-          className="w-10 h-10 items-center justify-center"
-        >
-          <Text className="text-white text-2xl">+</Text>
-        </TouchableOpacity>
-      </View>
+      <AppHeader
+        title="Documents"
+        right={
+          <TouchableOpacity
+            onPress={() => router.push('/documents/upload' as any)}
+            className="w-10 h-10 rounded-full bg-white/15 items-center justify-center"
+            accessibilityRole="button"
+            accessibilityLabel="Upload document"
+          >
+            <Ionicons name="add" size={22} color="#FFFFFF" />
+          </TouchableOpacity>
+        }
+      />
 
       {isLoading ? (
         <View className="flex-1 items-center justify-center">
@@ -67,7 +73,9 @@ export default function DocumentsScreen() {
                 onPress={() => setPreview(doc)}
                 className="bg-white rounded-2xl p-4 flex-row items-center gap-3 shadow-sm"
               >
-                <Text className="text-3xl">{ICONS[doc.type] ?? '📎'}</Text>
+                <View className="w-11 h-11 rounded-full bg-primary-50 items-center justify-center">
+                  <Ionicons name={ICONS[doc.type] ?? 'attach-outline'} size={20} color={colors.primary[500]} />
+                </View>
                 <View className="flex-1">
                   <Text className="text-base font-semibold text-gray-900">{doc.name ?? doc.type}</Text>
                   <Text className="text-xs text-gray-500 mt-0.5">
@@ -99,14 +107,15 @@ function StatusPill({ status }: { status?: string }) {
 
 function EmptyState({ onUpload }: { onUpload: () => void }) {
   return (
-    <View className="bg-white rounded-2xl p-8 items-center mt-8">
-      <Text className="text-5xl mb-3">📁</Text>
-      <Text className="text-gray-700 font-semibold text-base mb-1">No documents yet</Text>
-      <Text className="text-gray-500 text-sm text-center mb-4">Upload Aadhaar, PAN or contract to keep them handy.</Text>
-      <TouchableOpacity onPress={onUpload} className="bg-primary-500 px-5 py-2.5 rounded-xl">
-        <Text className="text-white font-semibold">Upload Document</Text>
-      </TouchableOpacity>
-    </View>
+    <Card padding="none" className="items-center mt-8 pb-8">
+      <EmptyStateBase
+        icon="folder-open-outline"
+        title="No documents yet"
+        body="Upload Aadhaar, PAN or contract to keep them handy."
+        className="pb-0"
+      />
+      <Button label="Upload Document" onPress={onUpload} className="mt-4" />
+    </Card>
   );
 }
 

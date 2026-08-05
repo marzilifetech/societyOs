@@ -1,5 +1,7 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text } from 'react-native';
+import { useTheme } from '../hooks/useTheme';
+import { RoundCard, IconCircle, PillButton, rd } from './ui';
 
 interface Props {
   message?: string;
@@ -8,27 +10,42 @@ interface Props {
 }
 
 export function ErrorCard({ message, onRetry, retryLabel = 'Try Again' }: Props) {
+  const t = useTheme();
   return (
-    <View style={styles.container}>
-      <Text style={styles.icon}>⚠️</Text>
-      <Text style={styles.message}>
-        {message ?? "Something didn't load. Please try again — your information is safe."}
-      </Text>
-      {onRetry && (
-        <TouchableOpacity style={styles.button} onPress={onRetry} activeOpacity={0.8}>
-          <Text style={styles.buttonText}>{retryLabel}</Text>
-        </TouchableOpacity>
-      )}
-      <Text style={styles.hint}>If this keeps happening, please contact the society office.</Text>
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+      <RoundCard padding={t.cardPaddingLg} style={{ width: '100%', alignItems: 'center' }}>
+        <IconCircle icon="alert-circle" size={56} bg={rd.crimsonSoft} color={rd.crimson} />
+        <Text
+          style={{
+            fontSize: t.fontBase,
+            color: t.textPrimary,
+            textAlign: 'center',
+            lineHeight: t.fontBase * t.lineHeightRelaxed,
+            marginTop: 16,
+          }}
+        >
+          {message ?? "Something didn't load. Please try again — your information is safe."}
+        </Text>
+        {onRetry && (
+          <PillButton
+            label={retryLabel}
+            onPress={onRetry}
+            tone="dark"
+            size="md"
+            style={{ marginTop: 20 }}
+          />
+        )}
+        <Text
+          style={{
+            fontSize: t.fontSm,
+            color: t.textMuted,
+            textAlign: 'center',
+            marginTop: 16,
+          }}
+        >
+          If this keeps happening, please contact the society office.
+        </Text>
+      </RoundCard>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  icon: { fontSize: 40, marginBottom: 16 },
-  message: { fontSize: 16, color: '#F5F5F7', textAlign: 'center', lineHeight: 24, marginBottom: 20 },
-  button: { backgroundColor: '#821A52', paddingVertical: 14, paddingHorizontal: 32, borderRadius: 4, marginBottom: 16 },
-  buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  hint: { fontSize: 13, color: '#8E8E93', textAlign: 'center' },
-});

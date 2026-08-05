@@ -67,6 +67,12 @@ export function NotificationPrimerModal({ visible, onClose }: Props) {
           allowAlert: true,
           allowBadge: true,
           allowSound: true,
+          // Same options as push.ts ensurePermission — iOS shows the system
+          // dialog only once, so every request path must ask for the same
+          // grants. allowCriticalAlerts is deliberately omitted until the
+          // critical-alerts entitlement is granted and declared in app.json;
+          // requesting it unentitled risks burning this one-shot dialog with
+          // a failed authorization request.
           allowProvisional: false,
         },
       });

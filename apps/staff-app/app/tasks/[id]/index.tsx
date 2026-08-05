@@ -13,16 +13,10 @@ import { router, useLocalSearchParams, Stack } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
+import { colors } from '@societyos/theme';
 import { api } from '../../../src/lib/api';
-
-const STATUS_META: Record<string, { label: string; bg: string; color: string }> = {
-  PENDING:     { label: 'Pending',     bg: 'bg-blue-900',   color: 'text-blue-300' },
-  ASSIGNED:    { label: 'Assigned',    bg: 'bg-purple-900', color: 'text-purple-300' },
-  IN_PROGRESS: { label: 'In Progress', bg: 'bg-amber-900',  color: 'text-amber-300' },
-  COMPLETED:   { label: 'Completed',   bg: 'bg-green-900',  color: 'text-green-300' },
-  REJECTED:    { label: 'Rejected',    bg: 'bg-red-900',    color: 'text-red-300' },
-  DISPUTED:    { label: 'Disputed',    bg: 'bg-red-900',    color: 'text-red-300' },
-};
+import { AppHeader, Card, StatusChip } from '../../../src/components/ui';
+import { TASK_STATUS_TONES, toneFor } from '../../../src/lib/status-theme';
 
 const TIMELINE = ['PENDING', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED'];
 
@@ -49,14 +43,14 @@ export default function TaskDetailScreen() {
 
   if (isLoading || !task) {
     return (
-      <SafeAreaView className="flex-1 bg-gray-950 items-center justify-center">
+      <SafeAreaView className="flex-1 bg-gray-50 dark:bg-gray-950 items-center justify-center">
         <Stack.Screen options={{ title: 'Task' }} />
-        <ActivityIndicator color="#fff" />
+        <ActivityIndicator color={colors.primary[500]} />
       </SafeAreaView>
     );
   }
 
-  const meta = STATUS_META[task.status] ?? STATUS_META.PENDING;
+  const tone = toneFor(TASK_STATUS_TONES, task.status, 'PENDING');
   const photos: any[] = task.photos ?? [];
   const isPending = task.status === 'PENDING' || task.status === 'ASSIGNED';
   const isInProgress = task.status === 'IN_PROGRESS';
@@ -64,40 +58,30 @@ export default function TaskDetailScreen() {
   const timelineStep = TIMELINE.indexOf(task.status);
 
   return (
-    <SafeAreaView className="flex-1 bg-gray-950">
+    <SafeAreaView className="flex-1 bg-gray-50 dark:bg-gray-950">
       <Stack.Screen options={{ headerShown: false }} />
-      <View className="bg-gray-900 px-5 py-4 flex-row items-center">
-        <TouchableOpacity onPress={() => router.back()} className="w-10 h-10 items-center justify-center">
-          <Text className="text-white text-2xl">‹</Text>
-        </TouchableOpacity>
-        <View className="flex-1 ml-2">
-          <Text className="text-white text-lg font-bold">{task.category}</Text>
-        </View>
-        <View className={`rounded-full px-3 py-1 ${meta.bg}`}>
-          <Text className={`text-xs font-semibold ${meta.color}`}>{meta.label}</Text>
-        </View>
-      </View>
+      <AppHeader title={task.category} right={<StatusChip tone={tone} />} />
 
       <ScrollView className="flex-1" contentContainerClassName="p-5 gap-4 pb-32">
         {/* Resident */}
         {task.unit && (
-          <View className="bg-gray-900 rounded-2xl p-5">
-            <Text className="text-xs text-gray-400 uppercase tracking-wider mb-2">Resident</Text>
-            <Text className="text-white text-base font-semibold">
+          <Card padding="lg">
+            <Text className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Resident</Text>
+            <Text className="text-gray-900 dark:text-gray-100 text-base font-semibold">
               {task.requestedBy?.name ?? task.unit?.owner?.name ?? 'Resident'}
             </Text>
-            <Text className="text-gray-400 text-sm mt-0.5">Flat {task.unit.flatNumber}</Text>
+            <Text className="text-gray-500 dark:text-gray-400 text-sm mt-0.5">Flat {task.unit.flatNumber}</Text>
             {task.unit.floor && (
-              <Text className="text-gray-500 text-xs mt-0.5">Floor {task.unit.floor}</Text>
+              <Text className="text-gray-400 dark:text-gray-500 text-xs mt-0.5">Floor {task.unit.floor}</Text>
             )}
-          </View>
+          </Card>
         )}
 
         {/* Scheduled arrival */}
         {task.scheduledTime && (
-          <View className="bg-[#821A52]/20 border border-[#821A52]/40 rounded-2xl p-5">
-            <Text className="text-xs text-[#821A52] uppercase tracking-wider mb-1">Scheduled Arrival</Text>
-            <Text className="text-white text-lg font-bold">
+          <View className="bg-primary-50 dark:bg-primary-900/40 border border-primary-100 dark:border-primary-800 rounded-2xl p-5">
+            <Text className="text-xs text-primary-600 dark:text-primary-200 uppercase tracking-wider mb-1">Scheduled Arrival</Text>
+            <Text className="text-gray-900 dark:text-gray-100 text-lg font-heading">
               {new Date(task.scheduledTime).toLocaleString('en-IN', {
                 weekday: 'short', day: 'numeric', month: 'short',
                 hour: '2-digit', minute: '2-digit',
@@ -108,38 +92,44 @@ export default function TaskDetailScreen() {
 
         {/* Dispute alert */}
         {task.disputeReason && (
-          <View className="bg-red-900/30 border border-red-700/50 rounded-2xl p-5">
-            <Text className="text-xs text-red-400 uppercase tracking-wider mb-1">Resident Dispute</Text>
-            <Text className="text-red-200 text-sm">{task.disputeReason}</Text>
+          <View className="bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-2xl p-5">
+            <Text className="text-xs text-red-600 dark:text-red-400 uppercase tracking-wider mb-1">Resident Dispute</Text>
+            <Text className="text-red-700 dark:text-red-200 text-sm">{task.disputeReason}</Text>
           </View>
         )}
 
         {/* Description */}
-        <View className="bg-gray-900 rounded-2xl p-5">
-          <Text className="text-xs text-gray-400 uppercase tracking-wider mb-2">Description</Text>
-          <Text className="text-gray-100 text-sm leading-5">{task.description}</Text>
-        </View>
+        <Card padding="lg">
+          <Text className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Description</Text>
+          <Text className="text-gray-800 dark:text-gray-100 text-sm leading-5">{task.description}</Text>
+        </Card>
 
         {/* Timeline */}
-        <View className="bg-gray-900 rounded-2xl p-5">
-          <Text className="text-xs text-gray-400 uppercase tracking-wider mb-4">Timeline</Text>
+        <Card padding="lg">
+          <Text className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-4">Timeline</Text>
           <View className="flex-row items-center justify-between">
             {TIMELINE.map((step, idx) => (
               <View key={step} className="flex-1 items-center">
                 <View
                   className={`w-8 h-8 rounded-full items-center justify-center ${
-                    idx <= timelineStep ? 'bg-green-600' : 'bg-gray-800'
+                    idx <= timelineStep ? 'bg-green-600' : 'bg-gray-200 dark:bg-gray-800'
                   }`}
                 >
-                  <Text className="text-white text-xs font-bold">{idx + 1}</Text>
+                  <Text
+                    className={`text-xs font-bold ${
+                      idx <= timelineStep ? 'text-white' : 'text-gray-500 dark:text-gray-400'
+                    }`}
+                  >
+                    {idx + 1}
+                  </Text>
                 </View>
-                <Text className="text-gray-500 text-[9px] mt-1 text-center">
+                <Text className="text-gray-500 dark:text-gray-400 text-[9px] mt-1 text-center">
                   {step.replace('_', ' ')}
                 </Text>
                 {idx < TIMELINE.length - 1 && (
                   <View
                     className={`absolute top-4 left-1/2 h-0.5 w-full ${
-                      idx < timelineStep ? 'bg-green-600' : 'bg-gray-700'
+                      idx < timelineStep ? 'bg-green-600' : 'bg-gray-200 dark:bg-gray-700'
                     }`}
                     style={{ zIndex: -1 }}
                   />
@@ -147,12 +137,12 @@ export default function TaskDetailScreen() {
               </View>
             ))}
           </View>
-        </View>
+        </Card>
 
         {/* Photos */}
         {photos.length > 0 && (
-          <View className="bg-gray-900 rounded-2xl p-5">
-            <Text className="text-xs text-gray-400 uppercase tracking-wider mb-3">Photos</Text>
+          <Card padding="lg">
+            <Text className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Photos</Text>
             <FlatList
               data={photos}
               horizontal
@@ -173,33 +163,33 @@ export default function TaskDetailScreen() {
                 </TouchableOpacity>
               )}
             />
-          </View>
+          </Card>
         )}
 
         {/* Notes history */}
         {task.notes?.length > 0 && (
-          <View className="bg-gray-900 rounded-2xl p-5">
-            <Text className="text-xs text-gray-400 uppercase tracking-wider mb-3">Notes</Text>
+          <Card padding="lg">
+            <Text className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Notes</Text>
             <View className="gap-3">
               {(task.notes as any[]).map((n: any) => (
-                <View key={n.id} className="bg-gray-800 rounded-xl p-3">
-                  <Text className="text-gray-100 text-sm">{n.body}</Text>
-                  <Text className="text-gray-500 text-[10px] mt-1">
+                <View key={n.id} className="bg-gray-50 dark:bg-gray-800 rounded-xl p-3">
+                  <Text className="text-gray-800 dark:text-gray-100 text-sm">{n.body}</Text>
+                  <Text className="text-gray-400 dark:text-gray-500 text-[10px] mt-1">
                     {new Date(n.createdAt).toLocaleString('en-IN')}
                   </Text>
                 </View>
               ))}
             </View>
-          </View>
+          </Card>
         )}
       </ScrollView>
 
       {/* Action bar */}
-      <View className="absolute bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-800 px-5 py-4 gap-3">
+      <View className="absolute bottom-0 left-0 right-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800 px-5 py-4 gap-3">
         {isPending && (
           <TouchableOpacity
             onPress={() => router.push(`/tasks/${id}/start` as any)}
-            className="bg-amber-500 rounded-2xl py-4 items-center"
+            className="bg-amber-500 rounded-full py-4 items-center"
             style={{ minHeight: 56 }}
           >
             <Text className="text-white font-bold text-base">Accept & Start</Text>
@@ -208,7 +198,7 @@ export default function TaskDetailScreen() {
         {isInProgress && !task.disputeReason && (
           <TouchableOpacity
             onPress={() => router.push(`/tasks/${id}/complete` as any)}
-            className="bg-green-600 rounded-2xl py-4 items-center"
+            className="bg-green-600 rounded-full py-4 items-center"
             style={{ minHeight: 56 }}
           >
             <Text className="text-white font-bold text-base">Complete Work</Text>
@@ -217,7 +207,7 @@ export default function TaskDetailScreen() {
         {(isDisputed || task.disputeReason) && (
           <TouchableOpacity
             onPress={() => router.push(`/tasks/${id}/dispute` as any)}
-            className="bg-red-600 rounded-2xl py-4 items-center"
+            className="bg-red-600 rounded-full py-4 items-center"
             style={{ minHeight: 56 }}
           >
             <Text className="text-white font-bold text-base">Respond to Dispute</Text>

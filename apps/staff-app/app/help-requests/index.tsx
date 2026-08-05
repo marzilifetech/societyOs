@@ -1,12 +1,15 @@
-import { useMemo } from 'react';
+import { useMemo, type ComponentProps } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
 import { router, Stack } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
+import { Ionicons } from '@expo/vector-icons';
+import { colors } from '@societyos/theme';
 import i18nInstance from '../../src/lib/i18n';
 import { api } from '../../src/lib/api';
 import { ErrorCard } from '../../src/components/ErrorCard';
+import { AppHeader, Card, EmptyState } from '../../src/components/ui';
 
 export interface HelpRequest {
   id: string;
@@ -17,10 +20,12 @@ export interface HelpRequest {
   resident?: { name?: string; flat?: string };
 }
 
-const ICONS: Record<string, string> = {
-  HELP_HEAVY: '📦',
-  HELP_DOCUMENT: '📄',
-  HELP_PACKAGE: '🎁',
+type CategoryIcon = ComponentProps<typeof Ionicons>['name'];
+
+const ICONS: Record<string, CategoryIcon> = {
+  HELP_HEAVY: 'cube-outline',
+  HELP_DOCUMENT: 'document-text-outline',
+  HELP_PACKAGE: 'gift-outline',
 };
 
 const LABELS: Record<string, string> = {
@@ -47,12 +52,7 @@ export default function HelpRequestsScreen() {
   return (
     <SafeAreaView className="flex-1 bg-gray-50" edges={['top']}>
       <Stack.Screen options={{ headerShown: false }} />
-      <View className="bg-primary-500 dark:bg-primary-900 px-5 py-4 flex-row items-center">
-        <TouchableOpacity onPress={() => router.back()} className="w-10 h-10 items-center justify-center">
-          <Text className="text-white text-2xl">‹</Text>
-        </TouchableOpacity>
-        <Text className="text-white text-lg font-bold ml-2">{t('helpRequests.title')}</Text>
-      </View>
+      <AppHeader title={t('helpRequests.title')} />
 
       {isLoading ? (
         <View className="flex-1 items-center justify-center">
@@ -68,10 +68,9 @@ export default function HelpRequestsScreen() {
           <Section title={`Active (${grouped.active.length})`} items={grouped.active} />
           <Section title={`Completed (${grouped.completed.length})`} items={grouped.completed} />
           {(data ?? []).length === 0 ? (
-            <View className="bg-white rounded-2xl p-8 items-center mt-4">
-              <Text className="text-5xl mb-3">🙋</Text>
-              <Text className="text-gray-700 font-semibold text-base">No help requests yet</Text>
-            </View>
+            <Card padding="none" className="mt-4">
+              <EmptyState icon="hand-left-outline" title="No help requests yet" />
+            </Card>
           ) : null}
         </ScrollView>
       )}
@@ -90,7 +89,9 @@ function Section({ title, items }: { title: string; items: HelpRequest[] }) {
           onPress={() => router.push(`/help-requests/${r.id}` as any)}
           className="bg-white rounded-2xl p-4 flex-row items-center gap-3 shadow-sm"
         >
-          <Text className="text-3xl">{ICONS[r.category] ?? '🆘'}</Text>
+          <View className="w-11 h-11 rounded-full bg-primary-50 items-center justify-center">
+            <Ionicons name={ICONS[r.category] ?? 'help-buoy-outline'} size={20} color={colors.primary[500]} />
+          </View>
           <View className="flex-1">
             <Text className="text-base font-semibold text-gray-900">{LABELS[r.category] ?? r.category}</Text>
             <Text className="text-xs text-gray-500 mt-0.5">

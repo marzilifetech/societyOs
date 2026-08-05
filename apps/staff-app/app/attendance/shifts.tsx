@@ -58,6 +58,9 @@ export default function ShiftsScreen() {
         <FlatList
           data={shifts}
           keyExtractor={(s) => s.id}
+          initialNumToRender={10}
+          maxToRenderPerBatch={10}
+          windowSize={7}
           contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 32 }}
           ItemSeparatorComponent={() => <View className="h-3" />}
           renderItem={({ item }) => {

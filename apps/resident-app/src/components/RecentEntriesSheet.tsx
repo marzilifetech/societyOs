@@ -73,6 +73,9 @@ export function RecentEntriesSheet({
             <FlatList
               data={visitors}
               keyExtractor={(v) => v.id}
+              initialNumToRender={10}
+              maxToRenderPerBatch={10}
+              windowSize={7}
               contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 16 }}
               ItemSeparatorComponent={() => (
                 <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: '#F3F4F6', marginLeft: 64 }} />

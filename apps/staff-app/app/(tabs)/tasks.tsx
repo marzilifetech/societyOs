@@ -23,6 +23,9 @@ import { PriorityBadge } from '../../src/components/task/PriorityBadge';
 import { TaskEmptyState } from '../../src/components/task/TaskEmptyState';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import MapView, { Marker } from 'react-native-maps';
+import { colors } from '@societyos/theme';
+import { Card, FilterChips, StatusChip } from '../../src/components/ui';
+import { TASK_STATUS_TONES, toneFor } from '../../src/lib/status-theme';
 
 const FILTER_IDS = ['all', 'pending', 'inProgress', 'completed'] as const;
 type FilterId = (typeof FILTER_IDS)[number];
@@ -34,14 +37,6 @@ const LEGACY_TO_ID: Record<string, FilterId> = {
   Pending: 'pending',
   'In Progress': 'inProgress',
   Completed: 'completed',
-};
-
-const STATUS_STYLE: Record<string, { color: string; bg: string }> = {
-  PENDING: { color: 'text-blue-700 dark:text-blue-300', bg: 'bg-blue-100 dark:bg-blue-950/60' },
-  ASSIGNED: { color: 'text-purple-700 dark:text-purple-300', bg: 'bg-purple-100 dark:bg-purple-950/60' },
-  IN_PROGRESS: { color: 'text-amber-700 dark:text-amber-300', bg: 'bg-amber-100 dark:bg-amber-950/60' },
-  COMPLETED: { color: 'text-green-700 dark:text-green-300', bg: 'bg-green-100 dark:bg-green-950/60' },
-  REJECTED: { color: 'text-red-700 dark:text-red-300', bg: 'bg-red-100 dark:bg-red-950/60' },
 };
 
 const FILTER_MAP: Record<FilterId, string[]> = {
@@ -106,7 +101,7 @@ export default function TasksScreen() {
     <SafeAreaView className="flex-1 bg-gray-50 dark:bg-gray-950">
       <View className="px-6 pt-6 pb-4">
         <View className="flex-row items-center justify-between mb-4">
-          <Text className="text-2xl font-bold text-gray-900 dark:text-gray-100">{t('tasks.title')}</Text>
+          <Text className="text-2xl font-heading text-gray-900 dark:text-gray-100">{t('tasks.title')}</Text>
           <View className="flex-row bg-gray-200 dark:bg-gray-800 rounded-full p-0.5">
             <TouchableOpacity
               className={`px-3 py-1 rounded-full ${view === 'list' ? 'bg-white dark:bg-gray-900' : ''}`}
@@ -123,30 +118,17 @@ export default function TasksScreen() {
           </View>
         </View>
 
-        <View className="flex-row gap-2 mb-2">
-          {FILTER_IDS.map((fid) => (
-            <TouchableOpacity
-              key={fid}
-              className={`px-3 py-1.5 rounded-full border ${
-                filter === fid
-                  ? 'bg-primary-500 dark:bg-primary-600 border-primary-500 dark:border-primary-600'
-                  : 'bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700'
-              }`}
-              onPress={() => setFilter(fid)}
-            >
-              <Text
-                className={`text-xs font-medium ${filter === fid ? 'text-white' : 'text-gray-600 dark:text-gray-300'}`}
-              >
-                {t(`tasks.filters.${fid}`)}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+        <FilterChips
+          className="mb-2"
+          options={FILTER_IDS.map((fid) => ({ id: fid, label: t(`tasks.filters.${fid}`) }))}
+          selected={filter}
+          onSelect={setFilter}
+        />
       </View>
 
       {isLoading ? (
         <View className="flex-1 items-center justify-center">
-          <ActivityIndicator color="#821A52" />
+          <ActivityIndicator color={colors.primary[500]} />
         </View>
       ) : view === 'map' ? (
         <MapTaskView tasks={filtered} />
@@ -156,6 +138,9 @@ export default function TasksScreen() {
         <FlatList
           data={filtered}
           keyExtractor={(task) => task.id}
+          initialNumToRender={10}
+          maxToRenderPerBatch={10}
+          windowSize={7}
           contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 32 }}
           ItemSeparatorComponent={() => <View className="h-3" />}
           refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={onRefresh} />}
@@ -183,7 +168,6 @@ function TaskRow({
 }) {
   const { t } = useTranslation(undefined, { i18n: i18nInstance });
   const loc = localeTag(i18nInstance.language);
-  const style = STATUS_STYLE[item.status] ?? STATUS_STYLE.PENDING;
   const statusKey = ['PENDING', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'REJECTED'].includes(item.status)
     ? item.status
     : 'PENDING';
@@ -193,8 +177,8 @@ function TaskRow({
     <TouchableOpacity
       activeOpacity={0.85}
       onPress={() => router.push(`/tasks/${item.id}` as any)}
-      className="bg-white dark:bg-gray-900 rounded-2xl p-4 shadow-sm border border-transparent dark:border-gray-800"
     >
+      <Card>
       <View className="flex-row items-start justify-between mb-2">
         <View className="flex-1 mr-3">
           <Text className="text-sm font-semibold text-gray-900 dark:text-gray-100">{item.category}</Text>
@@ -204,9 +188,7 @@ function TaskRow({
             </Text>
           )}
         </View>
-        <View className={`rounded-full px-2.5 py-1 ${style.bg}`}>
-          <Text className={`text-xs font-semibold ${style.color}`}>{statusLabel}</Text>
-        </View>
+        <StatusChip tone={toneFor(TASK_STATUS_TONES, statusKey, 'PENDING')} label={statusLabel} />
       </View>
 
       <Text className="text-sm text-gray-600 dark:text-gray-400 mb-3 leading-5" numberOfLines={2}>
@@ -233,7 +215,7 @@ function TaskRow({
 
       {item.status === 'ASSIGNED' && (
         <TouchableOpacity
-          className="bg-amber-500 dark:bg-amber-600 rounded-xl py-2.5 items-center"
+          className="bg-amber-500 dark:bg-amber-600 rounded-full py-2.5 items-center"
           onPress={() => onUpdate('IN_PROGRESS')}
           disabled={loading}
         >
@@ -242,7 +224,7 @@ function TaskRow({
       )}
       {item.status === 'IN_PROGRESS' && (
         <TouchableOpacity
-          className="bg-green-500 dark:bg-green-600 rounded-xl py-2.5 items-center"
+          className="bg-green-500 dark:bg-green-600 rounded-full py-2.5 items-center"
           onPress={() =>
             Alert.alert(t('tasks.completeTitle'), t('tasks.completeConfirm'), [
               { text: t('common.cancel'), style: 'cancel' },
@@ -254,6 +236,7 @@ function TaskRow({
           <Text className="text-white font-semibold text-sm">{t('tasks.markComplete')}</Text>
         </TouchableOpacity>
       )}
+      </Card>
     </TouchableOpacity>
   );
 }

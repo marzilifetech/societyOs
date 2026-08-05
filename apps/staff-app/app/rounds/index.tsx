@@ -2,11 +2,12 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, Alert } from 'react-native';
-import { router, Stack } from 'expo-router';
+import { Stack } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../src/lib/api';
 import { ErrorCard } from '../../src/components/ErrorCard';
+import { AppHeader, Card, EmptyState } from '../../src/components/ui';
 
 type StaffRoundsResponse = { items: unknown[]; message?: string };
 
@@ -111,13 +112,7 @@ export default function RoundsScreen() {
     <SafeAreaView className="flex-1 bg-gray-50" edges={['top']}>
       <Stack.Screen options={{ headerShown: false }} />
 
-      {/* Header */}
-      <View className="bg-primary-500 px-5 py-4 flex-row items-center">
-        <TouchableOpacity onPress={() => router.back()} className="w-10 h-10 items-center justify-center">
-          <Text className="text-white text-2xl">‹</Text>
-        </TouchableOpacity>
-        <Text className="text-white text-lg font-bold ml-2">Security Rounds</Text>
-      </View>
+      <AppHeader title="Security Rounds" />
 
       <ScrollView className="flex-1" contentContainerClassName="p-5 gap-4" showsVerticalScrollIndicator={false}>
         {roundsError ? (
@@ -178,9 +173,9 @@ export default function RoundsScreen() {
             Completed Today ({rounds.length})
           </Text>
           {rounds.length === 0 ? (
-            <View className="bg-white rounded-2xl p-6 items-center">
-              <Text className="text-gray-400 text-sm">No rounds logged yet</Text>
-            </View>
+            <Card padding="none">
+              <EmptyState icon="walk-outline" title="No rounds logged yet" />
+            </Card>
           ) : (
             <View className="gap-3">
               {rounds.map((r, i) => (

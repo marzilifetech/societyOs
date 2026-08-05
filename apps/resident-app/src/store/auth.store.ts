@@ -78,11 +78,21 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   hydrate: async () => {
+    // Read all keys in PARALLEL, and cap each read so a slow/broken device
+    // Keystore can never leave the app trapped on the splash screen. Hydration
+    // MUST resolve — the RootLayout gate blocks the whole UI on `isHydrated`.
+    const read = (key: string): Promise<string | null> =>
+      Promise.race([
+        SecureStore.getItemAsync(key).catch(() => null),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500)),
+      ]);
     try {
-      const token = await SecureStore.getItemAsync('auth_token');
-      const refreshToken = await SecureStore.getItemAsync('refresh_token');
-      const societyId = await SecureStore.getItemAsync('society_id');
-      const userJson = await SecureStore.getItemAsync('auth_user');
+      const [token, refreshToken, societyId, userJson] = await Promise.all([
+        read('auth_token'),
+        read('refresh_token'),
+        read('society_id'),
+        read('auth_user'),
+      ]);
       if (token && societyId && userJson) {
         setApiTokens(token, refreshToken);
         set({
@@ -94,6 +104,8 @@ export const useAuthStore = create<AuthState>((set) => ({
         });
         return;
       }
+    } catch {
+      /* fall through — always mark hydrated below so the UI can render */
     } finally {
       set({ isHydrated: true });
     }

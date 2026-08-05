@@ -226,13 +226,14 @@ export class AdminService {
       where: { id: userId },
       data: { status: UserStatus.ACTIVE },
     });
-    if (user.fcmToken) {
-      await this.notificationService.sendToToken(user.fcmToken, {
-        title: 'Welcome to the Society!',
-        body: 'Your account has been approved. You can now access all resident features.',
-        data: { type: 'RESIDENT_APPROVED' },
-      });
-    }
+    // Full push pipeline (category-aware, logged to the inbox); token
+    // resolution — Device rows + legacy fcmToken — happens inside it.
+    await this.notificationService.notifyUser(
+      userId,
+      'Welcome to the Society!',
+      'Your account has been approved. You can now access all resident features.',
+      { category: 'account_auth', data: { type: 'RESIDENT_APPROVED' } },
+    );
     return user;
   }
 
@@ -242,13 +243,14 @@ export class AdminService {
       where: { id: userId },
       data: { status: UserStatus.REJECTED, adminNote: reason },
     });
-    if (user.fcmToken) {
-      await this.notificationService.sendToToken(user.fcmToken, {
-        title: 'Registration Update',
-        body: `Your resident registration was not approved. Reason: ${reason}. Please contact society office.`,
-        data: { type: 'RESIDENT_REJECTED', reason },
-      });
-    }
+    // Full push pipeline (category-aware, logged to the inbox); token
+    // resolution — Device rows + legacy fcmToken — happens inside it.
+    await this.notificationService.notifyUser(
+      userId,
+      'Registration Update',
+      `Your resident registration was not approved. Reason: ${reason}. Please contact society office.`,
+      { category: 'account_auth', data: { type: 'RESIDENT_REJECTED', reason } },
+    );
     return user;
   }
 

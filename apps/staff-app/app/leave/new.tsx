@@ -4,9 +4,11 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
+import { Ionicons } from '@expo/vector-icons';
 import i18nInstance from '../../src/lib/i18n';
 import { api } from '../../src/lib/api';
 import { DateField } from '../../src/components/common/DateField';
+import { AppHeader } from '../../src/components/ui';
 
 const LEAVE_TYPES = [
   { value: 'CASUAL', label: 'Casual', balanceKey: 'casual' as const },
@@ -97,15 +99,10 @@ export default function LeaveRequestScreen() {
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-white">
+    <SafeAreaView className="flex-1 bg-white" edges={['top']}>
+      <AppHeader title={t('leave.requestTitle')} subtitle={t('leave.requestSubtitle')} />
       <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-        <View className="px-6 pt-4 pb-8">
-          <TouchableOpacity onPress={() => router.back()}>
-            <Text className="text-primary-500 text-base mb-4">← Back</Text>
-          </TouchableOpacity>
-          <Text className="text-2xl font-bold text-gray-900 mb-1">{t('leave.requestTitle')}</Text>
-          <Text className="text-gray-500 mb-6">{t('leave.requestSubtitle')}</Text>
-
+        <View className="px-6 pt-6 pb-8">
           {/* Leave type chips */}
           <Text className="text-sm font-medium text-gray-700 mb-3">Leave Type *</Text>
           <View className="flex-row flex-wrap gap-2 mb-6">
@@ -221,7 +218,9 @@ export default function LeaveRequestScreen() {
       <Modal visible={showSuccess} transparent animationType="fade">
         <View className="flex-1 items-center justify-center bg-black/30">
           <View className="bg-white rounded-2xl px-6 py-5 items-center shadow-lg">
-            <Text className="text-3xl mb-2">✅</Text>
+            <View className="w-12 h-12 rounded-full bg-green-100 items-center justify-center mb-2">
+              <Ionicons name="checkmark" size={26} color="#16A34A" />
+            </View>
             <Text className="text-base font-semibold text-gray-900">Submitted</Text>
             <Text className="text-xs text-gray-500 mt-1">Your leave request was sent</Text>
           </View>

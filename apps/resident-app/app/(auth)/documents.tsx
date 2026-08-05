@@ -33,6 +33,15 @@ type UploadState = {
 
 const EMPTY: UploadState = { localUri: '', mime: '', s3Url: '', uploading: false, error: null };
 
+// Soft card shadow matching the redesign-kit RoundCard surface.
+const cardShadow = {
+  shadowColor: '#000',
+  shadowOffset: { width: 0, height: 6 },
+  shadowOpacity: 0.06,
+  shadowRadius: 14,
+  elevation: 2,
+} as const;
+
 async function uploadKycDocument(uri: string, contentType: string): Promise<string> {
   // KYC documents are sensitive → upload as PRIVATE through the Marzi media
   // service. Private assets have no public_url, so we persist the S3 key
@@ -131,7 +140,7 @@ function UploadField({
   };
 
   return (
-    <View className="bg-gray-50 rounded-2xl p-5 mb-4 border border-gray-200">
+    <View className="bg-white rounded-2xl p-5 mb-4 border border-gray-100" style={cardShadow}>
       <Text className="text-gray-900 text-base font-semibold mb-1">{label}</Text>
       <Text className="text-gray-400 text-sm mb-4">{subtitle}</Text>
 
@@ -205,14 +214,14 @@ function UploadField({
         <View className="flex-row" style={{ gap: 10 }}>
           <TouchableOpacity
             onPress={() => handlePick('camera')}
-            className="flex-1 bg-primary-500 rounded-2xl h-[52px] items-center justify-center flex-row"
+            className="flex-1 bg-primary-500 rounded-full h-[52px] items-center justify-center flex-row"
           >
             <Ionicons name="camera-outline" size={18} color="#FFFFFF" />
             <Text className="text-white text-base font-semibold ml-2">Take Photo</Text>
           </TouchableOpacity>
           <TouchableOpacity
             onPress={() => handlePick('library')}
-            className="flex-1 bg-gray-100 rounded-2xl h-[52px] items-center justify-center border border-gray-200 flex-row"
+            className="flex-1 bg-gray-100 rounded-full h-[52px] items-center justify-center border border-gray-200 flex-row"
           >
             <Ionicons name="cloud-upload-outline" size={18} color="#374151" />
             <Text className="text-gray-700 text-base font-semibold ml-2">From Gallery</Text>
@@ -318,7 +327,7 @@ export default function DocumentsScreen() {
           </Text>
           <TouchableOpacity
             onPress={() => router.replace('/(auth)/profile-setup')}
-            className="bg-primary-500 rounded-2xl h-14 items-center justify-center"
+            className="bg-primary-500 rounded-full h-14 items-center justify-center"
           >
             <Text className="text-white text-base font-bold">Complete Home Details</Text>
           </TouchableOpacity>
@@ -349,7 +358,7 @@ export default function DocumentsScreen() {
         </Text>
 
         {/* Aadhaar number */}
-        <View className="bg-gray-50 rounded-2xl p-5 mb-4 border border-gray-200">
+        <View className="bg-white rounded-2xl p-5 mb-4 border border-gray-100" style={cardShadow}>
           <Text className="text-gray-900 text-base font-semibold mb-1">Aadhaar number</Text>
           <Text className="text-gray-400 text-sm mb-4">12 digits, no spaces</Text>
           <TextInput
@@ -369,7 +378,7 @@ export default function DocumentsScreen() {
         </View>
 
         {/* PAN number */}
-        <View className="bg-gray-50 rounded-2xl p-5 mb-4 border border-gray-200">
+        <View className="bg-white rounded-2xl p-5 mb-4 border border-gray-100" style={cardShadow}>
           <Text className="text-gray-900 text-base font-semibold mb-1">PAN number</Text>
           <Text className="text-gray-400 text-sm mb-4">10 characters, e.g. ABCDE1234F</Text>
           <TextInput
@@ -414,7 +423,7 @@ export default function DocumentsScreen() {
         <TouchableOpacity
           onPress={() => mutation.mutate()}
           disabled={!canSubmit || mutation.isPending}
-          className={`rounded-2xl h-14 items-center justify-center mt-2 mb-4 ${
+          className={`rounded-full h-14 items-center justify-center mt-2 mb-4 ${
             canSubmit ? 'bg-primary-500' : 'bg-primary-200'
           }`}
         >

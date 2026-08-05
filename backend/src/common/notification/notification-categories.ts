@@ -28,6 +28,25 @@ export type NotificationAudience = 'resident' | 'staff' | 'admin';
  */
 export type NotificationType = 'MARKETING' | 'DELIVERY' | 'EMERGENCY';
 
+/**
+ * Android notification channel ids. The apps create ALL of these on startup
+ * and the backend routes every push to exactly one of them:
+ *
+ *   emergency_sos — MAX importance, bypassDnd, public lockscreen
+ *   approvals     — HIGH; visitor/delivery/help/task approvals + approval_results
+ *   deliveries    — HIGH
+ *   community     — DEFAULT; notices, events, polls, welfare (replaces legacy 'marketing')
+ *   payments      — DEFAULT
+ *   system        — DEFAULT/LOW; account_auth, app updates, misc
+ */
+export type NotificationChannelId =
+  | 'emergency_sos'
+  | 'approvals'
+  | 'deliveries'
+  | 'community'
+  | 'payments'
+  | 'system';
+
 export interface NotificationCategory {
   key: string;
   /**
@@ -35,6 +54,12 @@ export interface NotificationCategory {
    * level. See the {@link NotificationType} doc for behavior per type.
    */
   type: NotificationType;
+  /**
+   * Android channel this category's pushes are routed to. The apps register
+   * the full {@link NotificationChannelId} set; `buildMessage` in
+   * push.service.ts prefers this over the coarse `type` mapping.
+   */
+  channelId: NotificationChannelId;
   label: string;
   description: string;
   /** Shipped default when the user has no explicit preference row. */
@@ -51,6 +76,7 @@ export interface NotificationCategory {
 export const NOTIFICATION_CATEGORIES: NotificationCategory[] = [
   {
     key: 'visitors_gate',
+    channelId: 'approvals',
     type: 'DELIVERY',
     label: 'Visitor arrivals',
     description: 'A guest or cab has arrived at the gate for your approval.',
@@ -62,6 +88,7 @@ export const NOTIFICATION_CATEGORIES: NotificationCategory[] = [
   },
   {
     key: 'deliveries',
+    channelId: 'deliveries',
     type: 'DELIVERY',
     label: 'Deliveries & parcels',
     description: 'A delivery agent is at the gate, or a parcel is held for you.',
@@ -73,6 +100,7 @@ export const NOTIFICATION_CATEGORIES: NotificationCategory[] = [
   },
   {
     key: 'daily_help',
+    channelId: 'community',
     type: 'MARKETING',
     label: 'Daily help & vendors',
     description: 'Maid, cook, driver, milk and other recurring vendor entries.',
@@ -84,6 +112,7 @@ export const NOTIFICATION_CATEGORIES: NotificationCategory[] = [
   },
   {
     key: 'family_vehicle',
+    channelId: 'community',
     type: 'MARKETING',
     label: 'Family & vehicle',
     description: 'Family member, child or vehicle entry and exit.',
@@ -95,6 +124,7 @@ export const NOTIFICATION_CATEGORIES: NotificationCategory[] = [
   },
   {
     key: 'complaints',
+    channelId: 'system',
     type: 'MARKETING',
     label: 'Complaints & service requests',
     description: 'Updates on your complaints and service requests.',
@@ -106,6 +136,7 @@ export const NOTIFICATION_CATEGORIES: NotificationCategory[] = [
   },
   {
     key: 'notices',
+    channelId: 'community',
     type: 'MARKETING',
     label: 'Notices & announcements',
     description: 'General society notices and announcements.',
@@ -117,6 +148,7 @@ export const NOTIFICATION_CATEGORIES: NotificationCategory[] = [
   },
   {
     key: 'notices_urgent',
+    channelId: 'community',
     // Urgent notices reach residents loudly but they are NOT emergencies in
     // the SOS sense — the user opted into society-admin authored "critical"
     // notices. Route them as DELIVERY (lockscreen + heads-up) so they break
@@ -134,6 +166,7 @@ export const NOTIFICATION_CATEGORIES: NotificationCategory[] = [
   },
   {
     key: 'community',
+    channelId: 'community',
     type: 'MARKETING',
     label: 'Community & celebrations',
     description: 'Events, polls and birthday/anniversary celebrations.',
@@ -145,6 +178,7 @@ export const NOTIFICATION_CATEGORIES: NotificationCategory[] = [
   },
   {
     key: 'payments_dues',
+    channelId: 'payments',
     type: 'MARKETING',
     label: 'Payments & dues',
     description: 'Maintenance dues, invoices and payment receipts.',
@@ -156,6 +190,7 @@ export const NOTIFICATION_CATEGORIES: NotificationCategory[] = [
   },
   {
     key: 'emergency_sos',
+    channelId: 'emergency_sos',
     type: 'EMERGENCY',
     label: 'Emergency & SOS',
     description: 'Panic / SOS alerts. Always on.',
@@ -167,6 +202,7 @@ export const NOTIFICATION_CATEGORIES: NotificationCategory[] = [
   },
   {
     key: 'staff_tasks',
+    channelId: 'approvals',
     type: 'MARKETING',
     label: 'Duty & tasks',
     description: 'Patrol reminders, shift handovers and task assignments.',
@@ -178,6 +214,7 @@ export const NOTIFICATION_CATEGORIES: NotificationCategory[] = [
   },
   {
     key: 'approval_results',
+    channelId: 'approvals',
     type: 'DELIVERY',
     label: 'Approval outcomes',
     description: 'Resident decisions on visitors you logged. Always on.',
@@ -189,6 +226,7 @@ export const NOTIFICATION_CATEGORIES: NotificationCategory[] = [
   },
   {
     key: 'account_auth',
+    channelId: 'system',
     type: 'DELIVERY',
     label: 'Account & security',
     description: 'OTP, logins and role changes. Always on.',

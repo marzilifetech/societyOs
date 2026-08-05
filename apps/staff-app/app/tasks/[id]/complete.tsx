@@ -15,8 +15,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
+import { colors } from '@societyos/theme';
 import { api } from '../../../src/lib/api';
 import { compressImage, uploadToPresigned } from '../../../src/lib/upload';
+import { AppHeader } from '../../../src/components/ui';
 
 export default function CompleteWorkScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -76,18 +78,18 @@ export default function CompleteWorkScreen() {
 
   if (done) {
     return (
-      <SafeAreaView className="flex-1 bg-white items-center justify-center px-8">
+      <SafeAreaView className="flex-1 bg-white dark:bg-gray-950 items-center justify-center px-8">
         <Stack.Screen options={{ headerShown: false }} />
-        <View className="w-20 h-20 rounded-3xl bg-green-100 items-center justify-center mb-6">
+        <View className="w-20 h-20 rounded-full bg-green-100 dark:bg-green-950/60 items-center justify-center mb-6">
           <Ionicons name="checkmark-circle" size={48} color="#15803D" />
         </View>
-        <Text className="text-gray-900 text-2xl font-bold mb-2 text-center">Work Completed</Text>
-        <Text className="text-gray-500 text-sm text-center mb-8">
+        <Text className="text-gray-900 dark:text-gray-100 text-2xl font-heading mb-2 text-center">Work Completed</Text>
+        <Text className="text-gray-500 dark:text-gray-400 text-sm text-center mb-8">
           Awaiting resident confirmation. You'll be notified once they confirm.
         </Text>
         <TouchableOpacity
           onPress={() => router.back()}
-          className="bg-primary-500 rounded-2xl px-8 py-4 w-full items-center"
+          className="bg-primary-500 dark:bg-primary-600 rounded-full px-8 py-4 w-full items-center"
           style={{ minHeight: 56 }}
         >
           <Text className="text-white font-bold text-base">Back to Tasks</Text>
@@ -98,9 +100,9 @@ export default function CompleteWorkScreen() {
 
   if (isLoading || !task) {
     return (
-      <SafeAreaView className="flex-1 bg-white items-center justify-center">
+      <SafeAreaView className="flex-1 bg-white dark:bg-gray-950 items-center justify-center">
         <Stack.Screen options={{ title: 'Complete Work' }} />
-        <ActivityIndicator color="#821A52" />
+        <ActivityIndicator color={colors.primary[500]} />
       </SafeAreaView>
     );
   }
@@ -108,35 +110,30 @@ export default function CompleteWorkScreen() {
   const busy = uploading;
 
   return (
-    <SafeAreaView className="flex-1 bg-white">
+    <SafeAreaView className="flex-1 bg-white dark:bg-gray-950">
       <Stack.Screen options={{ headerShown: false }} />
-      <View className="bg-white px-5 py-4 flex-row items-center border-b border-gray-200">
-        <TouchableOpacity onPress={() => router.back()} className="w-10 h-10 items-center justify-center">
-          <Ionicons name="chevron-back" size={24} color="#821A52" />
-        </TouchableOpacity>
-        <Text className="text-gray-900 text-lg font-bold ml-2">Complete Work</Text>
-      </View>
+      <AppHeader title="Complete Work" />
 
       <ScrollView className="flex-1" contentContainerClassName="p-5 gap-4" keyboardShouldPersistTaps="handled">
         {/* Task summary */}
-        <View className="bg-gray-50 rounded-2xl p-5 border border-gray-200">
+        <View className="bg-gray-50 dark:bg-gray-900 rounded-2xl p-5 border border-gray-200 dark:border-gray-800">
           <View className="flex-row items-center mb-1">
             <Ionicons name="clipboard" size={12} color="#6B7280" />
-            <Text className="text-xs text-gray-500 uppercase tracking-wider ml-1">{task.category}</Text>
+            <Text className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider ml-1">{task.category}</Text>
           </View>
-          <Text className="text-gray-900 text-base font-semibold">
+          <Text className="text-gray-900 dark:text-gray-100 text-base font-semibold">
             {task.requestedBy?.name ?? 'Resident'} · Flat {task.unit?.flatNumber ?? '—'}
           </Text>
-          <Text className="text-gray-500 text-sm mt-2">{task.description}</Text>
+          <Text className="text-gray-500 dark:text-gray-400 text-sm mt-2">{task.description}</Text>
         </View>
 
         {/* After photos */}
-        <View className="bg-gray-50 rounded-2xl p-5 border border-gray-200">
+        <View className="bg-gray-50 dark:bg-gray-900 rounded-2xl p-5 border border-gray-200 dark:border-gray-800">
           <View className="flex-row items-center justify-between mb-1">
-            <Text className="text-gray-900 font-semibold">After Photos</Text>
-            <Text className="text-gray-400 text-xs">{afterPhotos.length}/5</Text>
+            <Text className="text-gray-900 dark:text-gray-100 font-semibold">After Photos</Text>
+            <Text className="text-gray-400 dark:text-gray-500 text-xs">{afterPhotos.length}/5</Text>
           </View>
-          <Text className="text-gray-500 text-xs mb-4">Required — show completed work</Text>
+          <Text className="text-gray-500 dark:text-gray-400 text-xs mb-4">Required — show completed work</Text>
 
           {afterPhotos.length > 0 && (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-3">
@@ -161,35 +158,35 @@ export default function CompleteWorkScreen() {
           <TouchableOpacity
             onPress={pickPhoto}
             disabled={busy || afterPhotos.length >= 5}
-            className="border-2 border-dashed border-gray-200 rounded-xl py-6 items-center gap-1"
+            className="border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-xl py-6 items-center gap-1"
           >
-            <Ionicons name="camera-outline" size={28} color="#821A52" />
-            <Text className="text-gray-500 text-sm font-semibold">
+            <Ionicons name="camera-outline" size={28} color={colors.primary[500]} />
+            <Text className="text-gray-500 dark:text-gray-400 text-sm font-semibold">
               {afterPhotos.length === 0 ? 'Take After Photo' : 'Add Another'}
             </Text>
           </TouchableOpacity>
         </View>
 
         {/* Notes */}
-        <View className="bg-gray-50 rounded-2xl p-5 border border-gray-200">
-          <Text className="text-gray-900 font-semibold mb-3">Work Notes</Text>
+        <View className="bg-gray-50 dark:bg-gray-900 rounded-2xl p-5 border border-gray-200 dark:border-gray-800">
+          <Text className="text-gray-900 dark:text-gray-100 font-semibold mb-3">Work Notes</Text>
           <TextInput
             value={notes}
             onChangeText={setNotes}
             placeholder="Describe what was done…"
             placeholderTextColor="#9CA3AF"
-            className="bg-gray-100 rounded-xl p-4 text-gray-900 text-sm"
+            className="bg-gray-100 dark:bg-gray-800 rounded-xl p-4 text-gray-900 dark:text-gray-100 text-sm"
             style={{ minHeight: 100, textAlignVertical: 'top' }}
             multiline
           />
         </View>
       </ScrollView>
 
-      <View className="px-5 py-4 bg-white border-t border-gray-200">
+      <View className="px-5 py-4 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800">
         <TouchableOpacity
           onPress={handleComplete}
           disabled={busy || afterPhotos.length === 0}
-          className={`rounded-2xl items-center py-4 flex-row justify-center ${afterPhotos.length === 0 ? 'bg-gray-200' : 'bg-primary-500'}`}
+          className={`rounded-full items-center py-4 flex-row justify-center ${afterPhotos.length === 0 ? 'bg-gray-200 dark:bg-gray-700' : 'bg-primary-500 dark:bg-primary-600'}`}
           style={{ minHeight: 56 }}
         >
           {busy ? (

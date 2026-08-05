@@ -1,9 +1,15 @@
+import type { ComponentProps } from 'react';
 import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
 import { router, Stack } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
+import { Ionicons } from '@expo/vector-icons';
+import { colors } from '@societyos/theme';
 import i18nInstance from '../../src/lib/i18n';
 import { useSettingsStore } from '../../src/store/settings.store';
+import { AppHeader } from '../../src/components/ui';
+
+type RowIcon = ComponentProps<typeof Ionicons>['name'];
 
 export default function SettingsScreen() {
   const { t } = useTranslation(undefined, { i18n: i18nInstance });
@@ -12,36 +18,31 @@ export default function SettingsScreen() {
   return (
     <SafeAreaView className="flex-1 bg-gray-50 dark:bg-gray-950" edges={['top']}>
       <Stack.Screen options={{ headerShown: false }} />
-      <View className="bg-primary-500 px-5 py-4 flex-row items-center">
-        <TouchableOpacity onPress={() => router.back()} className="w-10 h-10 items-center justify-center">
-          <Text className="text-white text-2xl">‹</Text>
-        </TouchableOpacity>
-        <Text className="text-white text-lg font-bold ml-2">{t('settings.title')}</Text>
-      </View>
+      <AppHeader title={t('settings.title')} />
       <ScrollView className="flex-1" contentContainerClassName="p-5 gap-3 bg-gray-50 dark:bg-gray-950">
         <Group>
-          <Row icon="🔔" label={t('settings.notifications')} onPress={() => router.push('/settings/notifications' as any)} />
-          <Row icon="🌐" label={t('settings.language')} onPress={() => router.push('/settings/language' as any)} />
+          <Row icon="notifications-outline" label={t('settings.notifications')} onPress={() => router.push('/settings/notifications' as any)} />
+          <Row icon="globe-outline" label={t('settings.language')} onPress={() => router.push('/settings/language' as any)} />
         </Group>
 
         <Group>
           <ToggleRow
-            icon="🌙"
+            icon="moon-outline"
             label={t('settings.theme')}
             value={theme === 'dark'}
             onValueChange={(v) => setTheme(v ? 'dark' : 'light')}
             hint={theme === 'system' ? t('settings.system') : theme === 'dark' ? t('settings.dark') : t('settings.light')}
           />
-          <ToggleRow icon="🔠" label={t('settings.largeText')} value={largeText} onValueChange={setLargeText} />
+          <ToggleRow icon="text-outline" label={t('settings.largeText')} value={largeText} onValueChange={setLargeText} />
           <ToggleRow
-            icon="📶"
+            icon="cellular-outline"
             label={t('settings.dataSaver')}
             value={dataSaver}
             onValueChange={setDataSaver}
             hint={t('settings.dataSaverHint')}
           />
           <Row
-            icon="🔒"
+            icon="lock-closed-outline"
             label={t('settings.biometric')}
             onPress={() => router.push('/settings/notifications' as any)}
             value={biometricEnabled ? t('settings.on') : t('settings.off')}
@@ -49,8 +50,8 @@ export default function SettingsScreen() {
         </Group>
 
         <Group>
-          <Row icon="❓" label={t('settings.help')} onPress={() => router.push('/settings/help' as any)} />
-          <Row icon="ℹ️" label={t('settings.about')} onPress={() => router.push('/settings/about' as any)} />
+          <Row icon="help-circle-outline" label={t('settings.help')} onPress={() => router.push('/settings/help' as any)} />
+          <Row icon="information-circle-outline" label={t('settings.about')} onPress={() => router.push('/settings/about' as any)} />
         </Group>
       </ScrollView>
     </SafeAreaView>
@@ -65,13 +66,21 @@ function Group({ children }: { children: React.ReactNode }) {
   );
 }
 
+function RowIconCircle({ icon }: { icon: RowIcon }) {
+  return (
+    <View className="w-8 h-8 rounded-full bg-primary-50 dark:bg-primary-900/50 items-center justify-center mr-3">
+      <Ionicons name={icon} size={16} color={colors.primary[500]} />
+    </View>
+  );
+}
+
 function Row({
   icon,
   label,
   onPress,
   value,
 }: {
-  icon: string;
+  icon: RowIcon;
   label: string;
   onPress: () => void;
   value?: string;
@@ -81,10 +90,10 @@ function Row({
       onPress={onPress}
       className="px-5 py-4 flex-row items-center border-b border-gray-50 dark:border-gray-800"
     >
-      <Text className="text-xl mr-3">{icon}</Text>
+      <RowIconCircle icon={icon} />
       <Text className="flex-1 text-sm font-medium text-gray-900 dark:text-gray-100">{label}</Text>
       {value ? <Text className="text-sm text-gray-500 dark:text-gray-400 mr-2">{value}</Text> : null}
-      <Text className="text-gray-300 dark:text-gray-600 text-lg">›</Text>
+      <Ionicons name="chevron-forward" size={16} color="#9CA3AF" />
     </TouchableOpacity>
   );
 }
@@ -96,7 +105,7 @@ function ToggleRow({
   onValueChange,
   hint,
 }: {
-  icon: string;
+  icon: RowIcon;
   label: string;
   value: boolean;
   onValueChange: (v: boolean) => void;
@@ -107,7 +116,7 @@ function ToggleRow({
       onPress={() => onValueChange(!value)}
       className="px-5 py-4 flex-row items-center border-b border-gray-50 dark:border-gray-800"
     >
-      <Text className="text-xl mr-3">{icon}</Text>
+      <RowIconCircle icon={icon} />
       <View className="flex-1">
         <Text className="text-sm font-medium text-gray-900 dark:text-gray-100">{label}</Text>
         {hint ? <Text className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{hint}</Text> : null}

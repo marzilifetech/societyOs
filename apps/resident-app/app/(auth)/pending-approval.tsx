@@ -7,6 +7,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
 import { useAuthStore } from '../../src/store/auth.store';
 
+// Soft card shadow matching the redesign-kit RoundCard surface.
+const cardShadow = {
+  shadowColor: '#000',
+  shadowOffset: { width: 0, height: 6 },
+  shadowOpacity: 0.06,
+  shadowRadius: 14,
+  elevation: 2,
+} as const;
+
 export default function PendingApprovalScreen() {
   const user = useAuthStore((s) => s.user);
   const updateUser = useAuthStore((s) => s.updateUser);
@@ -43,11 +52,16 @@ export default function PendingApprovalScreen() {
         phone: meQuery.data.phone,
         status: meQuery.data.status,
       });
-      if (meQuery.data.status === 'ACTIVE') {
+      // Only enter the tabs once the Resident profile actually EXISTS — /(tabs)
+      // requires it (ResidentProfileGuard 404s → sends users right back here).
+      // Redirecting on status alone made an ACTIVE user without a profile
+      // ping-pong between this screen and the tabs forever. When ACTIVE but no
+      // profile yet, stay put and show the "Complete Your Profile" flow below.
+      if (meQuery.data.status === 'ACTIVE' && profileQuery.data) {
         router.replace('/(tabs)');
       }
     }
-  }, [meQuery.data, updateUser]);
+  }, [meQuery.data, profileQuery.data, updateUser]);
 
   const residentProfile = profileQuery.data;
   const needsSetup = !profileQuery.isLoading && !residentProfile;
@@ -120,7 +134,7 @@ export default function PendingApprovalScreen() {
 
           {/* What happens next card */}
           {!meQuery.isLoading && !isRejected && (
-            <View className="bg-gray-50 rounded-2xl p-5 mb-4 border border-gray-200">
+            <View className="bg-white rounded-2xl p-5 mb-4 border border-gray-100" style={cardShadow}>
               <Text className="text-primary-500 text-xs font-bold tracking-widest uppercase mb-3">
                 What happens next
               </Text>
@@ -138,7 +152,7 @@ export default function PendingApprovalScreen() {
 
           {/* Resident profile card */}
           {residentProfile && (
-            <View className="bg-gray-50 rounded-2xl p-5 mb-4 border border-gray-200">
+            <View className="bg-white rounded-2xl p-5 mb-4 border border-gray-100" style={cardShadow}>
               <Text className="text-gray-900 text-lg font-bold mb-2">
                 {residentProfile.user?.name ?? user?.name ?? 'Resident'}
               </Text>
@@ -158,7 +172,7 @@ export default function PendingApprovalScreen() {
               a "Resident profile not found" error on submit. */}
           {needsSetup ? (
             <TouchableOpacity
-              className="bg-primary-500 rounded-2xl h-14 items-center justify-center mb-3"
+              className="bg-primary-500 rounded-full h-14 items-center justify-center mb-3"
               onPress={() => router.push('/(auth)/profile-setup')}
             >
               <Text className="text-white text-base font-bold">Complete Home Details</Text>
@@ -166,7 +180,7 @@ export default function PendingApprovalScreen() {
           ) : residentProfile?.documentsStatus !== 'UPLOADED' &&
             residentProfile?.documentsStatus !== 'VERIFIED' ? (
             <TouchableOpacity
-              className="bg-primary-50 rounded-2xl h-14 items-center justify-center mb-3 border border-primary-500"
+              className="bg-primary-50 rounded-full h-14 items-center justify-center mb-3 border border-primary-500"
               onPress={() => router.push('/(auth)/documents')}
             >
               <Text className="text-primary-500 text-base font-bold">Upload ID Documents</Text>
@@ -174,7 +188,7 @@ export default function PendingApprovalScreen() {
           ) : null}
 
           <TouchableOpacity
-            className="bg-gray-50 rounded-2xl h-14 items-center justify-center border border-gray-200"
+            className="bg-gray-50 rounded-full h-14 items-center justify-center border border-gray-200"
             onPress={handleSignOut}
           >
             <Text className="text-gray-500 text-base font-semibold">Use Another Number</Text>

@@ -104,6 +104,9 @@ export default function CommunityFeedScreen() {
         <FlatList
           data={posts}
           keyExtractor={(item) => item.id}
+          initialNumToRender={8}
+          maxToRenderPerBatch={8}
+          windowSize={7}
           renderItem={renderPost}
           contentContainerStyle={{ paddingTop: 4, paddingBottom: 100 }}
           showsVerticalScrollIndicator={false}

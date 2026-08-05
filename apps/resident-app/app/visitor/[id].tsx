@@ -3,14 +3,17 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import QRCode from 'react-native-qrcode-svg';
+import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
 import { useTheme } from '../../src/hooks/useTheme';
+import { StatusPill, type RdStatusTone } from '../../src/components/ui';
 
-const STATUS_COLOR: Record<string, string> = {
-  EXPECTED: 'bg-blue-100 text-blue-700',
-  CHECKED_IN: 'bg-green-100 text-green-700',
-  CHECKED_OUT: 'bg-gray-100 text-gray-600',
-  DENIED: 'bg-red-100 text-red-700',
+// Status chips follow the StatusPill soft-tone vocabulary.
+const STATUS_TONE: Record<string, RdStatusTone> = {
+  EXPECTED: 'pending',
+  CHECKED_IN: 'resolved',
+  CHECKED_OUT: 'neutral',
+  DENIED: 'cancelled',
 };
 
 export default function VisitorDetailScreen() {
@@ -35,7 +38,7 @@ export default function VisitorDetailScreen() {
   if (isLoading) {
     return (
       <SafeAreaView className="flex-1 bg-white items-center justify-center">
-        <ActivityIndicator size="large" color="#3B3FBF" />
+        <ActivityIndicator size="large" color={t.accentPrimary} />
       </SafeAreaView>
     );
   }
@@ -48,7 +51,7 @@ export default function VisitorDetailScreen() {
     );
   }
 
-  const statusClass = STATUS_COLOR[visitor.status] ?? 'bg-gray-100 text-gray-600';
+  const statusTone = STATUS_TONE[visitor.status] ?? 'neutral';
   const isPending = visitor.status === 'EXPECTED';
 
   return (
@@ -59,21 +62,20 @@ export default function VisitorDetailScreen() {
             onPress={() => router.back()}
             accessibilityRole="button"
             accessibilityLabel="Go back"
+            className="w-10 h-10 rounded-full bg-gray-50 items-center justify-center mb-4"
           >
-            <Text className="text-primary-500 mb-4" style={{ fontSize: t.fontBase }}>← Back</Text>
+            <Ionicons name="chevron-back" size={22} color="#111827" />
           </TouchableOpacity>
           <Text className="font-bold text-gray-900 mb-1" style={{ fontSize: t.font2xl }}>Visitor Pass</Text>
-          <View className={`self-start rounded-full px-3 py-1 mt-1 mb-6 ${statusClass.split(' ')[0]}`}>
-            <Text className={`font-semibold ${statusClass.split(' ')[1]}`} style={{ fontSize: t.fontSm }}>
-              {visitor.status.replace('_', ' ')}
-            </Text>
+          <View className="mt-1 mb-6">
+            <StatusPill label={visitor.status.replace('_', ' ')} tone={statusTone} />
           </View>
         </View>
 
         {/* Gate pass QR */}
         {isPending && visitor.qrToken && (
           <View className="items-center mb-8 px-6">
-            <View className="w-full rounded-3xl border border-gray-100 bg-white p-6 shadow-sm items-center">
+            <View className="w-full rounded-2xl border border-gray-100 bg-white p-6 shadow-sm items-center">
               <Text className="text-center font-semibold uppercase tracking-[2px] text-primary-500 mb-5" style={{ fontSize: t.fontSm }}>
                 Gate Pass
               </Text>
@@ -91,7 +93,7 @@ export default function VisitorDetailScreen() {
               </Text>
             </View>
             <TouchableOpacity
-              className="mt-4 bg-primary-50 rounded-xl px-5"
+              className="mt-4 bg-primary-50 rounded-full px-5"
               style={{ minHeight: t.touchTargetSm, justifyContent: 'center' }}
               onPress={() => {
                 const validLine = visitor.validTill

@@ -89,8 +89,11 @@ function ForegroundBannerBridge({
 
       // Delivery → full-screen takeover. Pull out the fields the modal needs;
       // the banner queue is skipped so the resident isn't distracted by
-      // two competing UIs.
-      if (dataType === 'DELIVERY_APPROVAL_REQUEST') {
+      // two competing UIs. Match BOTH the legacy payload key and the current
+      // category-registry key ('deliveries') the backend now sends, otherwise a
+      // real delivery arriving in the foreground falls through to the plain
+      // banner instead of the forced-decision modal.
+      if (dataType === 'DELIVERY_APPROVAL_REQUEST' || dataType === 'deliveries') {
         const visitId =
           typeof data.entityId === 'string'
             ? data.entityId
@@ -133,8 +136,14 @@ export default function RootLayout() {
   const hydrate = useAuthStore((s) => s.hydrate);
   const isHydrated = useAuthStore((s) => s.isHydrated);
   const token = useAuthStore((s) => s.token);
+  // Failsafe so the app can NEVER get trapped on the maroon splash. If either
+  // hydration or font loading stalls (device Keystore hiccup, a font asset that
+  // won't decode, etc.), we proceed anyway after a few seconds — fonts fall back
+  // to system defaults and a null token simply routes to the login flow. Far
+  // better than an infinite splash.
+  const [failsafeReady, setFailsafeReady] = useState(false);
 
-  const [fontsLoaded] = useFonts({
+  const [fontsLoaded, fontError] = useFonts({
     Montserrat_400Regular,
     Montserrat_500Medium,
     Montserrat_600SemiBold,
@@ -164,6 +173,22 @@ export default function RootLayout() {
     }
   }, [isHydrated]);
 
+  // Boot failsafe — if we're still gated after 3.5s, log WHY (so logcat reveals
+  // whether hydration or fonts stalled) and force the app past the splash.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const st = useAuthStore.getState();
+      if (!st.isHydrated || !fontsLoaded) {
+        console.warn(
+          `[boot] splash failsafe fired — isHydrated=${st.isHydrated} ` +
+            `fontsLoaded=${fontsLoaded} fontError=${fontError ? String(fontError) : 'none'}`,
+        );
+      }
+      setFailsafeReady(true);
+    }, 3500);
+    return () => clearTimeout(timer);
+  }, [fontsLoaded, fontError]);
+
   // Tap routing for notification responses (warm taps + cold start). Set up
   // once on mount; deep-links into the app via the router.
   useEffect(() => {
@@ -191,8 +216,11 @@ export default function RootLayout() {
   }, [isHydrated, token]);
 
   // Show a solid view matching the splash background — avoids a white flash
-  // while React commits the isHydrated state update.
-  if (!isHydrated || !fontsLoaded) return <View style={{ flex: 1, backgroundColor: '#3B3FBF' }} />;
+  // while React commits the isHydrated state update. `fontError` counts as
+  // "fonts done" (fall back to system fonts) and the failsafe timer guarantees
+  // we never hang here indefinitely.
+  const bootReady = (isHydrated && (fontsLoaded || !!fontError)) || failsafeReady;
+  if (!bootReady) return <View style={{ flex: 1, backgroundColor: '#6E0043' }} />;
 
   return (
     <ErrorBoundary>
@@ -222,17 +250,18 @@ function RootShell({ token }: { token: string | null }) {
       <NetworkBanner />
       {token ? <RealtimeProvider /> : null}
       <StatusBar style="auto" />
+      {/* Global "notifications are off" strip — IN-FLOW, above the navigator so
+          it pushes screens down instead of overlaying their headers (mirrors
+          NetworkBanner). Only rendered while authenticated so we don't pester a
+          brand new user before the primer modal has had its chance. A foreground
+          push (InAppBanner, absolute zIndex 9999) still overlays it cleanly. */}
+      {token ? <NotificationPermissionBanner /> : null}
       {/* AppUpdateGate wraps the navigation Stack so when the policy says
           'immediate' we replace the entire app with the blocker screen —
           even unauthenticated boot can't bypass it. */}
       <AppUpdateGate>
         <Stack screenOptions={{ headerShown: false }} />
       </AppUpdateGate>
-      {/* Global "notifications are off" strip — zIndex 8000. Only rendered
-          while authenticated so we don't pester a brand new user before
-          the primer modal has had its chance. Sits beneath InAppBanner
-          (zIndex 9999) so a foreground push still overlays it cleanly. */}
-      {token ? <NotificationPermissionBanner /> : null}
       {/* InAppBanner is mounted last so it overlays every screen, including
           bottom tabs and modals. Delivery pushes are diverted from the
           banner into a full-screen modal (DeliveryApprovalModal) below. */}

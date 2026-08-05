@@ -33,7 +33,13 @@ function makePrisma() {
       findMany: jest.fn().mockResolvedValue([]),
     },
     notificationLog: {
-      create: jest.fn().mockResolvedValue({}),
+      create: jest.fn().mockResolvedValue({ id: 'log-1' }),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+      update: jest.fn().mockResolvedValue({ id: 'log-1' }),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      delete: jest.fn().mockResolvedValue({}),
+      count: jest.fn().mockResolvedValue(0),
+      groupBy: jest.fn().mockResolvedValue([]),
     },
   };
 }
@@ -248,9 +254,88 @@ describe('PushService', () => {
     expect(arg.data.title).toBe('Hello');
     expect(arg.data.body).toBe('World');
     expect(JSON.parse(arg.data.actions)).toEqual(actions);
+    // Background/killed Android relies on the tray notification block — the
+    // data payload alone is invisible until next app-open.
+    expect(arg.android.notification).toEqual(
+      expect.objectContaining({ channelId: 'system', title: 'Hello', body: 'World' }),
+    );
     expect(arg.apns.payload.aps['content-available']).toBe(1);
     expect(arg.apns.payload.aps['mutable-content']).toBe(1);
     expect(arg.apns.payload.aps.category).toBe('complaints');
+  });
+
+  it('routes via the registry channelId with a 30-min TTL for approval-style pushes', async () => {
+    const prisma = makePrisma();
+    prisma.user.findUnique.mockResolvedValue({ id: 'u1', phone: '+910000000000' });
+    prisma.device.findMany.mockResolvedValue([{ token: 'tok' }]);
+
+    const svc = makeService(prisma);
+    await (svc as any).sendNow(
+      'u1',
+      { title: 'Guest', body: 'At gate', category: 'visitors_gate' },
+      undefined,
+    );
+
+    const arg = mockSendEachForMulticast.mock.calls[0][0];
+    expect(arg.android.notification.channelId).toBe('approvals');
+    // Android group rides in data (FCM v1 has no android.notification.group);
+    // it mirrors the iOS thread-id — both = channel bucket.
+    expect(arg.data.group).toBe('approvals');
+    expect(arg.android.ttl).toBe(30 * 60 * 1000);
+    expect(arg.apns.headers['apns-expiration']).toBeDefined();
+    expect(arg.apns.payload.aps['thread-id']).toBe('approvals');
+  });
+
+  it('sets aps.badge + android notificationCount to unread count + 1', async () => {
+    const prisma = makePrisma();
+    prisma.user.findUnique.mockResolvedValue({ id: 'u1', phone: '+910000000000' });
+    prisma.device.findMany.mockResolvedValue([{ token: 'tok' }]);
+    prisma.notificationLog.count.mockResolvedValue(4);
+
+    const svc = makeService(prisma);
+    await (svc as any).sendNow('u1', baseNotification, undefined);
+
+    const arg = mockSendEachForMulticast.mock.calls[0][0];
+    expect(arg.apns.payload.aps.badge).toBe(5);
+    expect(arg.android.notification.notificationCount).toBe(5);
+  });
+
+  it('persists NotificationLog.type = category key for inbox deep links', async () => {
+    const prisma = makePrisma();
+    prisma.user.findUnique.mockResolvedValue({ id: 'u1', phone: '+910000000000' });
+    prisma.device.findMany.mockResolvedValue([{ token: 'tok' }]);
+
+    const svc = makeService(prisma);
+    await (svc as any).sendNow(
+      'u1',
+      { title: 'Guest', body: 'At gate', category: 'visitors_gate' },
+      { type: 'VISITOR_APPROVAL_REQUEST' },
+    );
+
+    expect(prisma.notificationLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ type: 'visitors_gate', status: 'SENT' }),
+      }),
+    );
+  });
+
+  it('falls back to data.type for NotificationLog.type when no category is set', async () => {
+    const prisma = makePrisma();
+    prisma.user.findUnique.mockResolvedValue({ id: 'u1', phone: '+910000000000' });
+    prisma.device.findMany.mockResolvedValue([{ token: 'tok' }]);
+
+    const svc = makeService(prisma);
+    await (svc as any).sendNow(
+      'u1',
+      { title: 'Legacy', body: 'payload' },
+      { type: 'RESIDENT_APPROVED' },
+    );
+
+    expect(prisma.notificationLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ type: 'RESIDENT_APPROVED' }),
+      }),
+    );
   });
 
   it('applies collapse key to both android and apns headers', async () => {
@@ -277,7 +362,7 @@ describe('PushService', () => {
   });
 
   describe('sendToSocietyNow', () => {
-    it('batch-resolves recipient tokens from Device table union fcmToken and multicasts', async () => {
+    it('sends per-recipient (small fan-out) with badges and writes per-user inbox rows', async () => {
       const prisma = makePrisma();
       // Batched impl selects id + fcmToken + notificationPrefs in one query.
       prisma.user.findMany.mockResolvedValue([
@@ -286,21 +371,44 @@ describe('PushService', () => {
       ]);
       // No stored category prefs => registry defaults (complaints is on).
       prisma.notificationPreference.findMany.mockResolvedValue([]);
-      // One device query for all eligible recipients.
-      prisma.device.findMany.mockResolvedValue([{ token: 't1' }, { token: 't2' }]);
-      mockSendEachForMulticast.mockResolvedValue(okResponse(3));
+      // One device query for all eligible recipients (userId + token).
+      prisma.device.findMany.mockResolvedValue([
+        { userId: 'u1', token: 't1' },
+        { userId: 'u1', token: 't2' },
+      ]);
+      // u1 has 2 unread already; u2 none.
+      prisma.notificationLog.groupBy.mockResolvedValue([
+        { userId: 'u1', _count: { _all: 2 } },
+      ]);
+      mockSendEachForMulticast
+        .mockResolvedValueOnce(okResponse(2))
+        .mockResolvedValueOnce(okResponse(1));
 
       const svc = makeService(prisma);
       const res = await (svc as any).sendToSocietyNow('soc1', null, baseNotification, undefined);
 
       // device.findMany called exactly once (no N+1), with all eligible ids.
       expect(prisma.device.findMany).toHaveBeenCalledTimes(1);
-      const arg = mockSendEachForMulticast.mock.calls[0][0];
-      expect(arg.tokens).toEqual(['t1', 't2', 'legacy']);
+      // ≤200 recipients → one message per recipient, each with its own badge.
+      expect(mockSendEachForMulticast).toHaveBeenCalledTimes(2);
+      const [msg1, msg2] = mockSendEachForMulticast.mock.calls.map((c) => c[0]);
+      expect(msg1.tokens).toEqual(['t1', 't2']);
+      expect(msg1.apns.payload.aps.badge).toBe(3); // 2 unread + this push
+      expect(msg2.tokens).toEqual(['legacy']);
+      expect(msg2.apns.payload.aps.badge).toBe(1);
       expect(res).toEqual({ sent: 3, failed: 0, cleaned: 0 });
+      // Per-recipient inbox rows (the userId=null summary row is invisible
+      // to the inbox query).
+      expect(prisma.notificationLog.createMany).toHaveBeenCalledWith({
+        data: expect.arrayContaining([
+          expect.objectContaining({ userId: 'u1', societyId: 'soc1', type: 'complaints', status: 'SENT' }),
+          expect.objectContaining({ userId: 'u2', societyId: 'soc1', type: 'complaints', status: 'SENT' }),
+        ]),
+      });
+      // Society-level audit summary row still written.
       expect(prisma.notificationLog.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({ status: 'SENT', societyId: 'soc1' }),
+          data: expect.objectContaining({ status: 'SENT', societyId: 'soc1', userId: null }),
         }),
       );
     });
@@ -315,7 +423,7 @@ describe('PushService', () => {
       prisma.notificationPreference.findMany.mockResolvedValue([
         { userId: 'u2', enabled: false },
       ]);
-      prisma.device.findMany.mockResolvedValue([{ token: 't1' }]);
+      prisma.device.findMany.mockResolvedValue([{ userId: 'u1', token: 't1' }]);
       mockSendEachForMulticast.mockResolvedValue(okResponse(1));
 
       const svc = makeService(prisma);
@@ -337,6 +445,81 @@ describe('PushService', () => {
 
       expect(res).toEqual({ sent: 0, failed: 0, cleaned: 0 });
       expect(mockSendEachForMulticast).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('quiet-hours deferral', () => {
+    // 23:30 IST — squarely inside quiet hours (22:00–07:00).
+    const QUIET_NOW = new Date('2026-07-06T23:30:00+05:30');
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('writes a DEFERRED log row and threads its id into the queued job', async () => {
+      jest.useFakeTimers({ now: QUIET_NOW });
+      const prisma = makePrisma();
+      const svc = makeService(prisma);
+      const add = jest.fn().mockResolvedValue({});
+      (svc as any).deferQueue = { add };
+
+      const queued = await (svc as any).enqueueDeferred({
+        kind: 'user',
+        userId: 'u1',
+        notification: baseNotification,
+        data: { type: 'COMPLAINT_UPDATE' },
+      });
+
+      expect(queued).toBe(true);
+      expect(prisma.notificationLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            userId: 'u1',
+            status: 'DEFERRED',
+            type: 'complaints',
+          }),
+        }),
+      );
+      const [name, job, opts] = add.mock.calls[0];
+      expect(name).toBe('deliver');
+      expect(job).toEqual(expect.objectContaining({ kind: 'user', userId: 'u1', logId: 'log-1' }));
+      expect(opts.delay).toBeGreaterThan(0);
+    });
+
+    it('drops the push (and removes the DEFERRED row) when the queue is down', async () => {
+      jest.useFakeTimers({ now: QUIET_NOW });
+      const prisma = makePrisma();
+      prisma.user.findUnique.mockResolvedValue({ id: 'u1', phone: '+910000000000' });
+      prisma.device.findMany.mockResolvedValue([{ token: 'tok' }]);
+
+      const svc = makeService(prisma);
+      (svc as any).deferQueue = {
+        add: jest.fn().mockRejectedValue(new Error('redis down')),
+      };
+
+      const res = await svc.send('u1', baseNotification, undefined);
+
+      // Quiet hours stay enforced even without a working queue.
+      expect(res).toEqual({ ok: false, reason: 'quiet_hours' });
+      expect(mockSendEachForMulticast).not.toHaveBeenCalled();
+      // Orphaned DEFERRED row removed so it can't inflate badges forever.
+      expect(prisma.notificationLog.delete).toHaveBeenCalledWith({ where: { id: 'log-1' } });
+    });
+
+    it('drops the push during quiet hours when no queue is configured', async () => {
+      jest.useFakeTimers({ now: QUIET_NOW });
+      const prisma = makePrisma();
+      prisma.user.findUnique.mockResolvedValue({ id: 'u1', phone: '+910000000000' });
+      prisma.device.findMany.mockResolvedValue([{ token: 'tok' }]);
+
+      const svc = makeService(prisma); // onModuleInit never ran => deferQueue null
+
+      const res = await svc.send('u1', baseNotification, undefined);
+
+      expect(res).toEqual({ ok: false, reason: 'quiet_hours' });
+      expect(mockSendEachForMulticast).not.toHaveBeenCalled();
+      // No log rows at all when queueing was never attempted.
+      expect(prisma.notificationLog.create).not.toHaveBeenCalled();
     });
   });
 });

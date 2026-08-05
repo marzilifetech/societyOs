@@ -1,12 +1,20 @@
 import { useTheme } from '../../src/hooks/useTheme';
 import { useState, useEffect } from 'react';
 import { View, Text, Switch, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from 'react-native';
-import { router } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Notifications from 'expo-notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../src/lib/api';
 import { openNotificationSettings } from '../../src/lib/push';
+import { ScreenHeader } from '../../src/components/ui';
+
+// Soft card shadow matching the redesign-kit RoundCard surface.
+const cardShadow = {
+  shadowColor: '#000',
+  shadowOffset: { width: 0, height: 6 },
+  shadowOpacity: 0.06,
+  shadowRadius: 14,
+  elevation: 2,
+} as const;
 
 type Preference = {
   key: string;
@@ -81,15 +89,9 @@ export default function NotificationSettingsScreen() {
   const list = prefs ?? [];
 
   return (
-    <SafeAreaView className="flex-1 bg-white">
-      <ScrollView showsVerticalScrollIndicator={false}>
-        <View className="px-6 pt-4 pb-3">
-          <TouchableOpacity onPress={() => router.back()}>
-            <Text className="text-primary-500 text-base mb-4">← Back</Text>
-          </TouchableOpacity>
-          <Text className="text-2xl font-bold text-gray-900 mb-1">Notifications</Text>
-          <Text className="text-gray-500 mb-6">Choose what you'd like to be notified about</Text>
-        </View>
+    <View className="flex-1 bg-white">
+      <ScreenHeader title="Notifications" subtitle="Choose what you'd like to be notified about" />
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingTop: 12 }}>
 
         {permissionStatus !== 'granted' && (
           <View className="mx-6 mb-6 bg-amber-50 rounded-2xl p-4">
@@ -108,10 +110,10 @@ export default function NotificationSettingsScreen() {
 
         {isLoading ? (
           <View className="py-16 items-center">
-            <ActivityIndicator size="large" color="#3B3FBF" />
+            <ActivityIndicator size="large" color={t.accentPrimary} />
           </View>
         ) : (
-          <View className="mx-6 bg-gray-50 rounded-2xl overflow-hidden mb-6">
+          <View className="mx-6 bg-white border border-gray-100 rounded-2xl overflow-hidden mb-6" style={cardShadow}>
             {list.map((pref, idx) => (
               <View
                 key={pref.key}
@@ -129,8 +131,8 @@ export default function NotificationSettingsScreen() {
                     onValueChange={(val: boolean) =>
                       setOverrides((o) => ({ ...o, [pref.key]: val }))
                     }
-                    trackColor={{ false: '#E5E7EB', true: '#C7C9F5' }}
-                    thumbColor={isEnabled(pref) ? '#3B3FBF' : '#9CA3AF'}
+                    trackColor={{ false: '#E5E7EB', true: t.accentPrimary }}
+                    thumbColor="#FFFFFF"
                   />
                 ) : (
                   <Text className="text-xs font-semibold text-primary-500">Always on</Text>
@@ -142,7 +144,7 @@ export default function NotificationSettingsScreen() {
 
         <View className="px-6 mb-8">
           <TouchableOpacity
-            className="bg-primary-500 rounded-2xl py-4 items-center"
+            className="bg-primary-500 rounded-full py-4 items-center"
             onPress={() => saveMutation.mutate()}
             disabled={saveMutation.isPending || isLoading}
           >
@@ -154,6 +156,6 @@ export default function NotificationSettingsScreen() {
           </TouchableOpacity>
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }

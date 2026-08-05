@@ -85,28 +85,55 @@ async function postDeviceToken(token: string): Promise<void> {
   }
 }
 
+/**
+ * Foreground display behaviour. While a session is active, the
+ * ForegroundBannerBridge in app/_layout.tsx renders EVERY foreground push as
+ * the rich in-app banner, so the OS banner would be a duplicate — suppress
+ * it. Logged out the bridge is unmounted, so keep the OS alert as fallback.
+ *
+ * shouldSetBadge stays true: the backend sends the recipient's unread
+ * NotificationLog count as the badge; the inbox screen clears it on focus.
+ */
 export async function setupNotificationHandler() {
   Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowAlert: true,
-      shouldPlaySound: true,
-      shouldSetBadge: true,
-      shouldShowBanner: true,
-      shouldShowList: true,
-    }),
+    handleNotification: async () => {
+      let bannerCoversForeground = false;
+      try {
+        // Lazy import to keep this module free of a load-order dependency on
+        // the auth store.
+        const { useAuthStore } = await import('../store/auth.store');
+        bannerCoversForeground = !!useAuthStore.getState().token;
+      } catch {
+        /* conservative: keep the OS alert */
+      }
+      return {
+        shouldShowAlert: !bannerCoversForeground,
+        shouldShowBanner: !bannerCoversForeground,
+        shouldShowList: true,
+        shouldPlaySound: true,
+        shouldSetBadge: true,
+      };
+    },
   });
 }
 
 /**
- * Android notification channels grouped under three coarse user-facing types
- * — MARKETING, DELIVERY, EMERGENCY — mirroring the backend's NotificationType.
+ * Android notification channels. The six "primary" channels are the contract
+ * the backend routes to via the per-category `channelId` field in
+ * backend/src/common/notification/notification-categories.ts:
  *
- * The three "primary" channels (marketing/deliveries/emergency_sos) are what
- * the backend now targets via FCM channelId. The legacy ids below them
- * (staff_tasks, notices, approval_results, etc.) are kept as ALIASES so
- * devices that already registered them keep working — Android locks
- * importance once a channel is created, so renaming or dropping them would
- * silently degrade behavior on existing installs.
+ *   emergency_sos — MAX, bypasses DND, public lockscreen
+ *   approvals     — HIGH (visitor/help/task approvals + approval results)
+ *   deliveries    — HIGH
+ *   community     — DEFAULT (notices, events, polls, welfare; replaces the
+ *                   legacy 'marketing' channel)
+ *   payments      — DEFAULT
+ *   system        — DEFAULT (account/auth, app updates, misc)
+ *
+ * The legacy ids below them (marketing, staff_tasks, notices, etc.) are kept
+ * as ALIASES so devices that already registered them keep working — Android
+ * locks importance once a channel is created, so renaming or dropping them
+ * would silently degrade behavior on existing installs.
  *
  * Per-channel sound is intentionally LEFT EMPTY for v1; differentiation comes
  * from importance + vibration patterns. To wire a custom ringtone, drop the
@@ -117,12 +144,23 @@ async function setupAndroidChannels() {
   const PUBLIC = Notifications.AndroidNotificationVisibility.PUBLIC;
   const PRIVATE = Notifications.AndroidNotificationVisibility.PRIVATE;
 
-  // ─── Primary channels — what the backend targets going forward ──────────
-  await Notifications.setNotificationChannelAsync('marketing', {
-    name: 'News & Updates',
-    importance: Notifications.AndroidImportance.DEFAULT,
-    lockscreenVisibility: PRIVATE,
-    vibrationPattern: [0, 200],
+  // ─── Primary channels — what the backend targets via channelId ──────────
+  const emergency: Notifications.NotificationChannelInput = {
+    name: 'Emergency Alerts',
+    importance: Notifications.AndroidImportance.MAX,
+    lockscreenVisibility: PUBLIC,
+    vibrationPattern: [0, 500, 250, 500, 250, 500, 250, 500],
+    enableVibrate: true,
+    enableLights: true,
+    lightColor: '#821A52',
+    bypassDnd: true,
+  };
+  await Notifications.setNotificationChannelAsync('emergency_sos', { ...emergency });
+  await Notifications.setNotificationChannelAsync('approvals', {
+    name: 'Approvals',
+    importance: Notifications.AndroidImportance.HIGH,
+    lockscreenVisibility: PUBLIC,
+    vibrationPattern: [0, 250, 250, 250],
     enableVibrate: true,
   });
   await Notifications.setNotificationChannelAsync('deliveries', {
@@ -132,22 +170,40 @@ async function setupAndroidChannels() {
     vibrationPattern: [0, 250, 250, 250],
     enableVibrate: true,
   });
-  const emergency: Notifications.NotificationChannelInput = {
-    name: 'Emergency Alerts',
-    importance: Notifications.AndroidImportance.MAX,
-    lockscreenVisibility: PUBLIC,
-    vibrationPattern: [0, 500, 250, 500, 250, 500, 250, 500],
+  await Notifications.setNotificationChannelAsync('community', {
+    name: 'Community & Notices',
+    importance: Notifications.AndroidImportance.DEFAULT,
+    lockscreenVisibility: PRIVATE,
+    vibrationPattern: [0, 200],
     enableVibrate: true,
-    enableLights: true,
-    bypassDnd: true,
-  };
-  await Notifications.setNotificationChannelAsync('emergency_sos', { ...emergency });
+  });
+  await Notifications.setNotificationChannelAsync('payments', {
+    name: 'Payments & Salary',
+    importance: Notifications.AndroidImportance.DEFAULT,
+    lockscreenVisibility: PRIVATE,
+    vibrationPattern: [0, 200],
+    enableVibrate: true,
+  });
+  await Notifications.setNotificationChannelAsync('system', {
+    name: 'Account & System',
+    importance: Notifications.AndroidImportance.DEFAULT,
+    lockscreenVisibility: PRIVATE,
+    vibrationPattern: [0, 200],
+    enableVibrate: true,
+  });
 
   // ─── Legacy aliases — already exist on installed devices ────────────────
   // Importance is locked after channel creation, so we keep these with the
   // SAME importance as the primary channel they map to. The backend no
   // longer targets these names directly but in-flight payloads still land
   // correctly during the rolling deploy.
+  await Notifications.setNotificationChannelAsync('marketing', {
+    name: 'News & Updates',
+    importance: Notifications.AndroidImportance.DEFAULT,
+    lockscreenVisibility: PRIVATE,
+    vibrationPattern: [0, 200],
+    enableVibrate: true,
+  });
   await Notifications.setNotificationChannelAsync('staff_tasks', {
     name: 'Tasks',
     importance: Notifications.AndroidImportance.DEFAULT,
@@ -193,15 +249,18 @@ export async function registerForPushNotifications(): Promise<string | null> {
     const { status: existing } = await Notifications.getPermissionsAsync();
     let final = existing;
     if (existing !== 'granted') {
-      // Critical-alerts entitlement (iOS) requires Apple approval against the
-      // bundle ID. The request below is harmless without it — iOS just falls
-      // back to the standard alert/sound/badge permissions.
+      // NOTE: allowCriticalAlerts is deliberately NOT requested. The
+      // com.apple.developer.usernotifications.critical-alerts entitlement
+      // (Apple-approved, per bundle ID) is not configured in app.json, and
+      // requesting .criticalAlert on an unentitled build risks the whole
+      // authorization request failing, silently killing iOS push registration.
+      // Re-enable here AND in NotificationPrimerModal once the entitlement is
+      // granted and declared under ios.entitlements.
       const req = await Notifications.requestPermissionsAsync({
         ios: {
           allowAlert: true,
           allowBadge: true,
           allowSound: true,
-          allowCriticalAlerts: true,
           allowProvisional: false,
         },
       });
@@ -292,22 +351,28 @@ async function handleActionButton(actionId: string, data: Record<string, any>): 
   }
 }
 
-export function attachNotificationTapHandler() {
-  if (responseSub) return responseSub;
-  responseSub = Notifications.addNotificationResponseReceivedListener((resp) => {
-    const data = (resp.notification.request.content.data ?? {}) as Record<string, any>;
-    const type = data.type;
-    const id = data.id ?? data.entityId;
-    const action = resp.actionIdentifier;
+let coldStartRouted = false;
 
-    // Action-button taps short-circuit the default deep-link: the user has
-    // already expressed intent on the lockscreen, no need to open a screen.
-    if (action && action !== Notifications.DEFAULT_ACTION_IDENTIFIER) {
-      void handleActionButton(action, data);
-      return;
-    }
-    try {
-      switch (type) {
+/**
+ * Route a single notification-tap response to the right screen (or run its
+ * lockscreen action). Shared by the warm-tap listener AND the cold-start path
+ * so a killed-state tap (guard taps a gate/SOS push to launch the app) still
+ * deep-links instead of just opening Home.
+ */
+function routeNotificationResponse(resp: Notifications.NotificationResponse) {
+  const data = (resp.notification.request.content.data ?? {}) as Record<string, any>;
+  const type = data.type;
+  const id = data.id ?? data.entityId;
+  const action = resp.actionIdentifier;
+
+  // Action-button taps short-circuit the default deep-link: the user has
+  // already expressed intent on the lockscreen, no need to open a screen.
+  if (action && action !== Notifications.DEFAULT_ACTION_IDENTIFIER) {
+    void handleActionButton(action, data);
+    return;
+  }
+  try {
+    switch (type) {
         // Backend notification categories (data.type == category key).
         case 'staff_tasks':
         case 'task':
@@ -316,12 +381,17 @@ export function attachNotificationTapHandler() {
           else router.push('/(tabs)/tasks' as any);
           break;
         case 'approval_results':
+        case 'visitor_approvals':
+        case 'visitors_gate':
+        case 'deliveries':
         case 'VISITOR_APPROVAL_REQUEST':
-          // Approval results (e.g. visitor pre-approvals) -> visitors screen.
+          // Visitor/approval categories -> visitors screen (same routing as
+          // the in-app banner and inbox deep links).
           router.push('/visitors' as any);
           break;
         case 'notices':
         case 'notices_urgent':
+        case 'community':
         case 'notice':
         case 'NOTICE_PUBLISHED':
           router.push('/community/notices' as any);
@@ -339,6 +409,7 @@ export function attachNotificationTapHandler() {
         case 'leave':
           router.push('/leave/balance' as any);
           break;
+        case 'staff_help_requests':
         case 'help':
         case 'HELP_REQUEST':
           if (id) router.push(`/help-requests/${id}` as any);
@@ -346,7 +417,22 @@ export function attachNotificationTapHandler() {
           break;
       }
     } catch {}
-  });
+}
+
+export function attachNotificationTapHandler() {
+  if (responseSub) return responseSub;
+  // Cold start: a tap that LAUNCHED the app from a killed state is NOT
+  // delivered to the listener below — pull it explicitly so a guard tapping a
+  // gate/visitor/SOS push to open the app still deep-links to the right screen.
+  if (!coldStartRouted) {
+    coldStartRouted = true;
+    Notifications.getLastNotificationResponseAsync()
+      .then((resp) => {
+        if (resp) routeNotificationResponse(resp);
+      })
+      .catch(() => {});
+  }
+  responseSub = Notifications.addNotificationResponseReceivedListener(routeNotificationResponse);
   return responseSub;
 }
 

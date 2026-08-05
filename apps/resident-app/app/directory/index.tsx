@@ -101,6 +101,9 @@ export default function DirectoryScreen() {
         <FlatList
           data={filtered}
           keyExtractor={(item: any) => item.id}
+          initialNumToRender={10}
+          maxToRenderPerBatch={10}
+          windowSize={7}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#821A52" />}
           contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 48 }}
           ListEmptyComponent={

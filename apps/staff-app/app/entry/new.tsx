@@ -17,6 +17,7 @@ import {
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { colors } from '@societyos/theme';
 import * as ImagePicker from 'expo-image-picker';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { unwrapApiEnvelope } from '@societyos/api-client';
@@ -47,7 +48,7 @@ type VisitorLookup = {
   deliveryPartner: string | null;
 };
 
-const PRIMARY = '#1E3A5F';
+const PRIMARY = colors.primary[500];
 
 /**
  * Staff "+ Add Entry" form.
@@ -551,6 +552,9 @@ export default function AddEntryScreen() {
             <FlatList
               data={filteredFlats}
               keyExtractor={(f) => f.flatId}
+              initialNumToRender={10}
+              maxToRenderPerBatch={10}
+              windowSize={7}
               keyboardShouldPersistTaps="handled"
               contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 20 }}
               ItemSeparatorComponent={() => <View style={{ height: 1, backgroundColor: '#F3F4F6' }} />}
@@ -636,6 +640,9 @@ export default function AddEntryScreen() {
           <FlatList
             data={[...DELIVERY_PARTNERS, 'Other']}
             keyExtractor={(p) => p}
+            initialNumToRender={10}
+            maxToRenderPerBatch={10}
+            windowSize={7}
             contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 20 }}
             ItemSeparatorComponent={() => <View style={{ height: 1, backgroundColor: '#F3F4F6' }} />}
             renderItem={({ item }) => {

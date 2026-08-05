@@ -5,7 +5,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Camera, CameraView } from 'expo-camera';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
+import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
+import { AppHeader, Card } from '../../src/components/ui';
 
 type Visitor = {
   id: string;
@@ -148,16 +150,16 @@ export default function QrScanScreen() {
     const busy = approve.isPending || reject.isPending || decision.isPending;
 
     return (
-      <SafeAreaView className="flex-1 bg-gray-900">
-        <View className="flex-1 px-6 pt-12">
-          <Text className="text-white text-2xl font-bold mb-1">Visitor Details</Text>
-          <Text className="text-gray-400 text-sm mb-8">
-            {pendingApproval ? 'Approve before allowing entry.' : 'Verify before allowing entry.'}
-          </Text>
-
-          <View className="bg-white rounded-3xl p-6 shadow-lg">
-            <Text className="text-xs text-gray-400">NAME</Text>
-            <Text className="text-2xl font-bold text-gray-900 mb-4">{visitor.name}</Text>
+      <SafeAreaView className="flex-1 bg-gray-50 dark:bg-gray-950" edges={['top']}>
+        <AppHeader
+          title="Visitor Details"
+          subtitle={pendingApproval ? 'Approve before allowing entry.' : 'Verify before allowing entry.'}
+          onBack={() => router.back()}
+        />
+        <View className="flex-1 px-6 pt-6">
+          <Card padding="lg" className="rounded-3xl">
+            <Text className="text-xs text-gray-400 dark:text-gray-500">NAME</Text>
+            <Text className="text-2xl font-heading text-gray-900 dark:text-gray-100 mb-4">{visitor.name}</Text>
 
             <DetailRow label="Flat" value={flatLabel(visitor)} />
             {visitor.purpose && <DetailRow label="Purpose" value={visitor.purpose} />}
@@ -171,7 +173,7 @@ export default function QrScanScreen() {
             {visitor.approvalStatus && (
               <DetailRow label="Approval" value={visitor.approvalStatus} />
             )}
-          </View>
+          </Card>
 
           {pendingApproval ? (
             <View className="flex-row gap-3 mt-8">
@@ -199,8 +201,8 @@ export default function QrScanScreen() {
               </TouchableOpacity>
             </View>
           ) : rejected ? (
-            <View className="mt-8 bg-red-900/40 rounded-2xl p-4">
-              <Text className="text-red-200 text-center text-sm">
+            <View className="mt-8 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-2xl p-4">
+              <Text className="text-red-700 dark:text-red-200 text-center text-sm">
                 This visitor was rejected and cannot enter.
               </Text>
             </View>
@@ -232,7 +234,7 @@ export default function QrScanScreen() {
           )}
 
           <TouchableOpacity className="mt-6 self-center" onPress={resetScan}>
-            <Text className="text-gray-400 text-sm">Scan another</Text>
+            <Text className="text-gray-500 dark:text-gray-400 text-sm">Scan another</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -248,11 +250,17 @@ export default function QrScanScreen() {
         barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
       >
         <SafeAreaView className="flex-1">
-          <View className="flex-row items-center px-6 pt-4 mb-8">
-            <TouchableOpacity onPress={() => router.back()}>
-              <Text className="text-white text-base">← Back</Text>
+          {/* Camera viewfinder stays dark by design — only the back idiom is unified. */}
+          <View className="flex-row items-center px-5 pt-4 mb-8">
+            <TouchableOpacity
+              onPress={() => router.back()}
+              className="w-10 h-10 rounded-full bg-white/15 items-center justify-center"
+              accessibilityRole="button"
+              accessibilityLabel="Go back"
+            >
+              <Ionicons name="chevron-back" size={22} color="#FFFFFF" />
             </TouchableOpacity>
-            <Text className="text-white font-semibold text-base flex-1 text-center mr-12">
+            <Text className="text-white font-heading text-base flex-1 text-center mr-10">
               Scan Visitor QR
             </Text>
           </View>
@@ -300,9 +308,9 @@ export default function QrScanScreen() {
 
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
-    <View className="flex-row justify-between py-2 border-t border-gray-100">
-      <Text className="text-xs text-gray-500">{label}</Text>
-      <Text className="text-sm font-semibold text-gray-900">{value}</Text>
+    <View className="flex-row justify-between py-2 border-t border-gray-100 dark:border-gray-800">
+      <Text className="text-xs text-gray-500 dark:text-gray-400">{label}</Text>
+      <Text className="text-sm font-semibold text-gray-900 dark:text-gray-100">{value}</Text>
     </View>
   );
 }

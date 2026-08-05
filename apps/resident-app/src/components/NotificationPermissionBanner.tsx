@@ -1,24 +1,27 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useNotificationPermission } from '../hooks/useNotificationPermission';
 
 /**
- * Global persistent strip rendered above every screen when the OS has
- * actively denied notifications. Tap → notification-troubleshoot page.
+ * Persistent strip shown when the OS has actively denied notifications.
+ * Tap → notification-troubleshoot page.
  *
- * Mount once in app/_layout.tsx beneath InAppBanner (zIndex 8000 vs the
- * push banner's 9999) so a foreground push still overlays this strip when
- * one arrives. The visibility check polls on AppState change via the
- * underlying hook — so the banner auto-disappears the moment the user
- * flips the OS toggle back on without needing a manual refresh.
+ * IN-FLOW (not absolute): mounted at the top of the RootShell column ABOVE
+ * the navigator, exactly like NetworkBanner, so it PUSHES the screen down
+ * instead of floating over and covering each screen's header. (The previous
+ * `position:absolute; top:0` overlaid the header — the bug this fixes.)
  *
- * Wrapped in SafeAreaView so notched devices push the strip below the
- * status bar / camera cutout cleanly.
+ * No SafeAreaView here — mirrors NetworkBanner. Individual screens own their
+ * top inset, and nesting another SafeAreaView above them would double-count
+ * the status-bar padding and leave an ugly gap while this strip is visible.
+ *
+ * The visibility check polls on AppState change via the underlying hook, so
+ * the banner auto-disappears the moment the user flips the OS toggle back on.
+ * A foreground push (InAppBanner, absolute zIndex 9999) still overlays this.
  *
  * Senior-grade: 44+px hit target, 14pt body, plain language ("turned off"
- * beats "permission denied"), red icon as the urgency anchor.
+ * beats "permission denied"), amber icon as the urgency anchor.
  */
 export function NotificationPermissionBanner() {
   const { status } = useNotificationPermission();
@@ -29,36 +32,25 @@ export function NotificationPermissionBanner() {
   if (status !== 'denied') return null;
 
   return (
-    <SafeAreaView edges={['top']} style={styles.safe} pointerEvents="box-none">
-      <Pressable
-        onPress={() => router.push('/profile/notification-troubleshoot' as any)}
-        accessibilityRole="button"
-        accessibilityLabel="Notifications are turned off. Tap to fix."
-        style={({ pressed }) => [styles.row, pressed && { opacity: 0.85 }]}
-        hitSlop={4}
-      >
-        <View style={styles.iconCircle}>
-          <Ionicons name="notifications-off" size={16} color="#B45309" />
-        </View>
-        <Text style={styles.text} numberOfLines={1}>
-          Notifications are off — tap to fix
-        </Text>
-        <Ionicons name="chevron-forward" size={16} color="#B45309" />
-      </Pressable>
-    </SafeAreaView>
+    <Pressable
+      onPress={() => router.push('/profile/notification-troubleshoot' as any)}
+      accessibilityRole="button"
+      accessibilityLabel="Notifications are turned off. Tap to fix."
+      style={({ pressed }) => [styles.row, pressed && { opacity: 0.85 }]}
+      hitSlop={4}
+    >
+      <View style={styles.iconCircle}>
+        <Ionicons name="notifications-off" size={16} color="#B45309" />
+      </View>
+      <Text style={styles.text} numberOfLines={1}>
+        Notifications are off — tap to fix
+      </Text>
+      <Ionicons name="chevron-forward" size={16} color="#B45309" />
+    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 8000,
-    elevation: 16,
-    backgroundColor: '#FEF3C7',
-  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

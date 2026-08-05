@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ComponentProps } from 'react';
 import {
   View,
   Text,
@@ -19,10 +19,14 @@ import { useTranslation } from 'react-i18next';
 import i18nInstance from '../../src/lib/i18n';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
-import Constants from 'expo-constants';
+import { APP_VERSION_LABEL } from '../../src/lib/app-version';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../src/store/auth.store';
 import { api } from '../../src/lib/api';
 import { uploadViaMedia } from '../../src/lib/photo-upload';
+import { colors } from '@societyos/theme';
+
+type QuickLinkIcon = ComponentProps<typeof Ionicons>['name'];
 
 interface StaffProfile {
   employeeId?: string;
@@ -158,14 +162,14 @@ export default function StaffProfileScreen() {
 
   const slip = latestSlip?.[0];
   const projected = slip?.netPay ?? 0;
-  const version = Constants.expoConfig?.version ?? '1.0.0';
+  const version = APP_VERSION_LABEL;
 
   return (
     <SafeAreaView className="flex-1 bg-gray-50 dark:bg-gray-950">
       <ScrollView showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View className="bg-primary-500 dark:bg-primary-900 px-6 pt-6 pb-10">
-          <Text className="text-2xl font-bold text-white mb-6">{t('profile.title')}</Text>
+          <Text className="text-2xl font-heading text-white mb-6">{t('profile.title')}</Text>
           <View className="flex-row items-center gap-4">
             <TouchableOpacity onPress={handlePhotoEdit} className="relative">
               <View className="w-16 h-16 rounded-full bg-white/20 items-center justify-center overflow-hidden">
@@ -177,17 +181,17 @@ export default function StaffProfileScreen() {
               </View>
               <View className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-white items-center justify-center">
                 {photoMutation.isPending ? (
-                  <ActivityIndicator size="small" color="#821A52" />
+                  <ActivityIndicator size="small" color={colors.primary[500]} />
                 ) : (
-                  <Text className="text-primary-500 text-xs font-bold">✎</Text>
+                  <Ionicons name="pencil" size={12} color={colors.primary[500]} />
                 )}
               </View>
             </TouchableOpacity>
             <View>
               <Text className="text-white text-lg font-semibold">{user?.name ?? '—'}</Text>
-              <Text className="text-blue-200 text-sm">{user?.role?.replace('_', ' ')}</Text>
+              <Text className="text-primary-100 text-sm">{user?.role?.replace('_', ' ')}</Text>
               {user?.department && (
-                <Text className="text-blue-300 text-xs mt-0.5">{user.department}</Text>
+                <Text className="text-primary-200 text-xs mt-0.5">{user.department}</Text>
               )}
             </View>
           </View>
@@ -203,19 +207,19 @@ export default function StaffProfileScreen() {
         </View>
 
         {/* Earnings */}
-        <View className="mx-6 mb-4 bg-gradient-to-r rounded-2xl bg-primary-500 p-5">
-          <Text className="text-blue-200 text-xs uppercase tracking-wider">{t('profile.earnings')}</Text>
+        <View className="mx-6 mb-4 rounded-2xl bg-primary-500 dark:bg-primary-600 p-5">
+          <Text className="text-primary-100 text-xs uppercase tracking-wider">{t('profile.earnings')}</Text>
           <View className="flex-row justify-between items-end mt-2">
             <View>
-              <Text className="text-white text-2xl font-bold">
+              <Text className="text-white text-2xl font-heading">
                 ₹{(slip?.netPay ?? 0).toLocaleString('en-IN')}
               </Text>
-              <Text className="text-blue-200 dark:text-blue-300 text-xs mt-1">
+              <Text className="text-primary-100 text-xs mt-1">
                 {slip?.period ? t('profile.latestPeriod', { period: slip.period }) : t('profile.thisMonth')}
               </Text>
             </View>
             <View>
-              <Text className="text-blue-200 text-xs">{t('profile.projectedPayout')}</Text>
+              <Text className="text-primary-100 text-xs">{t('profile.projectedPayout')}</Text>
               <Text className="text-white text-base font-semibold mt-1">
                 ₹{projected.toLocaleString('en-IN')}
               </Text>
@@ -262,15 +266,15 @@ export default function StaffProfileScreen() {
 
         {/* Quick links */}
         <View className="mx-6 bg-white dark:bg-gray-900 rounded-2xl overflow-hidden mb-4 border border-transparent dark:border-gray-800">
-          <QuickLink icon="📁" label={t('profile.documents')} onPress={() => router.push('/documents' as any)} />
-          <QuickLink icon="💰" label={t('profile.salarySlips')} onPress={() => router.push('/salary' as any)} />
-          <QuickLink icon="🙋" label={t('helpRequests.title')} onPress={() => router.push('/help-requests' as any)} />
-          <QuickLink icon="📅" label={t('leave.requestTitle')} onPress={() => router.push('/leave/new' as any)} />
-          <QuickLink icon="📋" label={t('leave.historyTitle')} onPress={() => router.push('/leave/history' as any)} />
-          <QuickLink icon="⚙️" label={t('profile.settings')} onPress={() => router.push('/settings' as any)} />
+          <QuickLink icon="folder-open-outline" label={t('profile.documents')} onPress={() => router.push('/documents' as any)} />
+          <QuickLink icon="cash-outline" label={t('profile.salarySlips')} onPress={() => router.push('/salary' as any)} />
+          <QuickLink icon="hand-left-outline" label={t('helpRequests.title')} onPress={() => router.push('/help-requests' as any)} />
+          <QuickLink icon="calendar-outline" label={t('leave.requestTitle')} onPress={() => router.push('/leave/new' as any)} />
+          <QuickLink icon="time-outline" label={t('leave.historyTitle')} onPress={() => router.push('/leave/history' as any)} />
+          <QuickLink icon="settings-outline" label={t('profile.settings')} onPress={() => router.push('/settings' as any)} />
           {/* SOS — moved here from the home FAB. Still one tap away. */}
-          <QuickLink icon="🚨" label="Emergency / SOS" onPress={() => router.push('/sos' as any)} />
-          <QuickLink icon="❓" label={t('profile.help')} onPress={() => router.push('/settings/help' as any)} last />
+          <QuickLink icon="warning-outline" label="Emergency / SOS" onPress={() => router.push('/sos' as any)} />
+          <QuickLink icon="help-circle-outline" label={t('profile.help')} onPress={() => router.push('/settings/help' as any)} last />
         </View>
 
         {/* Logout */}
@@ -288,7 +292,7 @@ export default function StaffProfileScreen() {
 
         <View className="items-center pb-8 pt-2">
           <Text className="text-xs text-gray-400 dark:text-gray-500">
-            {t('profile.version')} {version} · SocietyOS Staff
+            {t('profile.version')} {version} · Marzi Staff App
           </Text>
         </View>
       </ScrollView>
@@ -321,15 +325,17 @@ function InfoRow({ label, value, last }: { label: string; value: string; last?: 
   );
 }
 
-function QuickLink({ icon, label, onPress, last }: { icon: string; label: string; onPress: () => void; last?: boolean }) {
+function QuickLink({ icon, label, onPress, last }: { icon: QuickLinkIcon; label: string; onPress: () => void; last?: boolean }) {
   return (
     <TouchableOpacity
       onPress={onPress}
       className={`px-5 py-4 flex-row items-center ${!last ? 'border-b border-gray-50 dark:border-gray-800' : ''}`}
     >
-      <Text className="text-xl mr-3">{icon}</Text>
+      <View className="w-8 h-8 rounded-full bg-primary-50 dark:bg-primary-900/50 items-center justify-center mr-3">
+        <Ionicons name={icon} size={16} color={colors.primary[500]} />
+      </View>
       <Text className="flex-1 text-sm font-medium text-gray-900 dark:text-gray-100">{label}</Text>
-      <Text className="text-gray-300 dark:text-gray-600 text-lg">›</Text>
+      <Ionicons name="chevron-forward" size={16} color="#9CA3AF" />
     </TouchableOpacity>
   );
 }
@@ -369,36 +375,39 @@ function EmergencyContactSheet({
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' }}
       >
-        <View className="bg-white rounded-t-3xl p-6">
-          <Text className="text-lg font-bold text-gray-900 mb-4">Emergency Contact</Text>
-          <Text className="text-xs text-gray-500 mb-1">Name</Text>
+        <View className="bg-white dark:bg-gray-900 rounded-t-3xl p-6">
+          <Text className="text-lg font-heading text-gray-900 dark:text-gray-100 mb-4">Emergency Contact</Text>
+          <Text className="text-xs text-gray-500 dark:text-gray-400 mb-1">Name</Text>
           <TextInput
-            className="bg-gray-100 rounded-xl px-4 py-3 mb-3 text-gray-900"
+            className="bg-gray-100 dark:bg-gray-800 rounded-xl px-4 py-3 mb-3 text-gray-900 dark:text-gray-100"
             value={name}
             onChangeText={setName}
             placeholder="Full name"
+            placeholderTextColor="#9CA3AF"
           />
-          <Text className="text-xs text-gray-500 mb-1">Phone</Text>
+          <Text className="text-xs text-gray-500 dark:text-gray-400 mb-1">Phone</Text>
           <TextInput
-            className="bg-gray-100 rounded-xl px-4 py-3 mb-3 text-gray-900"
+            className="bg-gray-100 dark:bg-gray-800 rounded-xl px-4 py-3 mb-3 text-gray-900 dark:text-gray-100"
             value={phone}
             onChangeText={setPhone}
             keyboardType="phone-pad"
             placeholder="Phone number"
+            placeholderTextColor="#9CA3AF"
           />
-          <Text className="text-xs text-gray-500 mb-1">Relation</Text>
+          <Text className="text-xs text-gray-500 dark:text-gray-400 mb-1">Relation</Text>
           <TextInput
-            className="bg-gray-100 rounded-xl px-4 py-3 mb-5 text-gray-900"
+            className="bg-gray-100 dark:bg-gray-800 rounded-xl px-4 py-3 mb-5 text-gray-900 dark:text-gray-100"
             value={relation}
             onChangeText={setRelation}
             placeholder="Spouse, parent…"
+            placeholderTextColor="#9CA3AF"
           />
           <View className="flex-row gap-3">
-            <TouchableOpacity className="flex-1 bg-gray-100 rounded-xl py-3 items-center" onPress={onClose}>
-              <Text className="text-gray-700 font-semibold">Cancel</Text>
+            <TouchableOpacity className="flex-1 bg-gray-100 dark:bg-gray-800 rounded-full py-3 items-center" onPress={onClose}>
+              <Text className="text-gray-700 dark:text-gray-200 font-semibold">Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              className="flex-1 bg-primary-500 rounded-xl py-3 items-center"
+              className="flex-1 bg-primary-500 dark:bg-primary-600 rounded-full py-3 items-center"
               onPress={save}
               disabled={saving}
             >

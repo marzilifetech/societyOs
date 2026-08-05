@@ -12,6 +12,7 @@ import { api } from '../../src/lib/api';
 import { Display, RoundCard, IconCircle, PillButton, StatusPill, rd, type RdStatusTone } from '../../src/components/ui';
 import { NotificationPrimerModal } from '../../src/components/NotificationPrimerModal';
 import { useNotificationPermission } from '../../src/hooks/useNotificationPermission';
+import { registerDeviceToken } from '../../src/lib/push';
 import { HEALTH_ENABLED } from '../../src/lib/features';
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
@@ -169,7 +170,12 @@ export default function HomeScreen() {
     <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
       <NotificationPrimerModal
         visible={primerVisible}
-        onClose={() => setPrimerVisible(false)}
+        onClose={(outcome) => {
+          setPrimerVisible(false);
+          // The primer owns the one-shot OS prompt; register the device the
+          // moment the user grants so pushes start flowing immediately.
+          if (outcome === 'granted') registerDeviceToken().catch(() => {});
+        }}
       />
       <LinearGradient
         colors={['#FCEAEF', '#FFF6F1', '#FFFFFF']}
@@ -273,6 +279,13 @@ export default function HomeScreen() {
                     <Text style={{ marginTop: 10, fontSize: t.fontSm, fontWeight: '600', color: t.textPrimary, textAlign: 'center' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{a.label}</Text>
                   </RoundCard>
                 </TouchableOpacity>
+              ))}
+              {/* Invisible spacers pad the final row to a multiple of 3 so that
+                  `justifyContent: 'space-between'` left-aligns a partial last
+                  row instead of stretching its items to the screen edges. The
+                  action count changes with HEALTH_ENABLED, so this is computed. */}
+              {Array.from({ length: (3 - (QUICK_ACTIONS.length % 3)) % 3 }).map((_, i) => (
+                <View key={`qa-spacer-${i}`} style={{ width: '31%' }} />
               ))}
             </View>
           </View>

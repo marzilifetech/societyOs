@@ -1,5 +1,9 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useColorScheme } from 'nativewind';
+import { colors } from '@societyos/theme';
+import { Button } from './ui/Button';
 
 interface Props {
   message?: string;
@@ -7,27 +11,20 @@ interface Props {
 }
 
 export function ErrorCard({ message, onRetry }: Props) {
+  const { colorScheme } = useColorScheme();
+  const tint = colorScheme === 'dark' ? '#FCA5A5' : colors.error;
   return (
-    <View style={styles.wrap}>
-      <Text style={styles.icon}>⚠️</Text>
-      <Text style={styles.msg}>
+    <View className="flex-1 items-center justify-center p-6 bg-gray-50 dark:bg-gray-950">
+      <View className="w-16 h-16 rounded-full bg-red-50 dark:bg-red-950/50 items-center justify-center mb-4">
+        <Ionicons name="alert-circle-outline" size={30} color={tint} />
+      </View>
+      <Text className="font-body text-base text-gray-900 dark:text-gray-100 text-center leading-6 mb-5">
         {message ?? "Something didn't load. Please try again."}
       </Text>
-      {onRetry && (
-        <TouchableOpacity style={styles.btn} onPress={onRetry} activeOpacity={0.8}>
-          <Text style={styles.btnText}>Try Again</Text>
-        </TouchableOpacity>
-      )}
-      <Text style={styles.hint}>If the problem continues, please inform your supervisor.</Text>
+      {onRetry && <Button label="Try Again" onPress={onRetry} className="mb-4" />}
+      <Text className="font-body text-[13px] text-gray-400 dark:text-gray-500 text-center">
+        If the problem continues, please inform your supervisor.
+      </Text>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  wrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  icon: { fontSize: 36, marginBottom: 12 },
-  msg: { fontSize: 16, color: '#F5F5F7', textAlign: 'center', lineHeight: 24, marginBottom: 20 },
-  btn: { backgroundColor: '#821A52', paddingVertical: 14, paddingHorizontal: 28, borderRadius: 12, marginBottom: 16, minHeight: 48, justifyContent: 'center' },
-  btnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  hint: { fontSize: 13, color: '#8E8E93', textAlign: 'center' },
-});

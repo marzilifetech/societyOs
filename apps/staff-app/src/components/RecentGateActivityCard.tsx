@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
+import { colors } from '@societyos/theme';
 import { useQuery } from '@tanstack/react-query';
 import { unwrapApiEnvelope } from '@societyos/api-client';
 import { api } from '../lib/api';
@@ -116,7 +117,7 @@ export function RecentGateActivityCard() {
         <View style={{ flex: 1, marginLeft: 14, marginRight: 8 }}>
           <View style={styles.labelRow}>
             <View style={styles.labelChip}>
-              <Ionicons name="enter" size={11} color="#1E3A5F" />
+              <Ionicons name="enter" size={11} color={STAFF_PRIMARY} />
               <Text style={styles.labelChipText}>RECENT GATE ACTIVITY</Text>
             </View>
             {newCount > 0 ? <View style={styles.redDot} /> : null}
@@ -160,7 +161,7 @@ function formatEntryTime(iso: string): string {
   });
 }
 
-const STAFF_PRIMARY = '#1E3A5F';
+const STAFF_PRIMARY = colors.primary[500];
 
 const styles = StyleSheet.create({
   card: {
@@ -170,7 +171,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     padding: 14,
     borderWidth: 1,
-    borderColor: '#DBE5F1',
+    borderColor: colors.primary[100],
     shadowColor: STAFF_PRIMARY,
     shadowOpacity: 0.08,
     shadowRadius: 14,
@@ -195,7 +196,7 @@ const styles = StyleSheet.create({
   labelRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
   labelChip: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: '#E0EAF7', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999,
+    backgroundColor: colors.primary[50], paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999,
   },
   labelChipText: { fontSize: 10, fontWeight: '800', color: STAFF_PRIMARY, letterSpacing: 0.6 },
   redDot: {

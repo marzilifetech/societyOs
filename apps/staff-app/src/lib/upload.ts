@@ -1,6 +1,7 @@
 // Photo upload helpers — presigned-URL flow + image compression.
 import * as ImageManipulator from 'expo-image-manipulator';
-import * as FileSystem from 'expo-file-system';
+// SDK 54: documentDirectory/getInfoAsync/copyAsync live in the legacy API surface.
+import * as FileSystem from 'expo-file-system/legacy';
 
 export type CompressOpts = {
   maxWidth?: number;

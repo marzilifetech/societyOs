@@ -1,3 +1,4 @@
+import type { ComponentProps } from 'react';
 import {
   View,
   Text,
@@ -16,7 +17,13 @@ import { getUnwrapped, getUnwrappedArray } from '../../src/lib/unwrapped-get';
 import { SkeletonCard, SkeletonRow } from '../../src/components/attendance/SkeletonCard';
 import { ErrorCard } from '../../src/components/ErrorCard';
 import { isSecurityStaff } from '../../src/lib/security-staff';
+import { HEALTH_ENABLED } from '../../src/lib/features';
 import { Ionicons } from '@expo/vector-icons';
+import { colors } from '@societyos/theme';
+import { Card, EmptyState, StatusChip } from '../../src/components/ui';
+import { TASK_STATUS_TONES, toneFor } from '../../src/lib/status-theme';
+
+type QuickActionIcon = ComponentProps<typeof Ionicons>['name'];
 
 type StaffHomeSummary = {
   checkedIn?: boolean;
@@ -130,11 +137,11 @@ export default function StaffHomeScreen() {
         {/* Header */}
         <View className="bg-primary-500 dark:bg-primary-900 px-6 pt-4 pb-8 flex-row items-start justify-between">
           <View className="flex-1">
-            <Text className="text-blue-200 dark:text-blue-300 text-sm">{greeting()},</Text>
-            <Text className="text-white text-2xl font-bold mt-0.5">
+            <Text className="text-primary-100 text-sm font-body">{greeting()},</Text>
+            <Text className="text-white text-2xl font-heading mt-0.5">
               {user?.name ?? t('home.staffFallback')}
             </Text>
-            <Text className="text-blue-300 dark:text-blue-200 text-sm mt-1">
+            <Text className="text-primary-200 text-sm font-body mt-1">
               {user?.department ?? user?.role}
             </Text>
           </View>
@@ -182,9 +189,9 @@ export default function StaffHomeScreen() {
 
         {/* Daily briefing card (Task 1) */}
         <View className="px-6 -mt-4 mb-4">
-          <View className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm p-4 border border-transparent dark:border-gray-800">
+          <Card>
             <View className="flex-row items-center justify-between mb-3">
-              <Text className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t('home.briefingTitle')}</Text>
+              <Text className="font-heading text-sm text-gray-900 dark:text-gray-100">{t('home.briefingTitle')}</Text>
               <Text className="text-2xl">{weatherIcon}</Text>
             </View>
             {loadingSummary ? (
@@ -204,7 +211,7 @@ export default function StaffHomeScreen() {
                 </Text>
               </View>
             )}
-          </View>
+          </Card>
         </View>
 
         {/* Mini-stats row (Task 2) */}
@@ -222,7 +229,7 @@ export default function StaffHomeScreen() {
 
         {/* Check-in CTA */}
         <View className="px-6 mb-4">
-          <View className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm p-4 flex-row items-center justify-between border border-transparent dark:border-gray-800">
+          <Card className="flex-row items-center justify-between">
             <View>
               <Text className="text-sm font-semibold text-gray-900 dark:text-gray-100">
                 {summary?.checkedIn ? t('home.checkedIn') : t('home.notCheckedIn')}
@@ -239,21 +246,21 @@ export default function StaffHomeScreen() {
               )}
             </View>
             <TouchableOpacity
-              className="bg-primary-500 dark:bg-primary-600 rounded-xl px-5 py-2.5"
+              className="bg-primary-500 dark:bg-primary-600 rounded-full px-5 py-2.5"
               onPress={() => router.push('/(tabs)/attendance' as any)}
             >
               <Text className="text-white font-semibold text-sm">
                 {summary?.checkedIn ? t('home.checkOut') : t('home.checkIn')}
               </Text>
             </TouchableOpacity>
-          </View>
+          </Card>
         </View>
 
         {/* Upcoming shift card (Task 5) */}
         {todayShift && (
           <View className="px-6 mb-4">
-            <View className="bg-blue-50 dark:bg-blue-950/80 rounded-2xl p-4 border border-blue-100 dark:border-blue-900">
-              <Text className="text-xs text-blue-700 dark:text-blue-300 font-semibold mb-1">{t('home.upcomingShift')}</Text>
+            <View className="bg-primary-50 dark:bg-primary-900/40 rounded-2xl p-4 border border-primary-100 dark:border-primary-800">
+              <Text className="text-xs text-primary-600 dark:text-primary-200 font-semibold mb-1">{t('home.upcomingShift')}</Text>
               <Text className="text-base font-bold text-gray-900 dark:text-gray-100">
                 {todayShift.role ?? t('home.shiftFallback')}
               </Text>
@@ -264,7 +271,7 @@ export default function StaffHomeScreen() {
                 className="mt-3 self-start"
                 onPress={() => router.push('/attendance/shifts' as any)}
               >
-                <Text className="text-xs font-semibold text-blue-700 dark:text-blue-400">{t('home.viewAllShifts')}</Text>
+                <Text className="text-xs font-semibold text-primary-600 dark:text-primary-300">{t('home.viewAllShifts')}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -274,35 +281,34 @@ export default function StaffHomeScreen() {
         <View className="px-6 mb-4">
           <Text className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">{t('home.quickActions')}</Text>
           <View className="flex-row flex-wrap gap-3">
-            <QuickAction icon="🕐" label={t('home.actionCheckIn')} onPress={() => router.push('/(tabs)/attendance' as any)} />
-            <QuickAction icon="🔧" label={t('home.actionViewTasks')} onPress={() => router.push('/(tabs)/tasks' as any)} />
-            <QuickAction icon="📷" label={t('home.actionGateScan')} onPress={() => router.push('/scan/qr' as any)} />
+            <QuickAction icon="time-outline" label={t('home.actionCheckIn')} onPress={() => router.push('/(tabs)/attendance' as any)} />
+            <QuickAction icon="construct-outline" label={t('home.actionViewTasks')} onPress={() => router.push('/(tabs)/tasks' as any)} />
+            <QuickAction icon="qr-code-outline" label={t('home.actionGateScan')} onPress={() => router.push('/scan/qr' as any)} />
             {isSecurity && (
               <QuickAction
-                icon="🛡️"
+                icon="shield-checkmark-outline"
                 label={`Visitors${pendingVisitors.length ? ` (${pendingVisitors.length})` : ''}`}
                 onPress={() => router.push('/visitors' as any)}
               />
             )}
-            <QuickAction icon="📅" label={t('home.actionApplyLeave')} onPress={() => router.push('/leave/new' as any)} />
-            <QuickAction icon="⭐" label={t('home.actionMyReviews')} onPress={() => router.push('/reviews' as any)} />
-            <QuickAction icon="📢" label="Notices" onPress={() => router.push('/welfare' as any)} />
+            <QuickAction icon="calendar-outline" label={t('home.actionApplyLeave')} onPress={() => router.push('/leave/new' as any)} />
+            <QuickAction icon="star-outline" label={t('home.actionMyReviews')} onPress={() => router.push('/reviews' as any)} />
+            <QuickAction icon="megaphone-outline" label="Notices" onPress={() => router.push('/welfare' as any)} />
           </View>
         </View>
 
-        {/* Doctor Portal */}
-        {isDoctor && (
+        {/* Doctor Portal — gated by HEALTH_ENABLED (Play health-policy) — see src/lib/features.ts. */}
+        {HEALTH_ENABLED && isDoctor && (
           <View className="px-6 mb-4">
             <TouchableOpacity
-              className="rounded-2xl p-4 flex-row items-center justify-between"
-              style={{ backgroundColor: '#0D1F35', borderWidth: 1, borderColor: '#821A52' }}
+              className="rounded-2xl p-4 flex-row items-center justify-between bg-primary-500 dark:bg-primary-600"
               onPress={() => router.push('/doctor' as any)}
             >
               <View>
-                <Text className="text-white font-semibold text-base">Doctor Portal</Text>
-                <Text style={{ color: '#6B9CC8', fontSize: 12, marginTop: 2 }}>Appointments & availability</Text>
+                <Text className="text-white font-heading text-base">Doctor Portal</Text>
+                <Text className="text-primary-100 text-xs font-body mt-0.5">Appointments & availability</Text>
               </View>
-              <Text style={{ color: '#3B82F6', fontSize: 22 }}>⚕️</Text>
+              <Ionicons name="medkit-outline" size={24} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
         )}
@@ -311,11 +317,11 @@ export default function StaffHomeScreen() {
         <View className="px-6 pb-32">
           <Text className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">{t('home.activeTasks')}</Text>
           {loadingTasks ? (
-            <ActivityIndicator color="#821A52" />
+            <ActivityIndicator color={colors.primary[500]} />
           ) : pendingTasks.length === 0 ? (
-            <View className="bg-white dark:bg-gray-900 rounded-2xl p-6 items-center border border-transparent dark:border-gray-800">
-              <Text className="text-gray-400 dark:text-gray-500 text-sm">{t('home.noActiveTasks')}</Text>
-            </View>
+            <Card padding="none">
+              <EmptyState icon="checkmark-done-outline" title={t('home.noActiveTasks')} />
+            </Card>
           ) : (
             <View className="gap-3">
               {pendingTasks.slice(0, 5).map((task) => (
@@ -366,54 +372,46 @@ function MiniStat({ label, value, tone }: { label: string; value: string; tone?:
         ? 'text-amber-700 dark:text-amber-400'
         : 'text-gray-900 dark:text-gray-100';
   return (
-    <View className={`flex-1 rounded-2xl p-3 shadow-sm border border-transparent dark:border-gray-800 ${bg}`}>
-      <Text className={`text-xl font-bold ${txt}`}>{value}</Text>
-      <Text className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{label}</Text>
+    <View className={`flex-1 rounded-2xl p-3 shadow-sm border border-black/5 dark:border-gray-800 ${bg}`}>
+      <Text className={`text-xl font-heading ${txt}`}>{value}</Text>
+      <Text className="text-xs font-body text-gray-500 dark:text-gray-400 mt-0.5">{label}</Text>
     </View>
   );
 }
 
-function QuickAction({ icon, label, onPress }: { icon: string; label: string; onPress: () => void }) {
+function QuickAction({ icon, label, onPress }: { icon: QuickActionIcon; label: string; onPress: () => void }) {
   return (
     <TouchableOpacity
-      className="bg-white dark:bg-gray-900 rounded-2xl items-center py-4 shadow-sm border border-transparent dark:border-gray-800"
+      className="bg-white dark:bg-gray-900 rounded-2xl items-center py-4 shadow-sm border border-black/5 dark:border-gray-800"
       style={{ width: '47%' }}
       onPress={onPress}
     >
-      <Text className="text-2xl mb-1">{icon}</Text>
+      <View className="w-10 h-10 rounded-full bg-primary-50 dark:bg-primary-900/50 items-center justify-center mb-1.5">
+        <Ionicons name={icon} size={20} color={colors.primary[500]} />
+      </View>
       <Text className="text-xs font-medium text-gray-700 dark:text-gray-300">{label}</Text>
     </TouchableOpacity>
   );
 }
 
-const TASK_STATUS_STYLE: Record<'PENDING' | 'ASSIGNED' | 'IN_PROGRESS', { color: string; bg: string }> = {
-  PENDING: { color: 'text-blue-700 dark:text-blue-300', bg: 'bg-blue-100 dark:bg-blue-950' },
-  ASSIGNED: { color: 'text-purple-700 dark:text-purple-300', bg: 'bg-purple-100 dark:bg-purple-950' },
-  IN_PROGRESS: { color: 'text-amber-700 dark:text-amber-300', bg: 'bg-amber-100 dark:bg-amber-950' },
-};
-
 function TaskCard({ task }: { task: AssignedTask }) {
   const { t } = useTranslation(undefined, { i18n: i18nInstance });
   const key = taskStatusStyleKey(task.status);
-  const meta = TASK_STATUS_STYLE[key];
   const label = t(`home.taskStatus.${key}`);
   return (
-    <TouchableOpacity
-      className="bg-white dark:bg-gray-900 rounded-2xl p-4 shadow-sm flex-row items-center gap-3 border border-transparent dark:border-gray-800"
-      onPress={() => router.push(`/tasks/${task.id}` as any)}
-    >
-      <View className="flex-1">
-        <Text className="text-sm font-semibold text-gray-900 dark:text-gray-100">{task.category}</Text>
-        <Text className="text-xs text-gray-400 dark:text-gray-500 mt-0.5" numberOfLines={1}>{task.description}</Text>
-        {task.unit && (
-          <Text className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-            {t('home.flat', { number: task.unit.flatNumber })}
-          </Text>
-        )}
-      </View>
-      <View className={`rounded-full px-2.5 py-1 ${meta.bg}`}>
-        <Text className={`text-xs font-semibold ${meta.color}`}>{label}</Text>
-      </View>
+    <TouchableOpacity onPress={() => router.push(`/tasks/${task.id}` as any)}>
+      <Card className="flex-row items-center gap-3">
+        <View className="flex-1">
+          <Text className="text-sm font-semibold text-gray-900 dark:text-gray-100">{task.category}</Text>
+          <Text className="text-xs text-gray-400 dark:text-gray-500 mt-0.5" numberOfLines={1}>{task.description}</Text>
+          {task.unit && (
+            <Text className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+              {t('home.flat', { number: task.unit.flatNumber })}
+            </Text>
+          )}
+        </View>
+        <StatusChip tone={toneFor(TASK_STATUS_TONES, key, 'PENDING')} label={label} />
+      </Card>
     </TouchableOpacity>
   );
 }

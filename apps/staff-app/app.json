@@ -1,15 +1,15 @@
 {
   "expo": {
-    "name": "SocietyOS Staff",
+    "name": "Marzi Staff App",
     "slug": "societyos-staff",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#1E3A5F"
+      "backgroundColor": "#6E0043"
     },
     "ios": {
       "supportsTablet": false,
@@ -19,19 +19,14 @@
       }
     },
     "android": {
-      "versionCode": 2,
+      "versionCode": 5,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#1E3A5F"
+        "backgroundColor": "#6E0043"
       },
-      "package": "com.societyos.staff",
+      "package": "com.marzi.staff",
       "googleServicesFile": "./google-services.json",
-      "permissions": [
-        "POST_NOTIFICATIONS",
-        "USE_FULL_SCREEN_INTENT",
-        "VIBRATE",
-        "SYSTEM_ALERT_WINDOW"
-      ]
+      "permissions": ["POST_NOTIFICATIONS", "VIBRATE"]
     },
     "plugins": [
       "expo-router",
@@ -51,8 +46,8 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/icon.png",
-          "color": "#1E3A5F"
+          "icon": "./assets/notification-icon.png",
+          "color": "#6E0043"
         }
       ],
       "expo-local-authentication",

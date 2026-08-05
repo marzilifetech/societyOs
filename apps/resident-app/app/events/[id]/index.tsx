@@ -1,16 +1,30 @@
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, ScrollView, ActivityIndicator, Alert } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../../src/lib/api';
+import { useTheme } from '../../../src/hooks/useTheme';
+import {
+  ScreenHeader,
+  Display,
+  RoundCard,
+  PillButton,
+  IconCircle,
+  StatusPill,
+  rd,
+  type RdStatusTone,
+} from '../../../src/components/ui';
 
-const CATEGORY_COLORS: Record<string, string> = {
-  CULTURAL: 'bg-purple-100 text-purple-700',
-  SPORTS: 'bg-green-100 text-green-700',
-  MEETING: 'bg-blue-100 text-blue-700',
-  CELEBRATION: 'bg-amber-100 text-amber-700',
-  WORKSHOP: 'bg-teal-100 text-teal-700',
-  OTHER: 'bg-gray-100 text-gray-600',
+type IoniconName = keyof typeof Ionicons.glyphMap;
+
+// Category chips reuse the StatusPill soft-tone vocabulary (see events/index).
+const CATEGORY_META: Record<string, { tone: RdStatusTone; icon: IoniconName; iconBg: string }> = {
+  CULTURAL: { tone: 'cancelled', icon: 'color-palette-outline', iconBg: rd.crimsonSoft },
+  SPORTS: { tone: 'resolved', icon: 'football-outline', iconBg: rd.greenSoft },
+  MEETING: { tone: 'neutral', icon: 'people-outline', iconBg: '#EAF4FB' },
+  CELEBRATION: { tone: 'pending', icon: 'sparkles-outline', iconBg: rd.amberSoft },
+  WORKSHOP: { tone: 'active', icon: 'construct-outline', iconBg: rd.amberSoft },
+  OTHER: { tone: 'neutral', icon: 'calendar-outline', iconBg: rd.inkSoft },
 };
 
 type EventRegistration = { status: 'REGISTERED' | 'WAITLISTED' };
@@ -29,6 +43,7 @@ type ResidentEvent = {
 };
 
 export default function EventDetailScreen() {
+  const t = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const qc = useQueryClient();
 
@@ -58,13 +73,16 @@ export default function EventDetailScreen() {
 
   if (isLoading || !event) {
     return (
-      <SafeAreaView className="flex-1 bg-white items-center justify-center">
-        <ActivityIndicator color="#3B3FBF" />
-      </SafeAreaView>
+      <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+        <ScreenHeader title="Event Details" />
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator color={t.accentPrimary} />
+        </View>
+      </View>
     );
   }
 
-  const colorClass = CATEGORY_COLORS[event.category] ?? CATEGORY_COLORS.OTHER;
+  const meta = CATEGORY_META[event.category] ?? CATEGORY_META.OTHER;
   const registered = event.myRegistration?.status === 'REGISTERED';
   const waitlisted = event.myRegistration?.status === 'WAITLISTED';
   const full =
@@ -76,117 +94,146 @@ export default function EventDetailScreen() {
   const isPast = eventDate < new Date();
 
   return (
-    <SafeAreaView className="flex-1 bg-white">
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
-        <View className="bg-primary-500 px-6 pt-4 pb-8">
-          <TouchableOpacity onPress={() => router.back()} className="mb-4">
-            <Text className="text-white/80 text-base">← Back</Text>
-          </TouchableOpacity>
-          <View className={`self-start rounded-full px-3 py-0.5 mb-3 ${colorClass.split(' ')[0]}`}>
-            <Text className={`text-xs font-semibold ${colorClass.split(' ')[1]}`}>{event.category}</Text>
+    <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+      <ScreenHeader title="Event Details" />
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingHorizontal: t.screenPadding, paddingTop: 8, paddingBottom: 40 }}
+      >
+        {/* Title */}
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 20 }}>
+          <IconCircle size={56} bg={meta.iconBg}>
+            <Ionicons name={meta.icon} size={26} color={rd.ink} />
+          </IconCircle>
+          <View style={{ flex: 1, marginLeft: 14 }}>
+            <StatusPill label={event.category} tone={meta.tone} />
+            <Display size="md" style={{ marginTop: 8 }}>{event.title}</Display>
           </View>
-          <Text className="text-white text-2xl font-bold leading-snug">{event.title}</Text>
         </View>
 
-        <View className="px-6 -mt-4">
-          <View className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 mb-4">
-            <View className="flex-row flex-wrap gap-4">
-              <View>
-                <Text className="text-xs text-gray-400 mb-0.5">Date</Text>
-                <Text className="text-sm font-medium text-gray-800">
-                  {eventDate.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+        {/* Key facts */}
+        <RoundCard tone="white" padding={t.cardPaddingLg} style={{ marginBottom: 16 }}>
+          <View style={{ gap: 14 }}>
+            <FactRow
+              icon="calendar-outline"
+              label="Date"
+              value={eventDate.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+            />
+            {event.eventTime ? <FactRow icon="time-outline" label="Time" value={event.eventTime} /> : null}
+            {event.venue ? <FactRow icon="location-outline" label="Venue" value={event.venue} /> : null}
+            {event.capacity ? (
+              <FactRow
+                icon="people-outline"
+                label="Capacity"
+                value={`${event.registrationCount ?? 0} / ${event.capacity} registered`}
+              />
+            ) : null}
+          </View>
+        </RoundCard>
+
+        {event.capacity && (
+          <View style={{ marginBottom: 16 }}>
+            <View style={{ height: 8, backgroundColor: rd.inkSoft, borderRadius: rd.radiusPill, overflow: 'hidden' }}>
+              <View
+                style={{
+                  height: '100%',
+                  backgroundColor: t.accentPrimary,
+                  borderRadius: rd.radiusPill,
+                  width: `${Math.min(100, ((event.registrationCount ?? 0) / event.capacity) * 100)}%`,
+                }}
+              />
+            </View>
+          </View>
+        )}
+
+        {event.description && (
+          <RoundCard tone="gray" padding={t.cardPaddingLg} style={{ marginBottom: 16 }}>
+            <Text
+              style={{
+                fontSize: t.fontXs,
+                color: t.textMuted,
+                textTransform: 'uppercase',
+                letterSpacing: 1,
+                marginBottom: 8,
+              }}
+            >
+              About
+            </Text>
+            <Text style={{ fontSize: t.fontBase, color: t.textSecondary, lineHeight: t.fontBase * t.lineHeightBase }}>
+              {event.description}
+            </Text>
+          </RoundCard>
+        )}
+
+        {!isPast && (
+          <View style={{ gap: 12 }}>
+            {registered && (
+              <>
+                <RoundCard tone="green" padding={t.cardPadding} style={{ alignItems: 'center' }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Ionicons name="checkmark-circle" size={18} color={rd.green} />
+                    <Text style={{ color: '#1F7A45', fontSize: t.fontBase, fontWeight: '600' }}>
+                      You're registered
+                    </Text>
+                  </View>
+                </RoundCard>
+                <PillButton
+                  label="Cancel Registration"
+                  tone="light"
+                  onPress={() => cancelMutation.mutate()}
+                  disabled={cancelMutation.isPending}
+                  loading={cancelMutation.isPending}
+                />
+              </>
+            )}
+            {waitlisted && (
+              <View
+                style={{
+                  backgroundColor: rd.amberSoft,
+                  borderRadius: rd.radiusCard,
+                  paddingVertical: 16,
+                  alignItems: 'center',
+                }}
+              >
+                <Text style={{ color: rd.amberInk, fontSize: t.fontBase, fontWeight: '600' }}>
+                  You're on the waitlist
                 </Text>
               </View>
-              {event.eventTime && (
-                <View>
-                  <Text className="text-xs text-gray-400 mb-0.5">Time</Text>
-                  <Text className="text-sm font-medium text-gray-800">{event.eventTime}</Text>
-                </View>
-              )}
-              {event.venue && (
-                <View>
-                  <Text className="text-xs text-gray-400 mb-0.5">Venue</Text>
-                  <Text className="text-sm font-medium text-gray-800">{event.venue}</Text>
-                </View>
-              )}
-              {event.capacity && (
-                <View>
-                  <Text className="text-xs text-gray-400 mb-0.5">Capacity</Text>
-                  <Text className="text-sm font-medium text-gray-800">
-                    {event.registrationCount ?? 0} / {event.capacity} registered
-                  </Text>
-                </View>
-              )}
-            </View>
+            )}
+            {!registered && !waitlisted && (
+              <PillButton
+                label={full ? 'Event Full' : 'Register'}
+                tone={full ? 'light' : 'dark'}
+                onPress={() => registerMutation.mutate()}
+                disabled={full || registerMutation.isPending}
+                loading={registerMutation.isPending}
+              />
+            )}
           </View>
+        )}
 
-          {event.capacity && (
-            <View className="mb-4">
-              <View className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                <View
-                  className="h-full bg-primary-400 rounded-full"
-                  style={{ width: `${Math.min(100, ((event.registrationCount ?? 0) / event.capacity) * 100)}%` }}
-                />
-              </View>
-            </View>
-          )}
-
-          {event.description && (
-            <View className="bg-gray-50 rounded-2xl p-5 mb-4">
-              <Text className="text-xs text-gray-400 uppercase tracking-wide mb-2">About</Text>
-              <Text className="text-gray-700 leading-6">{event.description}</Text>
-            </View>
-          )}
-
-          {!isPast && (
-            <View className="gap-3">
-              {registered && (
-                <>
-                  <View className="bg-green-50 border border-green-200 rounded-2xl py-4 items-center">
-                    <Text className="text-green-700 font-semibold">You're registered ✓</Text>
-                  </View>
-                  <TouchableOpacity
-                    className="border border-gray-200 rounded-2xl py-3.5 items-center"
-                    onPress={() => cancelMutation.mutate()}
-                    disabled={cancelMutation.isPending}
-                  >
-                    <Text className="text-gray-500 font-medium">Cancel Registration</Text>
-                  </TouchableOpacity>
-                </>
-              )}
-              {waitlisted && (
-                <View className="bg-amber-50 border border-amber-200 rounded-2xl py-4 items-center">
-                  <Text className="text-amber-700 font-semibold">You're on the waitlist</Text>
-                </View>
-              )}
-              {!registered && !waitlisted && (
-                <TouchableOpacity
-                  className={`rounded-2xl py-4 items-center ${full ? 'bg-gray-100' : 'bg-primary-500'}`}
-                  onPress={() => registerMutation.mutate()}
-                  disabled={full || registerMutation.isPending}
-                >
-                  {registerMutation.isPending ? (
-                    <ActivityIndicator color="#fff" />
-                  ) : (
-                    <Text className={`font-semibold text-base ${full ? 'text-gray-400' : 'text-white'}`}>
-                      {full ? 'Event Full' : 'Register'}
-                    </Text>
-                  )}
-                </TouchableOpacity>
-              )}
-            </View>
-          )}
-
-          {isPast && registered && (
-            <TouchableOpacity
-              className="bg-primary-500 rounded-2xl py-4 items-center mt-2"
-              onPress={() => router.push(`/events/${id}/feedback` as any)}
-            >
-              <Text className="text-white font-semibold text-base">Give Feedback</Text>
-            </TouchableOpacity>
-          )}
-        </View>
+        {isPast && registered && (
+          <PillButton
+            label="Give Feedback"
+            tone="dark"
+            onPress={() => router.push(`/events/${id}/feedback` as any)}
+            style={{ marginTop: 8 }}
+          />
+        )}
       </ScrollView>
-    </SafeAreaView>
+    </View>
+  );
+}
+
+function FactRow({ icon, label, value }: { icon: IoniconName; label: string; value: string }) {
+  const t = useTheme();
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+      <Ionicons name={icon} size={16} color={t.textMuted} style={{ marginTop: 2 }} />
+      <View style={{ marginLeft: 10, flex: 1 }}>
+        <Text style={{ fontSize: t.fontXs, color: t.textMuted, marginBottom: 1 }}>{label}</Text>
+        <Text style={{ fontSize: t.fontSm, fontWeight: '600', color: t.textPrimary }}>{value}</Text>
+      </View>
+    </View>
   );
 }

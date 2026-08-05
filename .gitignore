@@ -7,6 +7,8 @@ dist
 .env
 .env.local
 .env.*.local
+.env.*
+!.env.example
 coverage
 .DS_Store
 *.log
@@ -49,6 +51,11 @@ creds.txt
 *.pem
 *creds*
 secrets.*
+
+# EAS local signing — credentials.json holds keystore + key passwords in plaintext;
+# play-store-key.json is the Play service-account key. Never commit either.
+**/credentials.json
+**/play-store-key.json
 
 # Firebase — service-account keys & client config (never commit)
 *firebase-adminsdk*.json

@@ -4,8 +4,10 @@ import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
+import { colors } from '@societyos/theme';
 import i18nInstance from '../../src/lib/i18n';
 import { api } from '../../src/lib/api';
+import { AppHeader, EmptyState, FilterChips } from '../../src/components/ui';
 
 const STATUS_META: Record<string, { label: string; color: string; bg: string }> = {
   PENDING: { label: 'Pending', color: 'text-amber-700', bg: 'bg-amber-100' },
@@ -45,52 +47,41 @@ export default function LeaveHistoryScreen() {
   );
 
   return (
-    <SafeAreaView className="flex-1 bg-gray-50">
-      <View className="px-6 pt-4 pb-3">
-        <TouchableOpacity onPress={() => router.back()}>
-          <Text className="text-primary-500 text-base mb-4">← Back</Text>
-        </TouchableOpacity>
-        <View className="flex-row items-center justify-between mb-4">
-          <Text className="text-2xl font-bold text-gray-900">{t('leave.historyTitle')}</Text>
+    <SafeAreaView className="flex-1 bg-gray-50 dark:bg-gray-950" edges={['top']}>
+      <AppHeader
+        title={t('leave.historyTitle')}
+        right={
           <TouchableOpacity
-            className="bg-primary-500 rounded-xl px-4 py-2"
+            className="bg-white/20 rounded-full px-4 py-2"
             onPress={() => router.push('/leave/new' as any)}
           >
             <Text className="text-white font-semibold text-sm">+ Request</Text>
           </TouchableOpacity>
-        </View>
-
-        {/* Filter chips */}
-        <View className="flex-row gap-2 mb-2">
-          {FILTERS.map((f) => (
-            <TouchableOpacity
-              key={f}
-              className={`px-3 py-1.5 rounded-full border ${
-                filter === f ? 'bg-primary-500 border-primary-500' : 'bg-white border-gray-200'
-              }`}
-              onPress={() => setFilter(f)}
-            >
-              <Text className={`text-xs font-medium ${filter === f ? 'text-white' : 'text-gray-600'}`}>
-                {f}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+        }
+      />
+      <View className="px-6 pt-4 pb-3">
+        <FilterChips
+          options={FILTERS.map((f) => ({ id: f, label: f }))}
+          selected={filter}
+          onSelect={setFilter}
+        />
       </View>
 
       {isLoading ? (
         <View className="flex-1 items-center justify-center">
-          <ActivityIndicator color="#821A52" />
+          <ActivityIndicator color={colors.primary[500]} />
         </View>
       ) : !filtered.length ? (
         <View className="flex-1 items-center justify-center">
-          <Text className="text-4xl mb-3">📅</Text>
-          <Text className="text-gray-400">No leave requests yet</Text>
+          <EmptyState icon="calendar-outline" title="No leave requests yet" />
         </View>
       ) : (
         <FlatList
           data={filtered}
           keyExtractor={(l) => l.id}
+          initialNumToRender={10}
+          maxToRenderPerBatch={10}
+          windowSize={7}
           contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 32 }}
           ItemSeparatorComponent={() => <View className="h-3" />}
           renderItem={({ item }) => {
