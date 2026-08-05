@@ -76,3 +76,6 @@ keystores/
 builds/
 figma images/
 mock-data/
+
+# Local secrets — never commit (DigitalOcean token etc.)
+tokens.json

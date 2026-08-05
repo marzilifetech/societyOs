@@ -486,7 +486,7 @@ describe('PushService', () => {
       expect(opts.delay).toBeGreaterThan(0);
     });
 
-    it('drops the push (and removes the DEFERRED row) when the queue is down', async () => {
+    it('sends immediately (does not drop) when the queue is down during quiet hours', async () => {
       jest.useFakeTimers({ now: QUIET_NOW });
       const prisma = makePrisma();
       prisma.user.findUnique.mockResolvedValue({ id: 'u1', phone: '+910000000000' });
@@ -499,14 +499,13 @@ describe('PushService', () => {
 
       const res = await svc.send('u1', baseNotification, undefined);
 
-      // Quiet hours stay enforced even without a working queue.
-      expect(res).toEqual({ ok: false, reason: 'quiet_hours' });
-      expect(mockSendEachForMulticast).not.toHaveBeenCalled();
-      // Orphaned DEFERRED row removed so it can't inflate badges forever.
-      expect(prisma.notificationLog.delete).toHaveBeenCalledWith({ where: { id: 'log-1' } });
+      // Losing a notification is worse than a late-night buzz: when the defer
+      // queue is unavailable we fall through to an immediate send.
+      expect(res.ok).toBe(true);
+      expect(mockSendEachForMulticast).toHaveBeenCalled();
     });
 
-    it('drops the push during quiet hours when no queue is configured', async () => {
+    it('sends immediately during quiet hours when no queue is configured', async () => {
       jest.useFakeTimers({ now: QUIET_NOW });
       const prisma = makePrisma();
       prisma.user.findUnique.mockResolvedValue({ id: 'u1', phone: '+910000000000' });
@@ -516,10 +515,8 @@ describe('PushService', () => {
 
       const res = await svc.send('u1', baseNotification, undefined);
 
-      expect(res).toEqual({ ok: false, reason: 'quiet_hours' });
-      expect(mockSendEachForMulticast).not.toHaveBeenCalled();
-      // No log rows at all when queueing was never attempted.
-      expect(prisma.notificationLog.create).not.toHaveBeenCalled();
+      expect(res.ok).toBe(true);
+      expect(mockSendEachForMulticast).toHaveBeenCalled();
     });
   });
 });
