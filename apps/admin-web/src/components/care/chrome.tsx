@@ -1,0 +1,89 @@
+'use client';
+
+import Link from 'next/link';
+import { useRouter, usePathname } from 'next/navigation';
+import { ArrowLeft, Home, Stethoscope, HeartPulse, Siren } from 'lucide-react';
+import { cn } from '@/components/primitives';
+
+/**
+ * Mobile-first app bar. `back` shows a chevron that pops the router; `right`
+ * renders an optional trailing action. Sticky so it stays put while the page
+ * scrolls under it.
+ */
+export function CareHeader({
+  title,
+  subtitle,
+  back = false,
+  right,
+}: {
+  title: string;
+  subtitle?: string;
+  back?: boolean;
+  right?: React.ReactNode;
+}) {
+  const router = useRouter();
+  return (
+    <header className="sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-gray-100">
+      <div className="h-14 px-4 flex items-center gap-3">
+        {back && (
+          <button
+            onClick={() => router.back()}
+            aria-label="Back"
+            className="-ml-1.5 w-9 h-9 rounded-full flex items-center justify-center text-gray-700 hover:bg-gray-100 active:bg-gray-200 transition-colors"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+        )}
+        <div className="min-w-0 flex-1">
+          <h1 className="text-[16px] font-semibold text-gray-950 truncate leading-tight">{title}</h1>
+          {subtitle && <p className="text-[12px] text-gray-500 truncate">{subtitle}</p>}
+        </div>
+        {right}
+      </div>
+    </header>
+  );
+}
+
+const TABS = [
+  { href: '/care', label: 'Home', icon: Home, match: (p: string) => p === '/care' },
+  { href: '/care/medical', label: 'Medical', icon: Stethoscope, match: (p: string) => p.startsWith('/care/medical') },
+  { href: '/care/health', label: 'Health', icon: HeartPulse, match: (p: string) => p.startsWith('/care/health') },
+  { href: '/care/sos', label: 'SOS', icon: Siren, match: (p: string) => p.startsWith('/care/sos'), danger: true },
+];
+
+/** Fixed bottom tab bar. Mounted by the care layout on the main sections. */
+export function BottomNav() {
+  const pathname = usePathname();
+  return (
+    <nav className="fixed bottom-0 inset-x-0 z-20 mx-auto max-w-md bg-white border-t border-gray-100 pb-[env(safe-area-inset-bottom)]">
+      <ul className="grid grid-cols-4">
+        {TABS.map((t) => {
+          const active = t.match(pathname);
+          return (
+            <li key={t.href}>
+              <Link
+                href={t.href}
+                className={cn(
+                  'flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-medium transition-colors',
+                  active
+                    ? t.danger
+                      ? 'text-red-600'
+                      : 'text-primary-700'
+                    : 'text-gray-400 hover:text-gray-600',
+                )}
+              >
+                <t.icon className={cn('w-5 h-5', active && t.danger && 'fill-red-100')} />
+                {t.label}
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    </nav>
+  );
+}
+
+/** Consistent page scroll region that clears the bottom nav. */
+export function CareBody({ children, className }: { children: React.ReactNode; className?: string }) {
+  return <main className={cn('px-4 pt-4 pb-28', className)}>{children}</main>;
+}

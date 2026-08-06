@@ -31,7 +31,10 @@ const securityHeaders = [
   { key: 'X-Frame-Options', value: 'DENY' },
   { key: 'X-Content-Type-Options', value: 'nosniff' },
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
-  { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+  // geolocation is allowed for same-origin (self) so the resident /care SOS
+  // flow can attach the user's location to an emergency alert. camera/mic stay
+  // disabled.
+  { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(self)' },
   { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' },
 ];
 
