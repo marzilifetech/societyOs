@@ -17,6 +17,9 @@ const mockPrisma = {
   resident: { findUnique: jest.fn(), update: jest.fn() },
 };
 
+// Hoisted so the test-number cases can assert the OTP service is bypassed.
+const mockOtp = { verifyOtp: jest.fn().mockResolvedValue(true), sendOtp: jest.fn() };
+
 describe('AuthService app activation', () => {
   let service: AuthService;
 
@@ -26,7 +29,7 @@ describe('AuthService app activation', () => {
         AuthService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: JwtService, useValue: { decode: jest.fn() } },
-        { provide: OtpService, useValue: { verifyOtp: jest.fn().mockResolvedValue(true), sendOtp: jest.fn() } },
+        { provide: OtpService, useValue: mockOtp },
         {
           provide: TokenService,
           useValue: {
@@ -109,6 +112,43 @@ describe('AuthService app activation', () => {
     await expect(
       service.verifyOtp({ phone: '9999999999', otp: '123456', societyId: 'soc-1' }),
     ).rejects.toThrow(UnauthorizedException);
+  });
+
+  // Hardcoded QA test number: fixed 0000 code, no SMS dispatched.
+  describe('hardcoded test number (9999999001 → 0000)', () => {
+    it('sendOtp does not dispatch an SMS for the test number', async () => {
+      const res = await service.sendOtp({ phone: '9999999001', societyId: 'soc-1' } as any);
+      expect(res).toEqual({ message: 'OTP sent' });
+      expect(mockOtp.sendOtp).not.toHaveBeenCalled();
+    });
+
+    it('verifyOtp accepts the fixed code 0000 without calling the OTP service', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'u-test',
+        phone: '+919999999001',
+        role: UserRole.RESIDENT,
+        status: UserStatus.ACTIVE,
+        societyId: 'soc-1',
+        totpEnabled: false,
+      });
+      mockPrisma.resident.findUnique.mockResolvedValue(null);
+
+      const res: any = await service.verifyOtp({
+        phone: '9999999001',
+        otp: '0000',
+        societyId: 'soc-1',
+      });
+
+      expect(res.accessToken).toBe('at');
+      expect(mockOtp.verifyOtp).not.toHaveBeenCalled();
+    });
+
+    it('verifyOtp rejects any other code for the test number', async () => {
+      await expect(
+        service.verifyOtp({ phone: '9999999001', otp: '1234', societyId: 'soc-1' }),
+      ).rejects.toThrow(UnauthorizedException);
+      expect(mockOtp.verifyOtp).not.toHaveBeenCalled();
+    });
   });
 
   // Society lifecycle gate — added 2026-05.
