@@ -1491,7 +1491,7 @@ async createStaff(
     // and the Prisma tenant extension intentionally excludes Resident from
     // auto-scoping (see tenant.extension.ts:64-66).
     const resident = await this.prisma.resident.findFirst({
-      where: { id: residentId, user: { societyId } },
+      where: { OR: [{ id: residentId }, { userId: residentId }], user: { societyId } },
       include: { user: true, flat: true },
     });
     if (!resident) throw new NotFoundException('Resident not found in this society');
@@ -1543,12 +1543,12 @@ async createStaff(
     // Pre-check ownership before issuing the update — otherwise an admin
     // from another society could flip any resident's documents status by id.
     const resident = await this.prisma.resident.findFirst({
-      where: { id: residentId, user: { societyId } },
+      where: { OR: [{ id: residentId }, { userId: residentId }], user: { societyId } },
       select: { id: true },
     });
     if (!resident) throw new NotFoundException('Resident not found in this society');
     return this.prisma.resident.update({
-      where: { id: residentId },
+      where: { id: resident.id },
       data: {
         documentsStatus: status as any,
       },
@@ -2102,7 +2102,7 @@ async createStaff(
 
   async getResidentDetail(societyId: string, residentId: string) {
     const resident = await this.prisma.resident.findFirst({
-      where: { id: residentId, user: { societyId } },
+      where: { OR: [{ id: residentId }, { userId: residentId }], user: { societyId } },
       include: { user: true, flat: true },
     });
     if (!resident) throw new NotFoundException('Resident not found');
@@ -2137,7 +2137,7 @@ async createStaff(
     },
   ) {
     const resident = await this.prisma.resident.findFirst({
-      where: { id: residentId, user: { societyId } },
+      where: { OR: [{ id: residentId }, { userId: residentId }], user: { societyId } },
     });
     if (!resident) throw new NotFoundException('Resident not found');
 
@@ -2148,7 +2148,7 @@ async createStaff(
     if (body.roleNote !== undefined) data.roleNote = body.roleNote;
     if (body.emergencyContact !== undefined) data.emergencyContact = body.emergencyContact;
 
-    await this.prisma.resident.update({ where: { id: residentId }, data: data as any });
+    await this.prisma.resident.update({ where: { id: resident.id }, data: data as any });
     return this.getResidentDetail(societyId, residentId);
   }
 
@@ -2198,13 +2198,13 @@ async createStaff(
 
   async dismissResident(residentId: string, societyId: string) {
     const resident = await this.prisma.resident.findFirst({
-      where: { id: residentId, user: { societyId } },
+      where: { OR: [{ id: residentId }, { userId: residentId }], user: { societyId } },
       include: { user: true },
     });
     if (!resident) throw new NotFoundException('Resident not found');
 
     await this.prisma.resident.update({
-      where: { id: residentId },
+      where: { id: resident.id },
       data: { moveOutDate: new Date() },
     });
     await this.prisma.user.update({
@@ -2219,13 +2219,13 @@ async createStaff(
       throw new ForbiddenException('Super admins cannot delete residents');
     }
     const resident = await this.prisma.resident.findFirst({
-      where: { id: residentId, user: { societyId } },
+      where: { OR: [{ id: residentId }, { userId: residentId }], user: { societyId } },
     });
     if (!resident) throw new NotFoundException('Resident not found');
 
     // Soft-delete
     await this.prisma.resident.update({
-      where: { id: residentId },
+      where: { id: resident.id },
       data: { deletedAt: new Date() },
     });
     return { deleted: true };

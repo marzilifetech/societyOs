@@ -107,6 +107,54 @@ describe('AdminService', () => {
     });
   });
 
+  // Regression: the residents list (and the pending-approval list) send the
+  // resident's USER id as `:id`, while other lists send the resident.id. The
+  // detail/document endpoints must resolve BOTH, else opening a pending
+  // resident to review documents 404s with "Resident not found".
+  describe('resident lookup accepts userId or residentId', () => {
+    it('getResidentDetail resolves a resident passed its userId', async () => {
+      mockPrisma.resident.findFirst.mockResolvedValue({
+        id: 'res-1',
+        userId: 'user-1',
+        user: { name: 'Ada', phone: '1', email: null, status: 'PENDING' },
+        flat: null,
+        type: 'OWNER',
+        moveInDate: null,
+        moveOutDate: null,
+        emergencyContact: null,
+        createdAt: new Date(),
+      });
+
+      const out = await service.getResidentDetail('soc-1', 'user-1');
+
+      expect(out).toMatchObject({ id: 'res-1', userId: 'user-1', name: 'Ada' });
+      expect(mockPrisma.resident.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            OR: [{ id: 'user-1' }, { userId: 'user-1' }],
+            user: { societyId: 'soc-1' },
+          }),
+        }),
+      );
+    });
+
+    it('verifyResidentDocuments updates by the resolved resident.id, not the raw input id', async () => {
+      mockPrisma.resident.findFirst.mockResolvedValue({ id: 'res-1' });
+      mockPrisma.resident.update.mockResolvedValue({ id: 'res-1', documentsStatus: 'VERIFIED' });
+
+      await service.verifyResidentDocuments('soc-1', 'user-1', 'VERIFIED');
+
+      expect(mockPrisma.resident.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'res-1' } }),
+      );
+    });
+
+    it('throws "Resident not found" when neither id nor userId matches in the society', async () => {
+      mockPrisma.resident.findFirst.mockResolvedValue(null);
+      await expect(service.getResidentDetail('soc-1', 'nope')).rejects.toThrow('Resident not found');
+    });
+  });
+
   // ─── approveVisitor ────────────────────────────────────────────────────────
 
   describe('approveVisitor', () => {
