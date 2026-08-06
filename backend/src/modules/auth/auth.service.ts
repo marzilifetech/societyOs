@@ -29,6 +29,25 @@ const ADMIN_SESSION_IDLE_SECONDS = 30 * 60; // 30 minutes
  */
 const REAUTH_TOKEN_TTL_SECONDS = 5 * 60;
 
+/**
+ * Hardcoded QA test numbers. These bypass the SMS OTP entirely: `sendOtp` does
+ * NOT dispatch a code (no SMS, no Marzi call), and `verifyOtp` accepts ONLY the
+ * fixed code below — nothing else. Keyed by the 10-digit national number and
+ * matched against the trailing 10 digits of the normalized phone, so it works
+ * regardless of +91 prefixing. Keep this list tiny and obvious: every entry is
+ * a login bypass and must never contain a real user's number.
+ */
+const TEST_OTP_NUMBERS: Record<string, string> = {
+  '9999999001': '0000',
+};
+
+/** Returns the fixed OTP for a hardcoded test number, or undefined. */
+function testOtpFor(phone: string): string | undefined {
+  const digits = phone.replace(/\D/g, '');
+  const national = digits.length > 10 ? digits.slice(-10) : digits;
+  return TEST_OTP_NUMBERS[national];
+}
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -148,6 +167,14 @@ export class AuthService {
     if (!society) throw new NotFoundException('Society not found');
     this.assertSocietyAccessible(society.status, society.id);
 
+    // Test numbers never receive a real SMS — the fixed code is accepted
+    // directly at verify time. Return the same success shape so the client
+    // flow is identical.
+    if (testOtpFor(phone)) {
+      this.logger.log(`OTP send skipped for test number ${phone}`);
+      return { message: 'OTP sent' };
+    }
+
     await this.otp.sendOtp(phone);
     return { message: 'OTP sent' };
   }
@@ -179,7 +206,15 @@ export class AuthService {
     //     SocietyOS keeps full control of access-token signing/denylist.
     //     See docs/AUTH-SECURITY-TRADEOFF.md.
     let marziPair: MarziTokenPair | null = null;
-    if (this.marzi.enabled) {
+    const testOtp = testOtpFor(phone);
+    if (testOtp) {
+      // Hardcoded QA number: accept only the fixed code, no Marzi/local check.
+      // marziPair stays null — the downstream token flow already handles that
+      // (same path as local mode), so no Marzi refresh is parked for it.
+      if (dto.otp !== testOtp) {
+        throw new UnauthorizedException({ code: 'INVALID_OTP' });
+      }
+    } else if (this.marzi.enabled) {
       marziPair = await this.marzi.verifyOtp(phone, dto.otp);
       if (!marziPair) {
         throw new UnauthorizedException({ code: 'INVALID_OTP' });
