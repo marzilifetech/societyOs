@@ -229,6 +229,27 @@ export class CreateSocietyDto {
   @IsBoolean()
   showInDirectory?: boolean;
 
+  @ApiPropertyOptional({ description: 'Public contact email shown to residents' })
+  @IsOptional()
+  @IsEmail()
+  contactEmail?: string;
+
+  @ApiPropertyOptional({ description: 'Public contact phone shown to residents' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  contactPhone?: string;
+
+  @ApiPropertyOptional({
+    description: 'Unique onboarding / join code (letters, numbers, dashes). Auto-uppercased.',
+  })
+  @IsOptional()
+  @IsString()
+  @Matches(/^[A-Za-z0-9-]{2,20}$/, {
+    message: 'shortCode must be 2–20 letters, numbers, or dashes',
+  })
+  shortCode?: string;
+
   @ApiProperty()
   @IsString()
   @MinLength(2)
