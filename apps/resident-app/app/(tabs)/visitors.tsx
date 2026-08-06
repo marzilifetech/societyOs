@@ -4,17 +4,30 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
+import { useTheme } from '../../src/hooks/useTheme';
+import { Display, IconCircle, rd } from '../../src/components/ui';
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
 
-const STATUS_CONFIG: Record<string, { bg: string; text: string; icon: IoniconName; iconColor: string; label: string }> = {
-  EXPECTED: { bg: 'bg-blue-100', text: 'text-blue-700', icon: 'time', iconColor: '#1D4ED8', label: 'Expected' },
-  CHECKED_IN: { bg: 'bg-green-100', text: 'text-green-700', icon: 'checkmark-circle', iconColor: '#15803D', label: 'Checked In' },
-  CHECKED_OUT: { bg: 'bg-gray-100', text: 'text-gray-600', icon: 'log-out', iconColor: '#4B5563', label: 'Checked Out' },
-  DENIED: { bg: 'bg-red-100', text: 'text-red-700', icon: 'close-circle', iconColor: '#B91C1C', label: 'Denied' },
+// Soft card shadow matching the redesign-kit RoundCard surface.
+const cardShadow = {
+  shadowColor: '#000',
+  shadowOffset: { width: 0, height: 6 },
+  shadowOpacity: 0.06,
+  shadowRadius: 14,
+  elevation: 2,
+} as const;
+
+// Status chips follow the StatusPill soft-tone vocabulary.
+const STATUS_CONFIG: Record<string, { bg: string; fg: string; icon: IoniconName; label: string }> = {
+  EXPECTED: { bg: rd.amberSoft, fg: rd.amberInk, icon: 'time', label: 'Expected' },
+  CHECKED_IN: { bg: rd.greenSoft, fg: '#1F7A45', icon: 'checkmark-circle', label: 'Checked In' },
+  CHECKED_OUT: { bg: rd.inkSoft, fg: '#4B5563', icon: 'log-out', label: 'Checked Out' },
+  DENIED: { bg: rd.crimsonSoft, fg: rd.crimson, icon: 'close-circle', label: 'Denied' },
 };
 
 export default function VisitorsTab() {
+  const t = useTheme();
   const { data: visitors, isLoading } = useQuery({
     queryKey: ['my-visitors'],
     queryFn: () => api.get<any[]>('/visitors/my'),
@@ -23,10 +36,12 @@ export default function VisitorsTab() {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <View className="px-6 pt-4 pb-3 flex-row justify-between items-center">
-        <Text className="text-2xl font-bold text-gray-900">Visitors</Text>
+        <Display size="md">Visitors</Display>
         <TouchableOpacity
-          className="bg-primary-500 rounded-xl px-4 py-2 flex-row items-center gap-1"
+          className="bg-primary-500 rounded-full px-4 py-2 flex-row items-center gap-1"
           onPress={() => router.push('/visitor/new' as any)}
+          accessibilityRole="button"
+          accessibilityLabel="Invite a visitor"
         >
           <Ionicons name="add" size={16} color="#FFFFFF" />
           <Text className="text-white font-semibold text-sm">Invite</Text>
@@ -36,14 +51,25 @@ export default function VisitorsTab() {
       <FlatList
         data={visitors}
         keyExtractor={(item) => item.id}
+        initialNumToRender={10}
+        maxToRenderPerBatch={10}
+        windowSize={7}
         contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 8, paddingBottom: 32 }}
         showsVerticalScrollIndicator={false}
         renderItem={({ item }) => {
-          const c = STATUS_CONFIG[item.status] ?? { bg: 'bg-gray-100', text: 'text-gray-600', icon: 'person' as IoniconName, iconColor: '#4B5563', label: item.status?.replace('_', ' ') ?? '' };
+          const c = STATUS_CONFIG[item.status] ?? {
+            bg: rd.inkSoft,
+            fg: '#4B5563',
+            icon: 'person' as IoniconName,
+            label: item.status?.replace('_', ' ') ?? '',
+          };
           return (
             <TouchableOpacity
-              className="bg-gray-50 border border-gray-200 rounded-2xl px-4 py-4 mb-3"
+              className="bg-white border border-gray-100 rounded-2xl px-4 py-4 mb-3"
+              style={cardShadow}
               onPress={() => router.push(`/visitor/${item.id}` as any)}
+              accessibilityRole="button"
+              accessibilityLabel={`View visitor pass for ${item.name}`}
             >
               <View className="flex-row justify-between items-start">
                 <View className="flex-1">
@@ -55,9 +81,12 @@ export default function VisitorsTab() {
                     {new Date(item.createdAt).toLocaleDateString('en-IN')}
                   </Text>
                 </View>
-                <View className={`flex-row items-center gap-1 rounded-full px-2.5 py-1 ${c.bg}`}>
-                  <Ionicons name={c.icon} size={12} color={c.iconColor} />
-                  <Text className={`text-xs font-medium ${c.text}`}>{c.label}</Text>
+                <View
+                  className="flex-row items-center gap-1 rounded-full px-2.5 py-1"
+                  style={{ backgroundColor: c.bg }}
+                >
+                  <Ionicons name={c.icon} size={12} color={c.fg} />
+                  <Text className="text-xs font-semibold" style={{ color: c.fg }}>{c.label}</Text>
                 </View>
               </View>
             </TouchableOpacity>
@@ -65,12 +94,12 @@ export default function VisitorsTab() {
         }}
         ListEmptyComponent={
           !isLoading ? (
-            <View className="items-center mt-20">
-              <View className="w-16 h-16 rounded-2xl bg-primary-50 items-center justify-center mb-4">
-                <Ionicons name="people" size={32} color="#821A52" />
-              </View>
-              <Text className="text-gray-900 font-semibold text-base">No visitors yet</Text>
-              <Text className="text-gray-400 text-sm mt-1">Invite someone to create a gate pass code</Text>
+            <View className="items-center mt-20 px-8">
+              <IconCircle icon="people-outline" size={64} bg={rd.crimsonSoft} color={t.accentPrimary} style={{ marginBottom: 16 }} />
+              <Display size="sm" align="center" style={{ marginBottom: 6 }}>No visitors yet</Display>
+              <Text className="text-gray-400 text-sm text-center">
+                Invite a guest and we'll create a gate pass code they can show at the gate.
+              </Text>
             </View>
           ) : null
         }

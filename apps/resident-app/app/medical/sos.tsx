@@ -43,7 +43,7 @@ import {
 } from '../../src/components/ui';
 import { ErrorBoundary } from '../../src/components/ErrorBoundary';
 
-// Public Figma reference (Medical SOS): node-id=22-1418.
+// Public Figma reference (Emergency SOS): node-id=22-1418.
 // Full redesign of the SOS flow per the 2026 Figma: Emergency Alert form →
 // 5-second cancel window → Alert Sent (live responder status via socket) →
 // Resolved / Cancelled summaries, plus the cancel-reason bottom sheet.
@@ -74,13 +74,13 @@ const CANCEL_REASONS = [
 ];
 
 const SENT_TO = [
-  { label: 'Medical Desk', render: (c: string, s: number) => <MaterialCommunityIcons name="stethoscope" size={s} color={c} /> },
+  { label: 'Help Desk', render: (c: string, s: number) => <MaterialCommunityIcons name="headset" size={s} color={c} /> },
   { label: 'First Responder', render: (c: string, s: number) => <Ionicons name="people-outline" size={s} color={c} /> },
   { label: 'Security Gate', render: (c: string, s: number) => <Ionicons name="shield-outline" size={s} color={c} /> },
 ];
 
 const RESPONDERS = [
-  { label: 'Medical Help Desk', ack: 'Dispatching help', render: (c: string, s: number) => <MaterialCommunityIcons name="stethoscope" size={s} color={c} /> },
+  { label: 'Help Desk', ack: 'Dispatching help', render: (c: string, s: number) => <MaterialCommunityIcons name="headset" size={s} color={c} /> },
   { label: 'Security Gate', ack: 'Security alerted', render: (c: string, s: number) => <Ionicons name="shield-outline" size={s} color={c} /> },
   { label: 'First Responder', ack: 'On the way', render: (c: string, s: number) => <Ionicons name="people-outline" size={s} color={c} /> },
 ];
@@ -360,7 +360,7 @@ function SosScreenInner() {
               ? 'Your emergency has been successfully resolved'
               : phase === 'cancelled'
               ? 'All responders notified this was a false alarm'
-              : 'Send instant alert to nearby responders and medical staff'}
+              : 'Send instant alert to security and nearby responders'}
           </Text>
 
           {/* Phase-specific body */}

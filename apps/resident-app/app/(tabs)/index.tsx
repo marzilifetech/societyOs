@@ -12,6 +12,8 @@ import { api } from '../../src/lib/api';
 import { Display, RoundCard, IconCircle, PillButton, StatusPill, rd, type RdStatusTone } from '../../src/components/ui';
 import { NotificationPrimerModal } from '../../src/components/NotificationPrimerModal';
 import { useNotificationPermission } from '../../src/hooks/useNotificationPermission';
+import { registerDeviceToken } from '../../src/lib/push';
+import { HEALTH_ENABLED } from '../../src/lib/features';
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
 
@@ -41,7 +43,10 @@ const NOTIF_PRIMER_SHOWN_KEY = 'notif_primer_shown_v1';
 type QuickAction = { icon: IoniconName; label: string; route: string; bg: string; tint: string };
 const QUICK_ACTIONS: QuickAction[] = [
   { icon: 'people', label: 'Visitor', route: '/visitor/new', bg: '#FCEBD8', tint: '#B26B2E' },
-  { icon: 'medkit', label: 'Medical', route: '/medical', bg: '#FCE4E6', tint: '#DC2626' },
+  // 'Medical' is gated by HEALTH_ENABLED (Play health-policy) — see src/lib/features.ts.
+  ...(HEALTH_ENABLED
+    ? [{ icon: 'medkit', label: 'Medical', route: '/medical', bg: '#FCE4E6', tint: '#DC2626' } as QuickAction]
+    : []),
   { icon: 'restaurant', label: 'Canteen', route: '/canteen', bg: '#E5EDFB', tint: '#1D4ED8' },
   { icon: 'card', label: 'Payments', route: '/maintenance', bg: '#E5EDFB', tint: '#2563EB' },
   { icon: 'chatbubble-ellipses', label: 'Complaints', route: '/complaints', bg: '#FBF1D9', tint: '#B45309' },
@@ -165,7 +170,12 @@ export default function HomeScreen() {
     <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
       <NotificationPrimerModal
         visible={primerVisible}
-        onClose={() => setPrimerVisible(false)}
+        onClose={(outcome) => {
+          setPrimerVisible(false);
+          // The primer owns the one-shot OS prompt; register the device the
+          // moment the user grants so pushes start flowing immediately.
+          if (outcome === 'granted') registerDeviceToken().catch(() => {});
+        }}
       />
       <LinearGradient
         colors={['#FCEAEF', '#FFF6F1', '#FFFFFF']}
@@ -235,11 +245,11 @@ export default function HomeScreen() {
 
           {/* Emergency SOS banner */}
           <View style={{ paddingHorizontal: t.screenPadding, marginBottom: 24 }}>
-            <TouchableOpacity activeOpacity={0.9} onPress={() => router.push('/medical/sos')} accessibilityRole="button" accessibilityLabel="Emergency SOS - alert security and medical">
+            <TouchableOpacity activeOpacity={0.9} onPress={() => router.push('/medical/sos')} accessibilityRole="button" accessibilityLabel="Emergency SOS - alert security and responders">
               <RoundCard tone="pink" padding={t.cardPaddingLg} style={{ flexDirection: 'row', alignItems: 'center' }}>
                 <View style={{ flex: 1 }}>
                   <Text style={{ color: rd.crimson, fontSize: t.fontLg, fontWeight: '800' }}>Emergency SOS</Text>
-                  <Text style={{ color: t.textSecondary, fontSize: t.fontSm, marginTop: 3 }}>Tap to alert security & medical</Text>
+                  <Text style={{ color: t.textSecondary, fontSize: t.fontSm, marginTop: 3 }}>Tap to alert security & responders</Text>
                 </View>
                 <View style={{
                   width: 52, height: 52, borderRadius: 26, backgroundColor: rd.crimson,
@@ -269,6 +279,13 @@ export default function HomeScreen() {
                     <Text style={{ marginTop: 10, fontSize: t.fontSm, fontWeight: '600', color: t.textPrimary, textAlign: 'center' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{a.label}</Text>
                   </RoundCard>
                 </TouchableOpacity>
+              ))}
+              {/* Invisible spacers pad the final row to a multiple of 3 so that
+                  `justifyContent: 'space-between'` left-aligns a partial last
+                  row instead of stretching its items to the screen edges. The
+                  action count changes with HEALTH_ENABLED, so this is computed. */}
+              {Array.from({ length: (3 - (QUICK_ACTIONS.length % 3)) % 3 }).map((_, i) => (
+                <View key={`qa-spacer-${i}`} style={{ width: '31%' }} />
               ))}
             </View>
           </View>

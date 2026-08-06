@@ -2,6 +2,7 @@ import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, Image, Ale
 import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../../src/lib/api';
 import { useTheme } from '../../../src/hooks/useTheme';
 
@@ -63,7 +64,7 @@ export default function VisitorReviewScreen() {
   if (isLoading) {
     return (
       <SafeAreaView className="flex-1 bg-white items-center justify-center">
-        <ActivityIndicator size="large" color="#3B3FBF" />
+        <ActivityIndicator size="large" color={t.accentPrimary} />
       </SafeAreaView>
     );
   }
@@ -72,8 +73,14 @@ export default function VisitorReviewScreen() {
     return (
       <SafeAreaView className="flex-1 bg-white items-center justify-center px-6">
         <Text className="text-gray-500 text-center mb-4">This visitor request is no longer available.</Text>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Text className="text-primary-500" style={{ fontSize: t.fontBase }}>← Back</Text>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+          className="flex-row items-center gap-1"
+        >
+          <Ionicons name="chevron-back" size={18} color={t.accentPrimary} />
+          <Text className="text-primary-500" style={{ fontSize: t.fontBase }}>Back</Text>
         </TouchableOpacity>
       </SafeAreaView>
     );
@@ -94,8 +101,9 @@ export default function VisitorReviewScreen() {
             onPress={() => router.back()}
             accessibilityRole="button"
             accessibilityLabel="Go back"
+            className="w-10 h-10 rounded-full bg-gray-50 items-center justify-center mb-4"
           >
-            <Text className="text-primary-500 mb-4" style={{ fontSize: t.fontBase }}>← Back</Text>
+            <Ionicons name="chevron-back" size={22} color="#111827" />
           </TouchableOpacity>
           <Text className="font-bold text-gray-900 mb-1" style={{ fontSize: t.font2xl }}>Visitor at the Gate</Text>
           <Text className="text-gray-500" style={{ fontSize: t.fontSm }}>
@@ -146,7 +154,7 @@ export default function VisitorReviewScreen() {
 
         <View className="px-6 mb-8 gap-3">
           <TouchableOpacity
-            className="bg-primary-500 rounded-2xl items-center justify-center"
+            className="bg-primary-500 rounded-full items-center justify-center"
             style={{ minHeight: t.touchTargetLg }}
             onPress={() => decisionMutation.mutate('APPROVE')}
             disabled={busy}
@@ -165,7 +173,7 @@ export default function VisitorReviewScreen() {
               no "leave at security" alternative. */}
           {visitor.type === 'DELIVERY' && (
             <TouchableOpacity
-              className="bg-amber-500 rounded-2xl items-center justify-center"
+              className="bg-amber-500 rounded-full items-center justify-center"
               style={{ minHeight: t.touchTargetLg }}
               onPress={() => decisionMutation.mutate('LEAVE_AT_SECURITY')}
               disabled={busy}
@@ -178,7 +186,7 @@ export default function VisitorReviewScreen() {
             </TouchableOpacity>
           )}
           <TouchableOpacity
-            className="bg-red-50 border border-red-200 rounded-2xl items-center justify-center"
+            className="bg-red-50 border border-red-200 rounded-full items-center justify-center"
             style={{ minHeight: t.touchTargetLg }}
             onPress={() => decisionMutation.mutate('REJECT')}
             disabled={busy}

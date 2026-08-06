@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import * as SecureStore from 'expo-secure-store';
 import {
   unwrapApiEnvelope,
@@ -163,8 +164,13 @@ export default function OtpVerifyScreen() {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <View className="flex-1 px-6 pt-12">
-        <TouchableOpacity className="mb-8" onPress={() => router.back()}>
-          <Text className="text-primary-500 text-base">← Back</Text>
+        <TouchableOpacity
+          className="mb-8 w-10 h-10 rounded-full bg-gray-50 items-center justify-center"
+          onPress={() => router.back()}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
+          <Ionicons name="chevron-back" size={22} color="#111827" />
         </TouchableOpacity>
 
         <View className="mb-10">
@@ -180,7 +186,7 @@ export default function OtpVerifyScreen() {
               key={i}
               ref={(ref) => { inputs.current[i] = ref; }}
               className="w-12 h-14 border-2 rounded-2xl text-center text-2xl font-bold text-gray-900"
-              style={{ borderColor: digit ? '#3B3FBF' : '#E5E7EB' }}
+              style={{ borderColor: digit ? '#821A52' : '#E5E7EB' }}
               value={digit}
               onChangeText={(text) => handleChange(text, i)}
               onKeyPress={({ nativeEvent }) => handleKeyPress(nativeEvent.key, i)}
@@ -192,7 +198,7 @@ export default function OtpVerifyScreen() {
         </View>
 
         <TouchableOpacity
-          className="bg-primary-500 rounded-2xl py-4 items-center mb-6"
+          className="bg-primary-500 rounded-full py-4 items-center mb-6"
           onPress={() => handleVerify()}
           disabled={loading || otp.some((d) => !d)}
         >

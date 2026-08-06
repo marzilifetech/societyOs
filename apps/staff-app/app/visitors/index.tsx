@@ -2,9 +2,11 @@ import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, Alert, Ref
 import { router, Stack } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { colors } from '@societyos/theme';
 import { api } from '../../src/lib/api';
 import { getUnwrappedArray } from '../../src/lib/unwrapped-get';
 import { ErrorCard } from '../../src/components/ErrorCard';
+import { AppHeader, Card, EmptyState } from '../../src/components/ui';
 
 type VisitorRow = {
   id: string;
@@ -54,25 +56,22 @@ export default function VisitorApprovalsScreen() {
     <SafeAreaView className="flex-1 bg-gray-50" edges={['top']}>
       <Stack.Screen options={{ headerShown: false }} />
 
-      <View className="bg-primary-500 px-5 py-4 flex-row items-center">
-        <TouchableOpacity onPress={() => router.back()} className="w-10 h-10 items-center justify-center">
-          <Text className="text-white text-2xl">‹</Text>
-        </TouchableOpacity>
-        <View className="flex-1 ml-2">
-          <Text className="text-white text-lg font-bold">Visitor Approvals</Text>
-          <Text className="text-blue-200 text-xs mt-0.5">Pending today</Text>
-        </View>
-        <TouchableOpacity
-          onPress={() => router.push('/scan/qr' as any)}
-          className="bg-white/20 rounded-xl px-3 py-2"
-        >
-          <Text className="text-white text-xs font-semibold">Scan QR</Text>
-        </TouchableOpacity>
-      </View>
+      <AppHeader
+        title="Visitor Approvals"
+        subtitle="Pending today"
+        right={
+          <TouchableOpacity
+            onPress={() => router.push('/scan/qr' as any)}
+            className="bg-white/20 rounded-full px-3 py-2"
+          >
+            <Text className="text-white text-xs font-semibold">Scan QR</Text>
+          </TouchableOpacity>
+        }
+      />
 
       {isLoading ? (
         <View className="flex-1 items-center justify-center">
-          <ActivityIndicator color="#821A52" />
+          <ActivityIndicator color={colors.primary[500]} />
         </View>
       ) : isError ? (
         <ErrorCard message="Could not load pending visitors." onRetry={() => refetch()} />
@@ -82,13 +81,13 @@ export default function VisitorApprovalsScreen() {
           refreshControl={<RefreshControl refreshing={isFetching && !isLoading} onRefresh={refetch} />}
         >
           {visitors.length === 0 ? (
-            <View className="bg-white rounded-2xl p-8 items-center mt-4">
-              <Text className="text-4xl mb-3">✓</Text>
-              <Text className="text-gray-900 font-semibold text-base">No pending approvals</Text>
-              <Text className="text-gray-400 text-sm text-center mt-1">
-                New visitor requests from residents will appear here.
-              </Text>
-            </View>
+            <Card padding="none" className="mt-4">
+              <EmptyState
+                icon="checkmark-circle-outline"
+                title="No pending approvals"
+                body="New visitor requests from residents will appear here."
+              />
+            </Card>
           ) : (
             <View className="gap-3 pb-8">
               {visitors.map((v) => {

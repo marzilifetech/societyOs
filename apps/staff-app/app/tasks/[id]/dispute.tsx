@@ -14,8 +14,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
+import { colors } from '@societyos/theme';
 import { api } from '../../../src/lib/api';
 import { compressImage, uploadToPresigned } from '../../../src/lib/upload';
+import { AppHeader, Card } from '../../../src/components/ui';
 
 export default function DisputeResponseScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -81,9 +83,9 @@ export default function DisputeResponseScreen() {
 
   if (isLoading || !task) {
     return (
-      <SafeAreaView className="flex-1 bg-gray-950 items-center justify-center">
+      <SafeAreaView className="flex-1 bg-gray-50 dark:bg-gray-950 items-center justify-center">
         <Stack.Screen options={{ title: 'Dispute Response' }} />
-        <ActivityIndicator color="#fff" />
+        <ActivityIndicator color={colors.primary[500]} />
       </SafeAreaView>
     );
   }
@@ -92,58 +94,53 @@ export default function DisputeResponseScreen() {
   const busy = uploading || submit.isPending;
 
   return (
-    <SafeAreaView className="flex-1 bg-gray-950">
+    <SafeAreaView className="flex-1 bg-gray-50 dark:bg-gray-950">
       <Stack.Screen options={{ headerShown: false }} />
-      <View className="bg-gray-900 px-5 py-4 flex-row items-center">
-        <TouchableOpacity onPress={() => router.back()} className="w-10 h-10 items-center justify-center">
-          <Text className="text-white text-2xl">‹</Text>
-        </TouchableOpacity>
-        <Text className="text-white text-lg font-bold ml-2">Dispute Response</Text>
-      </View>
+      <AppHeader title="Dispute Response" />
 
       <ScrollView className="flex-1" contentContainerClassName="p-5 gap-4" keyboardShouldPersistTaps="handled">
         {/* Resident dispute reason */}
-        <View className="bg-red-950 border border-red-800 rounded-2xl p-5">
-          <Text className="text-red-400 text-xs font-semibold uppercase tracking-wider mb-2">
+        <View className="bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-2xl p-5">
+          <Text className="text-red-600 dark:text-red-400 text-xs font-semibold uppercase tracking-wider mb-2">
             Resident's Dispute
           </Text>
-          <Text className="text-white text-sm leading-5">
+          <Text className="text-red-800 dark:text-red-100 text-sm leading-5">
             {dispute?.reason ?? task.disputeReason ?? 'No reason provided.'}
           </Text>
           {dispute?.createdAt && (
-            <Text className="text-red-400 text-xs mt-2">
+            <Text className="text-red-500 dark:text-red-400 text-xs mt-2">
               Raised {new Date(dispute.createdAt).toLocaleString('en-IN')}
             </Text>
           )}
         </View>
 
         {/* Task summary */}
-        <View className="bg-gray-900 rounded-2xl p-5">
-          <Text className="text-xs text-gray-400 uppercase tracking-wider mb-1">{task.category}</Text>
-          <Text className="text-white text-base font-semibold">
+        <Card padding="lg">
+          <Text className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">{task.category}</Text>
+          <Text className="text-gray-900 dark:text-gray-100 text-base font-semibold">
             Flat {task.unit?.flatNumber ?? '—'}
           </Text>
-          <Text className="text-gray-300 text-sm mt-2">{task.description}</Text>
-        </View>
+          <Text className="text-gray-600 dark:text-gray-300 text-sm mt-2">{task.description}</Text>
+        </Card>
 
         {/* Your response */}
-        <View className="bg-gray-900 rounded-2xl p-5">
-          <Text className="text-white font-semibold mb-3">Your Response</Text>
+        <Card padding="lg">
+          <Text className="text-gray-900 dark:text-gray-100 font-semibold mb-3">Your Response</Text>
           <TextInput
             value={response}
             onChangeText={setResponse}
             placeholder="Explain what was done and address the dispute…"
-            placeholderTextColor="#6b7280"
-            className="bg-gray-800 rounded-xl p-4 text-white text-sm"
+            placeholderTextColor="#9CA3AF"
+            className="bg-gray-100 dark:bg-gray-800 rounded-xl p-4 text-gray-900 dark:text-gray-100 text-sm"
             style={{ minHeight: 120, textAlignVertical: 'top' }}
             multiline
           />
-        </View>
+        </Card>
 
         {/* Additional photos */}
-        <View className="bg-gray-900 rounded-2xl p-5">
-          <Text className="text-white font-semibold mb-1">Additional Photos</Text>
-          <Text className="text-gray-400 text-xs mb-4">Optional — add evidence photos</Text>
+        <Card padding="lg">
+          <Text className="text-gray-900 dark:text-gray-100 font-semibold mb-1">Additional Photos</Text>
+          <Text className="text-gray-500 dark:text-gray-400 text-xs mb-4">Optional — add evidence photos</Text>
 
           {photos.length > 0 && (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-3">
@@ -168,18 +165,18 @@ export default function DisputeResponseScreen() {
           <TouchableOpacity
             onPress={pickPhoto}
             disabled={busy}
-            className="border-2 border-dashed border-gray-700 rounded-xl py-5 items-center"
+            className="border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-xl py-5 items-center"
           >
-            <Text className="text-gray-400 text-sm font-semibold">+ Add Photo</Text>
+            <Text className="text-gray-500 dark:text-gray-400 text-sm font-semibold">+ Add Photo</Text>
           </TouchableOpacity>
-        </View>
+        </Card>
       </ScrollView>
 
-      <View className="px-5 py-4 bg-gray-900 border-t border-gray-800">
+      <View className="px-5 py-4 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800">
         <TouchableOpacity
           onPress={handleSubmit}
           disabled={busy || !response.trim()}
-          className={`rounded-2xl items-center py-4 ${!response.trim() ? 'bg-gray-700' : 'bg-amber-600'}`}
+          className={`rounded-full items-center py-4 ${!response.trim() ? 'bg-gray-300 dark:bg-gray-700' : 'bg-amber-600'}`}
           style={{ minHeight: 56 }}
         >
           {busy ? (

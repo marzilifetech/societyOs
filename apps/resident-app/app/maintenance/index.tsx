@@ -10,6 +10,15 @@ import { api } from '../../src/lib/api';
 const AUTO_PAY_KEY = 'maintenance_auto_pay_enabled';
 const PAYMENT_METHOD_KEY = 'maintenance_payment_method_label';
 
+// Soft card shadow matching the redesign-kit RoundCard surface.
+const cardShadow = {
+  shadowColor: '#000',
+  shadowOffset: { width: 0, height: 6 },
+  shadowOpacity: 0.06,
+  shadowRadius: 14,
+  elevation: 2,
+} as const;
+
 type Bill = {
   id: string;
   month: string;
@@ -117,7 +126,10 @@ export default function MaintenanceScreen() {
         >
           {/* Auto-pay toggle */}
           {autoPayLoaded && (
-            <View className={`rounded-2xl p-4 mb-4 border ${autoPayEnabled ? 'bg-primary-50 border-primary-200' : 'bg-gray-50 border-gray-200'}`}>
+            <View
+              className={`rounded-2xl p-4 mb-4 border ${autoPayEnabled ? 'bg-primary-50 border-primary-200' : 'bg-white border-gray-100'}`}
+              style={autoPayEnabled ? undefined : cardShadow}
+            >
               <View className="flex-row items-center justify-between">
                 <View className="flex-row items-center flex-1 mr-3 gap-3">
                   <View className={`w-10 h-10 rounded-xl items-center justify-center ${autoPayEnabled ? 'bg-primary-100' : 'bg-gray-100'}`}>
@@ -184,7 +196,7 @@ export default function MaintenanceScreen() {
 
           {/* Current dues card */}
           {pending.length > 0 && (
-            <View className="bg-gray-50 border border-gray-200 rounded-2xl p-5 mb-6">
+            <View className="bg-white border border-gray-100 rounded-2xl p-5 mb-6" style={cardShadow}>
               <View className="flex-row items-center gap-2 mb-1">
                 <Ionicons name="cash" size={18} color="#821A52" />
                 <Text className="text-gray-500 text-sm">Total Outstanding</Text>
@@ -200,7 +212,7 @@ export default function MaintenanceScreen() {
               )}
               <TouchableOpacity
                 onPress={() => router.push('/maintenance/pay' as any)}
-                className="bg-primary-500 rounded-xl items-center justify-center py-4 flex-row gap-2"
+                className="bg-primary-500 rounded-full items-center justify-center py-4 flex-row gap-2"
                 accessibilityRole="button"
                 accessibilityLabel={`Pay maintenance bill of ₹${totalDue.toLocaleString('en-IN')}`}
               >
@@ -227,7 +239,8 @@ export default function MaintenanceScreen() {
                 <TouchableOpacity
                   key={bill.id}
                   onPress={() => router.push(`/maintenance/bills/${bill.id}` as any)}
-                  className="bg-gray-50 border border-gray-200 rounded-2xl p-4 mb-3 flex-row items-center"
+                  className="bg-white border border-gray-100 rounded-2xl p-4 mb-3 flex-row items-center"
+                  style={cardShadow}
                   accessibilityRole="button"
                   accessibilityLabel={`View bill for ${new Date(bill.month + '-01').toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}`}
                 >
@@ -253,7 +266,8 @@ export default function MaintenanceScreen() {
 
           <TouchableOpacity
             onPress={() => router.push('/maintenance/bills' as any)}
-            className="bg-gray-50 border border-gray-200 rounded-2xl py-4 items-center flex-row justify-center gap-2"
+            className="bg-white border border-gray-100 rounded-2xl py-4 items-center flex-row justify-center gap-2"
+            style={cardShadow}
             accessibilityRole="button"
             accessibilityLabel="View all maintenance bills"
           >

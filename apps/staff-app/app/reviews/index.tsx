@@ -3,11 +3,13 @@ import { View, Text, FlatList, TouchableOpacity, ActivityIndicator, RefreshContr
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { colors } from '@societyos/theme';
 import { api } from '../../src/lib/api';
 import { getUnwrapped } from '../../src/lib/unwrapped-get';
 import { StarStrip } from '../../src/components/review/StarStrip';
 import { ReviewCard } from '../../src/components/review/ReviewCard';
 import { ErrorCard } from '../../src/components/ErrorCard';
+import { AppHeader, EmptyState, FilterChips } from '../../src/components/ui';
 
 const FILTERS = ['All', '5★', '4★', '3★', 'Negative'] as const;
 type Filter = typeof FILTERS[number];
@@ -106,20 +108,21 @@ export default function ReviewsScreen() {
   });
 
   return (
-    <SafeAreaView className="flex-1 bg-gray-50">
-      <View className="px-6 pt-4 pb-3 bg-white">
-        <TouchableOpacity onPress={() => router.back()}>
-          <Text className="text-primary-500 text-base mb-3">← Back</Text>
-        </TouchableOpacity>
-        <View className="flex-row items-center justify-between">
-          <Text className="text-2xl font-bold text-gray-900">My Reviews</Text>
-          <TouchableOpacity onPress={() => router.push('/reviews/performance' as any)}>
-            <Text className="text-primary-500 text-sm font-semibold">Performance →</Text>
+    <SafeAreaView className="flex-1 bg-gray-50 dark:bg-gray-950" edges={['top']}>
+      <AppHeader
+        title="My Reviews"
+        right={
+          <TouchableOpacity
+            className="bg-white/20 rounded-full px-3 py-2"
+            onPress={() => router.push('/reviews/performance' as any)}
+          >
+            <Text className="text-white text-xs font-semibold">Performance →</Text>
           </TouchableOpacity>
-        </View>
-
+        }
+      />
+      <View className="px-6 pt-4 pb-3 bg-white">
         {/* Header */}
-        <View className="flex-row items-center mt-4 mb-3">
+        <View className="flex-row items-center mb-3">
           <Text className="text-5xl font-bold text-gray-900 mr-3">{avg.toFixed(1)}</Text>
           <View>
             <StarStrip value={avg} size={20} />
@@ -133,26 +136,17 @@ export default function ReviewsScreen() {
         </View>
 
         {/* Filter chips */}
-        <View className="flex-row gap-2 pb-2">
-          {FILTERS.map((f) => (
-            <TouchableOpacity
-              key={f}
-              className={`px-3 py-1.5 rounded-full border ${
-                filter === f ? 'bg-primary-500 border-primary-500' : 'bg-white border-gray-200'
-              }`}
-              onPress={() => setFilter(f)}
-            >
-              <Text className={`text-xs font-medium ${filter === f ? 'text-white' : 'text-gray-600'}`}>
-                {f}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+        <FilterChips
+          options={FILTERS.map((f) => ({ id: f, label: f }))}
+          selected={filter}
+          onSelect={setFilter}
+          className="pb-2"
+        />
       </View>
 
       {isLoading ? (
         <View className="flex-1 items-center justify-center">
-          <ActivityIndicator color="#821A52" />
+          <ActivityIndicator color={colors.primary[500]} />
         </View>
       ) : isError ? (
         <ErrorCard
@@ -160,20 +154,22 @@ export default function ReviewsScreen() {
           onRetry={() => refetch()}
         />
       ) : filtered.length === 0 ? (
-        <View className="flex-1 items-center justify-center px-8">
-          <Text className="text-4xl mb-3">⭐</Text>
-          <Text className="text-gray-500 text-center">No reviews yet — complete tasks to receive feedback</Text>
+        <View className="flex-1 items-center justify-center">
+          <EmptyState icon="star-outline" title="No reviews yet" body="Complete tasks to receive feedback" />
         </View>
       ) : (
         <FlatList
           data={filtered}
           keyExtractor={(r) => r.id}
+          initialNumToRender={10}
+          maxToRenderPerBatch={10}
+          windowSize={7}
           contentContainerStyle={{ paddingHorizontal: 24, paddingVertical: 16 }}
           ItemSeparatorComponent={() => <View className="h-3" />}
           refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={() => { setNewCount(0); refetch(); }} />}
           onEndReached={() => hasNextPage && fetchNextPage()}
           onEndReachedThreshold={0.5}
-          ListFooterComponent={isFetchingNextPage ? <ActivityIndicator className="my-4" color="#821A52" /> : null}
+          ListFooterComponent={isFetchingNextPage ? <ActivityIndicator className="my-4" color={colors.primary[500]} /> : null}
           renderItem={({ item }) => (
             <ReviewCard review={item} onLongPress={() => setFlagFor(item.id)} />
           )}

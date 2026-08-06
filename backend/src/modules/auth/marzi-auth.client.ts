@@ -26,11 +26,13 @@ export interface MarziTokenPair {
  * Thin client for the external Marzi Senior Community auth API
  * (https://dev.marzitech.in — see backend/POSTMAN.json › Auth).
  *
- * Updated 2026-05: SocietyOS now USES Marzi as its source of truth for
- * tokens — verify-otp passes Marzi's token pair straight through, and
- * /auth/refresh proxies to Marzi /v1/auth/refresh. Requires JWT_SECRET to
- * match Marzi's signing secret so our JwtStrategy can verify Marzi-signed
- * JWTs. See docs/AUTH-SECURITY-TRADEOFF.md for the rationale.
+ * Scope: Marzi is used ONLY as the OTP channel at login. SocietyOS mints its
+ * OWN local JWTs (JWT_SECRET stays independent — no shared secret with Marzi)
+ * and owns the user records + society/role gates. verify-otp does NOT pass
+ * Marzi's tokens through to the client; it parks Marzi's refresh/access in
+ * Redis so /auth/refresh can re-validate the session against Marzi (Marzi as
+ * the "is this user still allowed" authority) while the client only ever sees
+ * SocietyOS tokens. See docs/AUTH-SECURITY-TRADEOFF.md for the rationale.
  *
  * Activated by OTP_PROVIDER=marzi; otherwise dormant (the client returns
  * `enabled=false` and AuthService falls back to its local OTP+JWT path).

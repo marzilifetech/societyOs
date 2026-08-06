@@ -21,6 +21,32 @@ describe('notification-categories', () => {
       }
     });
 
+    it('every entry routes to a known Android channel', () => {
+      const channels = [
+        'emergency_sos',
+        'approvals',
+        'deliveries',
+        'community',
+        'payments',
+        'system',
+      ];
+      for (const cat of NOTIFICATION_CATEGORIES) {
+        expect(channels).toContain(cat.channelId);
+      }
+    });
+
+    it('pins the contract channel routing for key categories', () => {
+      expect(getCategory('emergency_sos')?.channelId).toBe('emergency_sos');
+      expect(getCategory('visitors_gate')?.channelId).toBe('approvals');
+      expect(getCategory('approval_results')?.channelId).toBe('approvals');
+      expect(getCategory('staff_tasks')?.channelId).toBe('approvals');
+      expect(getCategory('deliveries')?.channelId).toBe('deliveries');
+      expect(getCategory('notices')?.channelId).toBe('community');
+      expect(getCategory('notices_urgent')?.channelId).toBe('community');
+      expect(getCategory('payments_dues')?.channelId).toBe('payments');
+      expect(getCategory('account_auth')?.channelId).toBe('system');
+    });
+
     it('force-on categories (mutable=false) include emergency_sos', () => {
       expect(isForceOn('emergency_sos')).toBe(true);
     });

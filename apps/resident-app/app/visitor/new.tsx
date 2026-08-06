@@ -142,7 +142,7 @@ export default function NewVisitorScreen() {
             accessibilityLabel="Go back"
             className="flex-row items-center"
           >
-            <Ionicons name="chevron-back" size={20} color="#821A52" />
+            <Ionicons name="chevron-back" size={20} color={t.accentPrimary} />
             <Text className="text-primary-500" style={{ fontSize: t.fontBase }}>Back</Text>
           </TouchableOpacity>
         </View>
@@ -211,7 +211,7 @@ export default function NewVisitorScreen() {
             <Switch
               value={isRecurring}
               onValueChange={setIsRecurring}
-              trackColor={{ false: '#E5E7EB', true: '#821A52' }}
+              trackColor={{ false: '#E5E7EB', true: t.accentPrimary }}
               thumbColor="#fff"
               accessibilityLabel="Toggle recurring pass"
             />
@@ -230,7 +230,7 @@ export default function NewVisitorScreen() {
                     <TouchableOpacity
                       key={preset.label}
                       onPress={() => applyPreset(preset.days)}
-                      className={`rounded-xl px-3 items-center justify-center border ${active ? 'bg-primary-500 border-primary-500' : 'bg-white border-gray-200'}`}
+                      className={`rounded-full px-4 items-center justify-center border ${active ? 'bg-primary-500 border-primary-500' : 'bg-white border-gray-200'}`}
                       style={{ minHeight: t.touchTargetSm }}
                       accessibilityRole="button"
                       accessibilityLabel={`Set frequency to ${preset.label}`}
@@ -252,7 +252,7 @@ export default function NewVisitorScreen() {
                     <TouchableOpacity
                       key={day}
                       onPress={() => toggleDay(day)}
-                      className={`rounded-xl items-center justify-center border ${active ? 'bg-primary-500 border-primary-500' : 'bg-white border-gray-200'}`}
+                      className={`rounded-full items-center justify-center border ${active ? 'bg-primary-500 border-primary-500' : 'bg-white border-gray-200'}`}
                       style={{ minHeight: t.touchTargetSm, minWidth: 48 }}
                       accessibilityRole="button"
                       accessibilityLabel={`${active ? 'Deselect' : 'Select'} ${day}`}
@@ -271,7 +271,7 @@ export default function NewVisitorScreen() {
           )}
 
           <TouchableOpacity
-            className={`rounded-2xl py-4 items-center mt-4 ${isValid ? 'bg-primary-500' : 'bg-gray-200'}`}
+            className={`rounded-full py-4 items-center mt-4 ${isValid ? 'bg-primary-500' : 'bg-gray-200'}`}
             onPress={() => mutation.mutate(form)}
             disabled={!isValid || isPending}
             style={{ minHeight: t.touchTarget }}

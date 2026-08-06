@@ -111,6 +111,9 @@ export default function GroupChatScreen() {
           <FlatList
             data={list}
             keyExtractor={(m) => m.id}
+            initialNumToRender={10}
+            maxToRenderPerBatch={10}
+            windowSize={7}
             inverted
             contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 12 }}
             ItemSeparatorComponent={() => <View className="h-2" />}

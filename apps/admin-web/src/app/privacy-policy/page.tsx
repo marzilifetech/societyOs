@@ -54,7 +54,7 @@ export default function PrivacyPolicyPage() {
               <strong>Location (Staff App)</strong> — precise GPS location captured only at the
               moment a staff member takes a task verification photo or raises an emergency SOS
               alert. This is used in the foreground only; we do not track location in the
-              background. In the Resident App, location is used only if you raise a Medical SOS
+              background. In the Resident App, location is used only if you raise an Emergency SOS
               alert.
             </>,
             <>

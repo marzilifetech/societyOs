@@ -1,21 +1,28 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
-  FlatList,
+  ActivityIndicator,
   Image,
   RefreshControl,
-  StyleSheet,
+  SectionList,
   Text,
   TouchableOpacity,
   View,
-  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Stack, router } from 'expo-router';
-import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Stack, router, useFocusEffect } from 'expo-router';
+import * as Notifications from 'expo-notifications';
+import { Ionicons } from '@expo/vector-icons';
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQueryClient,
+  type InfiniteData,
+} from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { api } from '../../src/lib/api';
 
-const BRAND = '#1E3A5F';
+const BRAND = '#821A52'; // berry primary-500 (was legacy navy)
+const INBOX_KEY = ['notifications', 'inbox'] as const;
 
 type InboxItem = {
   id: string;
@@ -50,6 +57,49 @@ function timeAgo(iso: string): string {
   return new Date(iso).toLocaleDateString();
 }
 
+// ---------------------------------------------------------------------------
+// Category visuals — leading tinted icon circle keyed off the backend's
+// category registry (notification-categories.ts). Legacy event names from
+// older payloads normalise onto the same visuals.
+// ---------------------------------------------------------------------------
+
+type CategoryVisual = { icon: keyof typeof Ionicons.glyphMap; tint: string; bg: string };
+
+const DEFAULT_VISUAL: CategoryVisual = { icon: 'notifications', tint: BRAND, bg: '#EFF4FB' };
+
+const CATEGORY_VISUALS: Record<string, CategoryVisual> = {
+  visitor_approvals: { icon: 'person', tint: '#9A6B00', bg: '#FBF1D9' },
+  visitors_gate: { icon: 'person', tint: '#9A6B00', bg: '#FBF1D9' },
+  staff_tasks: { icon: 'checkbox', tint: '#2563EB', bg: '#DBEAFE' },
+  staff_help_requests: { icon: 'hand-left', tint: '#7C3AED', bg: '#EDE9FE' },
+  deliveries: { icon: 'cube', tint: '#0284C7', bg: '#E0F2FE' },
+  notices: { icon: 'megaphone', tint: '#9A6B00', bg: '#FBF1D9' },
+  notices_urgent: { icon: 'megaphone', tint: '#9A6B00', bg: '#FBF1D9' },
+  payments: { icon: 'card', tint: '#1F7A45', bg: '#E7F4EC' },
+  emergency_sos: { icon: 'alert', tint: '#C42847', bg: '#FCE9EE' },
+  complaints: { icon: 'chatbubble', tint: '#7C3AED', bg: '#EDE9FE' },
+  approval_results: { icon: 'checkmark-circle', tint: '#1F7A45', bg: '#E7F4EC' },
+  account_auth: { icon: 'shield-checkmark', tint: '#475569', bg: '#F1F5F9' },
+};
+
+const LEGACY_TO_CATEGORY: Record<string, string> = {
+  VISITOR_APPROVAL_REQUEST: 'visitor_approvals',
+  VISITOR_ARRIVAL: 'visitor_approvals',
+  TASK_ASSIGNED: 'staff_tasks',
+  task: 'staff_tasks',
+  HELP_REQUEST: 'staff_help_requests',
+  help: 'staff_help_requests',
+  NOTICE_PUBLISHED: 'notices',
+  notice: 'notices',
+  SOS_TRIGGERED: 'emergency_sos',
+  sos: 'emergency_sos',
+};
+
+function visualFor(item: InboxItem): CategoryVisual {
+  const key = item.type ?? '';
+  return CATEGORY_VISUALS[key] ?? CATEGORY_VISUALS[LEGACY_TO_CATEGORY[key] ?? ''] ?? DEFAULT_VISUAL;
+}
+
 function deepLinkFor(item: InboxItem): string {
   const data = item.data ?? {};
   const id =
@@ -58,23 +108,35 @@ function deepLinkFor(item: InboxItem): string {
     (typeof data.visitId === 'string' && data.visitId) ||
     undefined;
   switch (item.type) {
-    case 'VISITOR_APPROVAL_REQUEST':
+    // ── Category registry keys — the backend always sets these now ─────────
+    case 'visitor_approvals':
+    case 'visitors_gate':
+    case 'deliveries':
     case 'approval_results':
       return '/visitors';
-    case 'TASK_ASSIGNED':
     case 'staff_tasks':
+      return id ? `/tasks/${id}` : '/(tabs)/tasks';
+    case 'staff_help_requests':
+      return id ? `/help-requests/${id}` : '/help-requests';
+    case 'notices':
+    case 'notices_urgent':
+    case 'community':
+      return '/community/notices';
+    case 'emergency_sos':
+      return id ? `/help-requests/${id}` : '/help-requests';
+    // ── Legacy aliases — rows written by older backend builds ──────────────
+    case 'VISITOR_APPROVAL_REQUEST':
+      return '/visitors';
+    case 'TASK_ASSIGNED':
     case 'task':
       return id ? `/tasks/${id}` : '/(tabs)/tasks';
     case 'HELP_REQUEST':
     case 'help':
       return id ? `/help-requests/${id}` : '/help-requests';
     case 'NOTICE_PUBLISHED':
-    case 'notices':
-    case 'notices_urgent':
     case 'notice':
       return '/community/notices';
     case 'SOS_TRIGGERED':
-    case 'emergency_sos':
     case 'sos':
       return '/help-requests';
     default:
@@ -82,9 +144,55 @@ function deepLinkFor(item: InboxItem): string {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Date sections — Today / Yesterday / This week / Earlier
+// ---------------------------------------------------------------------------
+
+const SECTION_ORDER = ['today', 'yesterday', 'thisWeek', 'earlier'] as const;
+type SectionKey = (typeof SECTION_ORDER)[number];
+
+function sectionKeyFor(iso: string): SectionKey {
+  const t = new Date(iso).getTime();
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  if (t >= startOfToday) return 'today';
+  if (t >= startOfToday - 86_400_000) return 'yesterday';
+  if (t >= startOfToday - 6 * 86_400_000) return 'thisWeek';
+  return 'earlier';
+}
+
+type InboxSection = { key: SectionKey; data: InboxItem[] };
+
+function buildSections(items: InboxItem[]): InboxSection[] {
+  const buckets = new Map<SectionKey, InboxItem[]>();
+  for (const item of items) {
+    const key = sectionKeyFor(item.createdAt);
+    const list = buckets.get(key);
+    if (list) list.push(item);
+    else buckets.set(key, [item]);
+  }
+  return SECTION_ORDER.filter((k) => buckets.has(k)).map((k) => ({ key: k, data: buckets.get(k)! }));
+}
+
 export default function StaffNotificationsInbox() {
   const { t } = useTranslation();
   const qc = useQueryClient();
+  const [filter, setFilter] = useState<'all' | 'unread'>('all');
+
+  const sectionLabels: Record<SectionKey, string> = {
+    today: t('notifications.inbox.today', 'Today'),
+    yesterday: t('notifications.inbox.yesterday', 'Yesterday'),
+    thisWeek: t('notifications.inbox.thisWeek', 'This week'),
+    earlier: t('notifications.inbox.earlier', 'Earlier'),
+  };
+
+  // Clear the OS app-icon badge when the inbox gains focus — the badge is the
+  // backend's unread NotificationLog count; opening the inbox acknowledges it.
+  useFocusEffect(
+    useCallback(() => {
+      Notifications.setBadgeCountAsync(0).catch(() => {});
+    }, []),
+  );
 
   const {
     data,
@@ -96,16 +204,38 @@ export default function StaffNotificationsInbox() {
     hasNextPage,
     isFetchingNextPage,
   } = useInfiniteQuery({
-    queryKey: ['notifications', 'inbox'],
+    queryKey: INBOX_KEY,
     queryFn: fetchPage,
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
   });
 
+  // Optimistic per-item mark-read: write the cache immediately, roll back on
+  // error, and reconcile the unread badge count afterwards.
   const markRead = useMutation({
     mutationFn: (id: string) => api.patch(`/notifications/${id}/read`, {}),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['notifications', 'inbox'] });
+    onMutate: async (id: string) => {
+      await qc.cancelQueries({ queryKey: INBOX_KEY });
+      const previous = qc.getQueryData<InfiniteData<InboxPage>>(INBOX_KEY);
+      qc.setQueryData<InfiniteData<InboxPage>>(INBOX_KEY, (old) =>
+        old
+          ? {
+              ...old,
+              pages: old.pages.map((p) => ({
+                ...p,
+                items: p.items.map((it) =>
+                  it.id === id && !it.readAt ? { ...it, readAt: new Date().toISOString() } : it,
+                ),
+              })),
+            }
+          : old,
+      );
+      return { previous };
+    },
+    onError: (_err, _id, ctx) => {
+      if (ctx?.previous) qc.setQueryData(INBOX_KEY, ctx.previous);
+    },
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: ['notifications', 'unread-count'] });
     },
   });
@@ -113,12 +243,16 @@ export default function StaffNotificationsInbox() {
   const markAllRead = useMutation({
     mutationFn: () => api.patch('/notifications/read-all', {}),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['notifications', 'inbox'] });
+      qc.invalidateQueries({ queryKey: INBOX_KEY });
       qc.invalidateQueries({ queryKey: ['notifications', 'unread-count'] });
     },
   });
 
-  const items = data?.pages.flatMap((p) => p.items) ?? [];
+  const items = useMemo(() => data?.pages.flatMap((p) => p.items) ?? [], [data]);
+  const sections = useMemo(
+    () => buildSections(filter === 'unread' ? items.filter((it) => !it.readAt) : items),
+    [items, filter],
+  );
 
   const handlePress = useCallback(
     (item: InboxItem) => {
@@ -128,89 +262,180 @@ export default function StaffNotificationsInbox() {
     [markRead],
   );
 
+  const filters: { key: 'all' | 'unread'; label: string }[] = [
+    { key: 'all', label: t('notifications.inbox.filterAll', 'All') },
+    { key: 'unread', label: t('notifications.inbox.filterUnread', 'Unread') },
+  ];
+
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <SafeAreaView className="flex-1 bg-gray-50 dark:bg-gray-950" edges={['top']}>
       <Stack.Screen options={{ headerShown: false }} />
 
-      <View style={styles.header}>
+      <View className="flex-row items-center justify-between px-4 py-3">
         <TouchableOpacity
           onPress={() => router.back()}
           hitSlop={12}
           accessibilityRole="button"
           accessibilityLabel={t('common.back', 'Back')}
+          className="h-10 w-10 items-center justify-center rounded-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800"
         >
-          <Text style={styles.headerBack}>‹ {t('common.back', 'Back')}</Text>
+          <Ionicons name="chevron-back" size={20} color={BRAND} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{t('notifications.inbox.title', 'Notifications')}</Text>
+        <Text className="text-lg font-bold text-gray-900 dark:text-gray-50">
+          {t('notifications.inbox.title', 'Notifications')}
+        </Text>
         <TouchableOpacity
           onPress={() => markAllRead.mutate()}
           hitSlop={12}
           accessibilityRole="button"
           accessibilityLabel={t('notifications.inbox.markAllRead', 'Mark all read')}
         >
-          <Text style={styles.headerAction}>
+          <Text className="text-sm font-semibold" style={{ color: BRAND }}>
             {t('notifications.inbox.markAllRead', 'Mark all read')}
           </Text>
         </TouchableOpacity>
       </View>
 
+      <View className="flex-row gap-2 px-4 pb-3">
+        {filters.map((f) => {
+          const active = f.key === filter;
+          return (
+            <TouchableOpacity
+              key={f.key}
+              onPress={() => setFilter(f.key)}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: active }}
+              className={
+                active
+                  ? 'rounded-full px-5 py-2'
+                  : 'rounded-full px-5 py-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800'
+              }
+              style={active ? { backgroundColor: BRAND } : undefined}
+            >
+              <Text
+                className={
+                  active
+                    ? 'text-sm font-semibold text-white'
+                    : 'text-sm font-semibold text-gray-700 dark:text-gray-200'
+                }
+              >
+                {f.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
       {isLoading ? (
-        <View style={styles.center}>
-          <ActivityIndicator color={BRAND} />
+        <View className="gap-3 px-4 pt-1">
+          <View className="h-20 rounded-2xl bg-gray-100 dark:bg-gray-800 animate-pulse" />
+          <View className="h-20 rounded-2xl bg-gray-100 dark:bg-gray-800 animate-pulse" />
+          <View className="h-20 rounded-2xl bg-gray-100 dark:bg-gray-800 animate-pulse" />
         </View>
       ) : isError ? (
-        <View style={styles.center}>
-          <Text style={styles.errorText}>{t('common.errorLoading', 'Could not load.')}</Text>
-          <TouchableOpacity onPress={() => refetch()} style={styles.retryBtn}>
-            <Text style={styles.retryText}>{t('common.tryAgain', 'Try again')}</Text>
+        <View className="flex-1 items-center justify-center px-6">
+          <Text className="mb-4 text-center text-base text-gray-700 dark:text-gray-200">
+            {t('common.errorLoading', 'Could not load.')}
+          </Text>
+          <TouchableOpacity
+            onPress={() => refetch()}
+            className="rounded-xl px-5 py-3"
+            style={{ backgroundColor: BRAND }}
+          >
+            <Text className="text-base font-semibold text-white">
+              {t('common.tryAgain', 'Try again')}
+            </Text>
           </TouchableOpacity>
         </View>
       ) : (
-        <FlatList
-          data={items}
+        <SectionList
+          sections={sections}
           keyExtractor={(it) => it.id}
-          contentContainerStyle={items.length === 0 ? styles.empty : undefined}
+          stickySectionHeadersEnabled={false}
+          contentContainerStyle={
+            sections.length === 0
+              ? { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 40 }
+              : { paddingBottom: 24 }
+          }
           refreshControl={
             <RefreshControl refreshing={isRefetching} onRefresh={() => refetch()} tintColor={BRAND} />
           }
           ListEmptyComponent={
-            <Text style={styles.emptyText}>
-              {t('notifications.inbox.empty', "You're all caught up.")}
-            </Text>
+            <View className="items-center">
+              <View className="h-16 w-16 items-center justify-center rounded-full bg-success-soft">
+                <Ionicons name="checkmark-done" size={28} color="#1F7A45" />
+              </View>
+              <Text className="mt-3 text-lg font-bold text-gray-900 dark:text-gray-50">
+                {t('notifications.inbox.emptyTitle', "You're all caught up")}
+              </Text>
+              <Text className="mt-1 text-center text-sm text-gray-500 dark:text-gray-400">
+                {filter === 'unread'
+                  ? t('notifications.inbox.emptyUnread', 'No unread notifications right now.')
+                  : t('notifications.inbox.emptyBody', 'New alerts will appear here.')}
+              </Text>
+            </View>
           }
           onEndReached={() => hasNextPage && fetchNextPage()}
           onEndReachedThreshold={0.4}
           ListFooterComponent={
             isFetchingNextPage ? <ActivityIndicator color={BRAND} style={{ paddingVertical: 14 }} /> : null
           }
+          renderSectionHeader={({ section }) => (
+            <Text className="px-5 pb-2 pt-4 text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+              {sectionLabels[section.key]}
+            </Text>
+          )}
           renderItem={({ item }) => {
-            const data = item.data ?? {};
-            const imageUrl = typeof data.imageUrl === 'string' ? data.imageUrl : null;
+            const itemData = item.data ?? {};
+            const imageUrl = typeof itemData.imageUrl === 'string' ? itemData.imageUrl : null;
+            const visual = visualFor(item);
+            const unread = !item.readAt;
             return (
               <TouchableOpacity
                 onPress={() => handlePress(item)}
-                style={[styles.row, item.readAt ? null : styles.rowUnread]}
+                activeOpacity={0.85}
+                className="mx-4 mb-2.5 flex-row items-center gap-3 rounded-2xl border border-gray-200 bg-white p-3.5 dark:border-gray-800 dark:bg-gray-900"
+                style={unread ? { backgroundColor: '#EFF4FB', borderColor: 'rgba(30,58,95,0.18)' } : undefined}
                 accessibilityRole="button"
                 accessibilityLabel={`${item.title}. ${item.body}. ${timeAgo(item.createdAt)}.`}
               >
                 {imageUrl ? (
-                  <Image source={{ uri: imageUrl }} style={styles.thumb} />
+                  <Image source={{ uri: imageUrl }} className="h-11 w-11 rounded-full bg-gray-200" />
                 ) : (
-                  <View style={[styles.thumb, styles.thumbFallback]}>
-                    <Text style={styles.thumbFallbackText}>{item.title.slice(0, 1).toUpperCase()}</Text>
+                  <View
+                    className="h-11 w-11 items-center justify-center rounded-full"
+                    style={{ backgroundColor: visual.bg }}
+                  >
+                    <Ionicons name={visual.icon} size={20} color={visual.tint} />
                   </View>
                 )}
-                <View style={styles.rowBody}>
-                  <View style={styles.rowTitleLine}>
-                    {!item.readAt ? <View style={styles.dot} /> : null}
-                    <Text style={styles.rowTitle} numberOfLines={1}>
+                <View className="flex-1">
+                  <View className="flex-row items-center gap-1.5">
+                    {unread ? (
+                      <View className="h-2 w-2 rounded-full" style={{ backgroundColor: BRAND }} />
+                    ) : null}
+                    <Text
+                      className={
+                        unread
+                          ? 'flex-1 text-[15px] font-bold text-gray-900'
+                          : 'flex-1 text-[15px] font-bold text-gray-900 dark:text-gray-50'
+                      }
+                      numberOfLines={1}
+                    >
                       {item.title}
                     </Text>
+                    <Text className="text-xs text-gray-400">{timeAgo(item.createdAt)}</Text>
                   </View>
-                  <Text style={styles.rowBodyText} numberOfLines={2}>
+                  <Text
+                    className={
+                      unread
+                        ? 'mt-0.5 text-sm leading-5 text-gray-600'
+                        : 'mt-0.5 text-sm leading-5 text-gray-600 dark:text-gray-300'
+                    }
+                    numberOfLines={2}
+                  >
                     {item.body}
                   </Text>
-                  <Text style={styles.rowTime}>{timeAgo(item.createdAt)}</Text>
                 </View>
               </TouchableOpacity>
             );
@@ -220,45 +445,3 @@ export default function StaffNotificationsInbox() {
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#F5F7FA' },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#E5E7EB',
-    backgroundColor: '#FFFFFF',
-  },
-  headerBack: { fontSize: 17, color: BRAND, fontWeight: '600' },
-  headerTitle: { fontSize: 18, fontWeight: '700', color: '#111111' },
-  headerAction: { fontSize: 15, color: BRAND, fontWeight: '600' },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 },
-  errorText: { fontSize: 16, color: '#374151', textAlign: 'center', marginBottom: 16 },
-  retryBtn: { backgroundColor: BRAND, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 8 },
-  retryText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
-  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40 },
-  emptyText: { fontSize: 16, color: '#6B7280' },
-  row: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    gap: 12,
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#E5E7EB',
-  },
-  rowUnread: { backgroundColor: '#EFF4FB' },
-  thumb: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#E5E7EB' },
-  thumbFallback: { backgroundColor: BRAND, alignItems: 'center', justifyContent: 'center' },
-  thumbFallbackText: { color: '#FFFFFF', fontSize: 18, fontWeight: '700' },
-  rowBody: { flex: 1 },
-  rowTitleLine: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: BRAND },
-  rowTitle: { fontSize: 16, fontWeight: '600', color: '#111111', flex: 1 },
-  rowBodyText: { fontSize: 14, color: '#374151', marginTop: 2, lineHeight: 19 },
-  rowTime: { fontSize: 12, color: '#9CA3AF', marginTop: 4 },
-});

@@ -63,7 +63,7 @@ export default function PinSetupScreen() {
           <Text className="text-3xl font-bold text-white mb-2">
             {step === 'create' ? 'Set up PIN' : 'Confirm PIN'}
           </Text>
-          <Text className="text-blue-200 text-base mb-10">
+          <Text className="text-primary-100 text-base mb-10">
             {step === 'create'
               ? 'Choose a 4-digit PIN to secure your app.'
               : 'Re-enter the same PIN to confirm.'}

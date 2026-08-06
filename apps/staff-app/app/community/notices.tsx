@@ -70,6 +70,9 @@ export default function NoticesScreen() {
         <FlatList
           data={filtered}
           keyExtractor={(n) => n.id}
+          initialNumToRender={10}
+          maxToRenderPerBatch={10}
+          windowSize={7}
           contentContainerStyle={{ paddingHorizontal: 24, paddingVertical: 16 }}
           ItemSeparatorComponent={() => <View className="h-3" />}
           renderItem={({ item }) => {

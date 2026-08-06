@@ -13,8 +13,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
+import { Ionicons } from '@expo/vector-icons';
+import { colors } from '@societyos/theme';
 import { api } from '../../../src/lib/api';
 import { compressImage, uploadToPresigned } from '../../../src/lib/upload';
+import { AppHeader, Card } from '../../../src/components/ui';
 
 export default function StartWorkScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -80,9 +83,9 @@ export default function StartWorkScreen() {
 
   if (isLoading || !task) {
     return (
-      <SafeAreaView className="flex-1 bg-gray-950 items-center justify-center">
+      <SafeAreaView className="flex-1 bg-gray-50 dark:bg-gray-950 items-center justify-center">
         <Stack.Screen options={{ title: 'Start Work' }} />
-        <ActivityIndicator color="#fff" />
+        <ActivityIndicator color={colors.primary[500]} />
       </SafeAreaView>
     );
   }
@@ -90,29 +93,24 @@ export default function StartWorkScreen() {
   const busy = uploading || startWork.isPending;
 
   return (
-    <SafeAreaView className="flex-1 bg-gray-950">
+    <SafeAreaView className="flex-1 bg-gray-50 dark:bg-gray-950">
       <Stack.Screen options={{ headerShown: false }} />
-      <View className="bg-gray-900 px-5 py-4 flex-row items-center">
-        <TouchableOpacity onPress={() => router.back()} className="w-10 h-10 items-center justify-center">
-          <Text className="text-white text-2xl">‹</Text>
-        </TouchableOpacity>
-        <Text className="text-white text-lg font-bold ml-2">Start Work</Text>
-      </View>
+      <AppHeader title="Start Work" />
 
       <ScrollView className="flex-1" contentContainerClassName="p-5 gap-4">
         {/* Task summary */}
-        <View className="bg-gray-900 rounded-2xl p-5">
-          <Text className="text-xs text-gray-400 uppercase tracking-wider mb-1">{task.category}</Text>
-          <Text className="text-white text-base font-semibold">
+        <Card padding="lg">
+          <Text className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">{task.category}</Text>
+          <Text className="text-gray-900 dark:text-gray-100 text-base font-semibold">
             {task.requestedBy?.name ?? 'Resident'} · Flat {task.unit?.flatNumber ?? '—'}
           </Text>
-          <Text className="text-gray-300 text-sm mt-2">{task.description}</Text>
-        </View>
+          <Text className="text-gray-600 dark:text-gray-300 text-sm mt-2">{task.description}</Text>
+        </Card>
 
         {/* Before photo */}
-        <View className="bg-gray-900 rounded-2xl p-5">
-          <Text className="text-white font-semibold mb-1">Before Photo</Text>
-          <Text className="text-gray-400 text-xs mb-4">Required — capture current state before starting work</Text>
+        <Card padding="lg">
+          <Text className="text-gray-900 dark:text-gray-100 font-semibold mb-1">Before Photo</Text>
+          <Text className="text-gray-500 dark:text-gray-400 text-xs mb-4">Required — capture current state before starting work</Text>
 
           {beforePhoto ? (
             <View className="gap-3">
@@ -124,27 +122,27 @@ export default function StartWorkScreen() {
               <TouchableOpacity
                 onPress={pickPhoto}
                 disabled={busy}
-                className="bg-gray-800 rounded-xl py-3 items-center"
+                className="bg-gray-100 dark:bg-gray-800 rounded-full py-3 items-center"
               >
-                <Text className="text-gray-300 text-sm font-semibold">Retake Photo</Text>
+                <Text className="text-gray-700 dark:text-gray-300 text-sm font-semibold">Retake Photo</Text>
               </TouchableOpacity>
             </View>
           ) : (
             <TouchableOpacity
               onPress={pickPhoto}
               disabled={busy}
-              className="border-2 border-dashed border-gray-700 rounded-xl py-10 items-center gap-2"
+              className="border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-xl py-10 items-center gap-2"
             >
-              <Text className="text-4xl">📷</Text>
-              <Text className="text-gray-400 text-sm font-semibold">Tap to take Before photo</Text>
+              <Ionicons name="camera-outline" size={36} color={colors.primary[500]} />
+              <Text className="text-gray-500 dark:text-gray-400 text-sm font-semibold">Tap to take Before photo</Text>
             </TouchableOpacity>
           )}
-        </View>
+        </Card>
 
         {/* Resident photos (if any) */}
         {task.photos?.length > 0 && (
-          <View className="bg-gray-900 rounded-2xl p-5">
-            <Text className="text-white font-semibold mb-3">Resident's Photos</Text>
+          <Card padding="lg">
+            <Text className="text-gray-900 dark:text-gray-100 font-semibold mb-3">Resident's Photos</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               {task.photos.map((p: any, i: number) => (
                 <Image
@@ -155,15 +153,15 @@ export default function StartWorkScreen() {
                 />
               ))}
             </ScrollView>
-          </View>
+          </Card>
         )}
       </ScrollView>
 
-      <View className="px-5 py-4 bg-gray-900 border-t border-gray-800">
+      <View className="px-5 py-4 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800">
         <TouchableOpacity
           onPress={handleStart}
           disabled={busy || !beforePhoto}
-          className={`rounded-2xl items-center py-4 ${!beforePhoto ? 'bg-gray-700' : 'bg-green-600'}`}
+          className={`rounded-full items-center py-4 ${!beforePhoto ? 'bg-gray-300 dark:bg-gray-700' : 'bg-green-600'}`}
           style={{ minHeight: 56 }}
         >
           {busy ? (

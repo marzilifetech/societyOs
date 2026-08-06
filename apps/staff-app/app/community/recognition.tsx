@@ -108,6 +108,9 @@ export default function RecognitionScreen() {
         <FlatList
           data={filtered}
           keyExtractor={(r) => r.id}
+          initialNumToRender={10}
+          maxToRenderPerBatch={10}
+          windowSize={7}
           contentContainerStyle={{ paddingHorizontal: 24, paddingVertical: 16 }}
           ItemSeparatorComponent={() => <View className="h-3" />}
           renderItem={({ item }) => {
@@ -152,6 +155,9 @@ export default function RecognitionScreen() {
               <FlatList
                 data={staffList ?? []}
                 keyExtractor={(s) => s.id}
+                initialNumToRender={10}
+                maxToRenderPerBatch={10}
+                windowSize={7}
                 renderItem={({ item }) => (
                   <TouchableOpacity
                     className={`px-4 py-2.5 ${staffId === item.id ? 'bg-primary-50' : ''}`}

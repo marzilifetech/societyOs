@@ -94,6 +94,9 @@ export default function BillsListScreen() {
         <FlatList
           data={sorted}
           keyExtractor={(b) => b.id}
+          initialNumToRender={10}
+          maxToRenderPerBatch={10}
+          windowSize={7}
           contentContainerStyle={{ padding: 24, paddingBottom: 40 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await refetch(); setRefreshing(false); }} tintColor="#821A52" />}
           ItemSeparatorComponent={() => <View style={{ height: 12 }} />}

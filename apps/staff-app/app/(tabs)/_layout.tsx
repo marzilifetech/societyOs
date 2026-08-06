@@ -1,15 +1,20 @@
+import type { ComponentProps } from 'react';
 import { Tabs } from 'expo-router';
 import { View, Text } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
+import { Ionicons } from '@expo/vector-icons';
 import i18nInstance from '../../src/lib/i18n';
 import { useColorScheme } from 'nativewind';
 import { useSettingsStore } from '../../src/store/settings.store';
+import { colors } from '@societyos/theme';
 
-const ACTIVE_LIGHT = '#821A52';
-const ACTIVE_DARK = '#93C5FD';
+const ACTIVE_LIGHT = colors.primary[500];
+const ACTIVE_DARK = colors.primary[200];
 const INACTIVE_LIGHT = '#9CA3AF';
 const INACTIVE_DARK = '#6B7280';
+
+type TabIconName = ComponentProps<typeof Ionicons>['name'];
 
 function Badge({ count }: { count: number }) {
   if (!count || count <= 0) return null;
@@ -33,11 +38,23 @@ function Badge({ count }: { count: number }) {
   );
 }
 
-/** Emoji only — labels use the tab bar’s label slot so they aren’t squeezed into the icon area. */
-function TabEmoji({ emoji, focused, badge }: { emoji: string; focused: boolean; badge?: number }) {
+/** Icon only — labels use the tab bar’s label slot so they aren’t squeezed into the icon area. */
+function TabIcon({
+  name,
+  focusedName,
+  focused,
+  color,
+  badge,
+}: {
+  name: TabIconName;
+  focusedName: TabIconName;
+  focused: boolean;
+  color: string;
+  badge?: number;
+}) {
   return (
     <View style={{ alignItems: 'center', justifyContent: 'center' }}>
-      <Text style={{ fontSize: focused ? 22 : 20 }}>{emoji}</Text>
+      <Ionicons name={focused ? focusedName : name} size={focused ? 24 : 22} color={color} />
       <Badge count={badge ?? 0} />
     </View>
   );
@@ -105,7 +122,9 @@ export default function TabLayout() {
         options={{
           title: t('tabs.home'),
           tabBarLabel: tabBarLabel(t('tabs.home')),
-          tabBarIcon: ({ focused }) => <TabEmoji emoji="🏠" focused={focused} />,
+          tabBarIcon: ({ focused, color }) => (
+            <TabIcon name="home-outline" focusedName="home" focused={focused} color={color} />
+          ),
         }}
       />
       <Tabs.Screen
@@ -113,7 +132,9 @@ export default function TabLayout() {
         options={{
           title: t('tabs.duty'),
           tabBarLabel: tabBarLabel(t('tabs.duty')),
-          tabBarIcon: ({ focused }) => <TabEmoji emoji="📋" focused={focused} />,
+          tabBarIcon: ({ focused, color }) => (
+            <TabIcon name="clipboard-outline" focusedName="clipboard" focused={focused} color={color} />
+          ),
         }}
       />
       <Tabs.Screen
@@ -121,8 +142,14 @@ export default function TabLayout() {
         options={{
           title: t('tabs.tasks'),
           tabBarLabel: tabBarLabel(t('tabs.tasks')),
-          tabBarIcon: ({ focused }) => (
-            <TabEmoji emoji="✅" focused={focused} badge={badges.tasks} />
+          tabBarIcon: ({ focused, color }) => (
+            <TabIcon
+              name="checkmark-circle-outline"
+              focusedName="checkmark-circle"
+              focused={focused}
+              color={color}
+              badge={badges.tasks}
+            />
           ),
         }}
       />
@@ -131,7 +158,9 @@ export default function TabLayout() {
         options={{
           title: t('tabs.profile'),
           tabBarLabel: tabBarLabel(t('tabs.profile')),
-          tabBarIcon: ({ focused }) => <TabEmoji emoji="👤" focused={focused} />,
+          tabBarIcon: ({ focused, color }) => (
+            <TabIcon name="person-outline" focusedName="person" focused={focused} color={color} />
+          ),
         }}
       />
     </Tabs>

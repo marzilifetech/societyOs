@@ -34,6 +34,15 @@ type OnboardResponse = {
   };
 };
 
+// Soft card shadow matching the redesign-kit RoundCard surface.
+const cardShadow = {
+  shadowColor: '#000',
+  shadowOffset: { width: 0, height: 6 },
+  shadowOpacity: 0.06,
+  shadowRadius: 14,
+  elevation: 2,
+} as const;
+
 export default function ProfileSetupScreen() {
   const societyId = useAuthStore((s) => s.societyId);
   const user = useAuthStore((s) => s.user);
@@ -140,7 +149,7 @@ export default function ProfileSetupScreen() {
         </Text>
 
         {/* Name */}
-        <View className="bg-gray-50 rounded-2xl p-5 mb-4 border border-gray-200">
+        <View className="bg-white rounded-2xl p-5 mb-4 border border-gray-100" style={cardShadow}>
           <Text className="text-gray-900 text-xs font-bold tracking-widest uppercase mb-1">Your name</Text>
           <TextInput
             className="bg-gray-100 rounded-xl p-4 text-gray-900 text-base border border-gray-200 mt-2"
@@ -157,7 +166,7 @@ export default function ProfileSetupScreen() {
         </View>
 
         {/* Email */}
-        <View className="bg-gray-50 rounded-2xl p-5 mb-4 border border-gray-200">
+        <View className="bg-white rounded-2xl p-5 mb-4 border border-gray-100" style={cardShadow}>
           <Text className="text-gray-900 text-xs font-bold tracking-widest uppercase mb-1">Email (optional)</Text>
           <TextInput
             className="bg-gray-100 rounded-xl p-4 text-gray-900 text-base border border-gray-200 mt-2"
@@ -177,7 +186,7 @@ export default function ProfileSetupScreen() {
         </View>
 
         {/* Resident type */}
-        <View className="bg-gray-50 rounded-2xl p-5 mb-4 border border-gray-200">
+        <View className="bg-white rounded-2xl p-5 mb-4 border border-gray-100" style={cardShadow}>
           <Text className="text-gray-900 text-xs font-bold tracking-widest uppercase mb-1">Resident type</Text>
           <View className="flex-row mt-3" style={{ gap: 10 }}>
             {(['OWNER', 'TENANT'] as const).map((option) => {
@@ -206,7 +215,7 @@ export default function ProfileSetupScreen() {
         {/* Flat selection — opens a searchable bottom-sheet picker. Rendering
             the full list inline is painful on larger societies (100+ flats);
             search-then-tap is faster for elderly users too. */}
-        <View className="bg-gray-50 rounded-2xl p-5 mb-4 border border-gray-200">
+        <View className="bg-white rounded-2xl p-5 mb-4 border border-gray-100" style={cardShadow}>
           <Text className="text-gray-900 text-xs font-bold tracking-widest uppercase mb-3">
             Select your flat
           </Text>
@@ -322,6 +331,9 @@ export default function ProfileSetupScreen() {
             <FlatList
               data={filteredFlats}
               keyExtractor={(f) => f.id}
+              initialNumToRender={12}
+              maxToRenderPerBatch={12}
+              windowSize={7}
               keyboardShouldPersistTaps="handled"
               contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 20 }}
               ItemSeparatorComponent={() => <View style={{ height: 1, backgroundColor: '#F3F4F6' }} />}
@@ -370,7 +382,7 @@ export default function ProfileSetupScreen() {
         </Modal>
 
         {/* Emergency contact */}
-        <View className="bg-gray-50 rounded-2xl p-5 mb-4 border border-gray-200">
+        <View className="bg-white rounded-2xl p-5 mb-4 border border-gray-100" style={cardShadow}>
           <Text className="text-gray-900 text-xs font-bold tracking-widest uppercase mb-1">Emergency contact</Text>
           <TextInput
             className="bg-gray-100 rounded-xl p-4 text-gray-900 text-base border border-gray-200 mt-2"
@@ -397,7 +409,7 @@ export default function ProfileSetupScreen() {
         </View>
 
         {/* Consent */}
-        <View className="bg-gray-50 rounded-2xl p-5 mb-4 border border-gray-200">
+        <View className="bg-white rounded-2xl p-5 mb-4 border border-gray-100" style={cardShadow}>
           <View className="flex-row items-start justify-between">
             <View className="flex-1 mr-3">
               <Text className="text-gray-900 text-base font-semibold mb-1.5">
@@ -435,7 +447,7 @@ export default function ProfileSetupScreen() {
         <TouchableOpacity
           onPress={() => mutation.mutate()}
           disabled={!isValid || mutation.isPending}
-          className={`rounded-2xl h-14 items-center justify-center ${
+          className={`rounded-full h-14 items-center justify-center ${
             isValid ? 'bg-primary-500' : 'bg-primary-200'
           }`}
         >

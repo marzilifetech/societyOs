@@ -1,10 +1,11 @@
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { colors } from '@societyos/theme';
 import { useAppUpdate } from '../hooks/useAppUpdate';
 import { AppUpdateBanner } from './AppUpdateBanner';
 
-const BRAND = '#1E3A5F';
+const BRAND = colors.primary[500];
 
 /**
  * Top-level update wrapper for the staff app. Same contract as the

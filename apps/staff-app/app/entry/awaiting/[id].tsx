@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { colors } from '@societyos/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { unwrapApiEnvelope } from '@societyos/api-client';
@@ -25,7 +26,7 @@ type VisitorRow = {
   approvalStatus: VisitorStatus;
 };
 
-const PRIMARY = '#1E3A5F';
+const PRIMARY = colors.primary[500];
 
 /**
  * After staff submits an Add Entry, we land here and POLL until the resident

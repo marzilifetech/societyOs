@@ -59,6 +59,9 @@ export default function SocietySelectScreen() {
           <FlatList
             data={filtered}
             keyExtractor={(item) => item.id}
+            initialNumToRender={10}
+            maxToRenderPerBatch={10}
+            windowSize={7}
             showsVerticalScrollIndicator={false}
             renderItem={({ item }) => (
               <TouchableOpacity

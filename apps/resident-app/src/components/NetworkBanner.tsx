@@ -25,6 +25,12 @@ export function NetworkBanner() {
 }
 
 const styles = StyleSheet.create({
-  banner: { backgroundColor: '#92400E', padding: 12, alignItems: 'center' },
-  text: { color: '#FEF3C7', fontSize: 14, textAlign: 'center' },
+  banner: {
+    backgroundColor: '#FBF1D9',
+    padding: 12,
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(154,107,0,0.18)',
+  },
+  text: { color: '#9A6B00', fontSize: 14, fontWeight: '600', textAlign: 'center' },
 });

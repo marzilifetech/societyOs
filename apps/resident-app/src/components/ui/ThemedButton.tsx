@@ -29,11 +29,13 @@ export function ThemedButton({
   const heights = { sm: t.touchTargetSm, md: t.touchTarget, lg: t.touchTargetLg };
   const fontSizes = { sm: t.fontSm, md: t.fontBase, lg: t.fontLg };
 
+  // Redesign-kit pill tones (matches PillButton in redesign.tsx):
+  // primary = ink black, danger = crimson, secondary/ghost = white outline.
   const bgColors: Record<Variant, string> = {
-    primary: disabled ? 'rgba(130,26,82,0.35)' : t.accentPrimary,
-    secondary: t.bgCardStrong,
-    ghost: 'transparent',
-    danger: disabled ? 'rgba(255,59,48,0.35)' : t.accentEmergency,
+    primary: disabled ? 'rgba(20,20,20,0.35)' : '#141414',
+    secondary: '#FFFFFF',
+    ghost: '#FFFFFF',
+    danger: disabled ? 'rgba(196,40,71,0.35)' : '#C42847',
   };
 
   const textColors: Record<Variant, string> = {
@@ -45,8 +47,8 @@ export function ThemedButton({
 
   const borders: Record<Variant, string> = {
     primary: 'transparent',
-    secondary: t.borderDefault,
-    ghost: t.accentPrimary,
+    secondary: 'rgba(0,0,0,0.12)',
+    ghost: 'rgba(0,0,0,0.12)',
     danger: 'transparent',
   };
 
@@ -62,7 +64,7 @@ export function ThemedButton({
         {
           minHeight: heights[size],
           backgroundColor: bgColors[variant],
-          borderRadius: t.radiusMd,
+          borderRadius: 999,
           borderWidth: variant === 'secondary' || variant === 'ghost' ? 1 : 0,
           borderColor: borders[variant],
           justifyContent: 'center',
@@ -80,7 +82,7 @@ export function ThemedButton({
         <Text style={[{
           color: textColors[variant],
           fontSize: fontSizes[size],
-          fontWeight: '600',
+          fontWeight: '700',
           letterSpacing: size === 'sm' ? 0.2 : 0.3,
         }, textStyle]}>
           {label}

@@ -1,15 +1,15 @@
 {
   "expo": {
-    "name": "SocietyOS",
+    "name": "Marzi Care",
     "slug": "societyos-resident",
-    "version": "1.0.0",
+    "version": "1.0.6",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#3B3FBF"
+      "backgroundColor": "#6E0043"
     },
     "assetBundlePatterns": ["**/*"],
     "ios": {
@@ -22,12 +22,12 @@
       }
     },
     "android": {
-      "versionCode": 1,
+      "versionCode": 12,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#3B3FBF"
+        "backgroundColor": "#6E0043"
       },
-      "package": "com.societyos.resident",
+      "package": "com.marzi.resident",
       "googleServicesFile": "./google-services.json",
       "permissions": [
         "CAMERA",
@@ -46,11 +46,13 @@
         "expo-notifications",
         {
           "icon": "./assets/notification-icon.png",
-          "color": "#3B3FBF",
+          "color": "#6E0043",
           "sounds": []
         }
       ],
-      "@sentry/react-native"
+      "@sentry/react-native",
+      "expo-web-browser",
+      "@react-native-community/datetimepicker"
     ],
     "scheme": "societyos",
     "extra": {},

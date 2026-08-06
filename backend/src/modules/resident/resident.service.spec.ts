@@ -25,7 +25,7 @@ const mockPrisma = {
 };
 
 const mockNotifications = {
-  sendToMultiple: jest.fn(),
+  notifyUser: jest.fn(),
 };
 
 // MarziMediaSigner is used by getMyDocuments to mint short-lived GET URLs

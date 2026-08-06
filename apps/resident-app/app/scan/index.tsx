@@ -8,6 +8,7 @@ import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
 import { useTheme } from '../../src/hooks/useTheme';
+import { StatusPill, type RdStatusTone } from '../../src/components/ui';
 
 type VisitorPass = {
   id: string;
@@ -53,7 +54,7 @@ export default function ScanScreen() {
   if (hasPermission === null) {
     return (
       <SafeAreaView className="flex-1 bg-white items-center justify-center">
-        <ActivityIndicator color="#821A52" />
+        <ActivityIndicator color={t.accentPrimary} />
       </SafeAreaView>
     );
   }
@@ -62,14 +63,14 @@ export default function ScanScreen() {
     return (
       <SafeAreaView className="flex-1 bg-white items-center justify-center px-8">
         <View className="w-20 h-20 rounded-full bg-primary-50 items-center justify-center mb-5">
-          <Ionicons name="camera-outline" size={40} color="#821A52" />
+          <Ionicons name="camera-outline" size={40} color={t.accentPrimary} />
         </View>
         <Text className="text-gray-900 text-lg font-semibold mb-2 text-center">Camera access required</Text>
         <Text className="text-gray-500 text-base text-center mb-6" style={{ lineHeight: t.fontBase * t.lineHeight }}>
           Camera access is needed to scan QR codes.
         </Text>
         <TouchableOpacity
-          className="bg-primary-500 rounded-xl px-6 flex-row items-center gap-2"
+          className="bg-primary-500 rounded-full px-6 flex-row items-center gap-2"
           style={{ minHeight: t.touchTarget, justifyContent: 'center' }}
           onPress={() =>
             Camera.requestCameraPermissionsAsync().then(({ status }) =>
@@ -93,13 +94,14 @@ export default function ScanScreen() {
   }
 
   if (result) {
-    const statusStyle: Record<string, { bg: string; text: string }> = {
-      EXPECTED: { bg: 'bg-blue-100', text: 'text-blue-700' },
-      CHECKED_IN: { bg: 'bg-green-100', text: 'text-green-700' },
-      CHECKED_OUT: { bg: 'bg-gray-100', text: 'text-gray-700' },
-      DENIED: { bg: 'bg-red-100', text: 'text-red-700' },
+    // Status chips follow the StatusPill soft-tone vocabulary.
+    const statusTone: Record<string, RdStatusTone> = {
+      EXPECTED: 'pending',
+      CHECKED_IN: 'resolved',
+      CHECKED_OUT: 'neutral',
+      DENIED: 'cancelled',
     };
-    const s = statusStyle[result.status] ?? { bg: 'bg-gray-100', text: 'text-gray-700' };
+    const tone = statusTone[result.status] ?? 'neutral';
     return (
       <SafeAreaView className="flex-1 bg-white">
         <View className="flex-1 px-6 pt-4">
@@ -112,8 +114,8 @@ export default function ScanScreen() {
           </TouchableOpacity>
 
           <View className="flex-row items-center gap-3 mb-1">
-            <View className="w-12 h-12 rounded-xl bg-primary-50 items-center justify-center">
-              <Ionicons name="checkmark-circle" size={26} color="#821A52" />
+            <View className="w-12 h-12 rounded-full bg-primary-50 items-center justify-center">
+              <Ionicons name="checkmark-circle" size={26} color={t.accentPrimary} />
             </View>
             <View>
               <Text className="text-gray-900 text-2xl font-bold">Visitor Pass</Text>
@@ -140,16 +142,12 @@ export default function ScanScreen() {
             ) : null}
             <View className="flex-row justify-between items-center pt-3 border-t border-gray-200">
               <Text className="text-gray-500 text-sm">Status</Text>
-              <View className={`rounded-full px-3 py-1 ${s.bg}`}>
-                <Text className={`text-sm font-semibold ${s.text}`}>
-                  {result.status.replace('_', ' ')}
-                </Text>
-              </View>
+              <StatusPill label={result.status.replace('_', ' ')} tone={tone} />
             </View>
           </View>
 
           <TouchableOpacity
-            className="mt-7 bg-primary-500 rounded-xl items-center flex-row justify-center gap-2"
+            className="mt-7 bg-primary-500 rounded-full items-center flex-row justify-center gap-2"
             style={{ minHeight: t.touchTarget, justifyContent: 'center' }}
             onPress={() => { setScanned(false); setResult(null); }}
           >

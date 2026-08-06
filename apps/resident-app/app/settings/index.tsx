@@ -3,13 +3,24 @@ import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../src/store/auth.store';
+import { APP_VERSION_LABEL } from '../../src/lib/app-version';
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
 
 type Item = { icon: IoniconName; label: string; route: string; tint: string; description?: string };
 
+// Soft card shadow matching the redesign-kit RoundCard surface.
+const cardShadow = {
+  shadowColor: '#000',
+  shadowOffset: { width: 0, height: 6 },
+  shadowOpacity: 0.06,
+  shadowRadius: 14,
+  elevation: 2,
+} as const;
+
 const ITEMS: Item[] = [
   { icon: 'notifications-outline', label: 'Notifications', route: '/settings/notifications', tint: '#0EA5E9', description: 'Manage push and email alerts' },
+  { icon: 'flask-outline', label: 'Notification test', route: '/settings/notification-test', tint: '#F59E0B', description: 'Send a test notification to this device' },
   { icon: 'eye-outline', label: 'Accessibility', route: '/settings/accessibility', tint: '#7C3AED', description: 'Larger fonts, text size, contrast' },
   { icon: 'language-outline', label: 'Language', route: '/settings/language', tint: '#16A34A', description: 'Change app language' },
 ];
@@ -41,11 +52,11 @@ export default function SettingsScreen() {
       </View>
 
       <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 48, paddingTop: 8 }}>
-        <View className="bg-gray-50 border border-gray-200 rounded-2xl overflow-hidden mb-6">
+        <View className="bg-white border border-gray-100 rounded-2xl overflow-hidden mb-6" style={cardShadow}>
           {ITEMS.map((item, i) => (
             <TouchableOpacity
               key={item.route}
-              className={`flex-row items-center px-4 py-4 ${i < ITEMS.length - 1 ? 'border-b border-gray-200' : ''}`}
+              className={`flex-row items-center px-4 py-4 ${i < ITEMS.length - 1 ? 'border-b border-gray-100' : ''}`}
               style={{ minHeight: 64 }}
               onPress={() => router.push(item.route as any)}
               accessibilityRole="button"
@@ -65,14 +76,19 @@ export default function SettingsScreen() {
 
         <TouchableOpacity
           onPress={handleLogout}
-          className="bg-gray-50 border border-gray-200 rounded-2xl flex-row items-center justify-center gap-2 py-4"
-          style={{ minHeight: 56 }}
+          className="bg-white border border-gray-100 rounded-2xl flex-row items-center justify-center gap-2 py-4"
+          style={{ minHeight: 56, ...cardShadow }}
           accessibilityRole="button"
           accessibilityLabel="Sign out"
         >
           <Ionicons name="log-out-outline" size={18} color="#DC2626" />
           <Text className="text-red-600 font-semibold">Sign Out</Text>
         </TouchableOpacity>
+
+        {/* App version — helps support identify exactly which build a user is on. */}
+        <Text className="text-center text-gray-400 text-xs mt-6" accessibilityLabel={`App version ${APP_VERSION_LABEL}`}>
+          SocietyOS · {APP_VERSION_LABEL}
+        </Text>
       </ScrollView>
     </SafeAreaView>
   );

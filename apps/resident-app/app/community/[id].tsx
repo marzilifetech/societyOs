@@ -174,6 +174,9 @@ export default function PostDetailScreen() {
           <FlatList
             data={comments}
             keyExtractor={(item) => item.id}
+            initialNumToRender={10}
+            maxToRenderPerBatch={10}
+            windowSize={7}
             renderItem={renderComment}
             ListHeaderComponent={<ListHeader />}
             contentContainerStyle={{ paddingBottom: 8 }}

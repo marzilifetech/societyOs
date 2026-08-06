@@ -2,9 +2,10 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { ConfigService } from '@nestjs/config';
 import * as admin from 'firebase-admin';
 import IORedis from 'ioredis';
-import { Queue, Worker } from 'bullmq';
+import { Queue, Worker, ConnectionOptions } from 'bullmq';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
+  getCategory,
   getNotificationType,
   isForceOn,
   type NotificationType,
@@ -42,12 +43,24 @@ const QUIET_END_HOUR = 7; //  07:00 IST
 
 const DEFER_QUEUE = 'push-deferred';
 
+/** Approvals/deliveries are pointless after ~30 min — let FCM/APNs drop them. */
+const ACTIONABLE_TTL_MS = 30 * 60 * 1000;
+
+/**
+ * Society fan-outs up to this many recipients get one message per recipient so
+ * each device carries its own unread badge; bigger broadcasts fall back to flat
+ * 500-token multicast chunks with no badge (perf).
+ */
+const SOCIETY_BADGE_MAX_RECIPIENTS = 200;
+
 type DeferredJob =
   | {
       kind: 'user';
       userId: string;
       notification: PushNotification;
       data?: Record<string, string>;
+      /** DEFERRED NotificationLog row written at defer time; reconciled on delivery. */
+      logId?: string | null;
     }
   | {
       kind: 'society';
@@ -55,6 +68,8 @@ type DeferredJob =
       role: string | null;
       notification: PushNotification;
       data?: Record<string, string>;
+      /** DEFERRED NotificationLog row written at defer time; reconciled on delivery. */
+      logId?: string | null;
     };
 
 function istWallClock(now: Date): { y: string; mo: string; d: string; h: number } {
@@ -127,23 +142,32 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
     if (!url) return;
     try {
       this.redisConn = new IORedis(url, { maxRetriesPerRequest: null });
-      this.deferQueue = new Queue(DEFER_QUEUE, { connection: this.redisConn });
+      // bullmq bundles its own ioredis types, so the app's IORedis instance is
+      // structurally identical but nominally incompatible — cast is safe.
+      const connection = this.redisConn as unknown as ConnectionOptions;
+      this.deferQueue = new Queue(DEFER_QUEUE, { connection });
       this.deferWorker = new Worker(
         DEFER_QUEUE,
         async (job) => {
           const payload = job.data as DeferredJob;
           if (payload.kind === 'user') {
-            await this.sendNow(payload.userId, payload.notification, payload.data);
+            await this.sendNow(
+              payload.userId,
+              payload.notification,
+              payload.data,
+              payload.logId ?? undefined,
+            );
           } else {
             await this.sendToSocietyNow(
               payload.societyId,
               payload.role,
               payload.notification,
               payload.data,
+              payload.logId ?? undefined,
             );
           }
         },
-        { connection: this.redisConn.duplicate() },
+        { connection: this.redisConn.duplicate() as unknown as ConnectionOptions },
       );
       this.deferWorker.on('failed', (job, err) => {
         this.logger.warn(`deferred push failed job=${job?.id}: ${(err as Error).message}`);
@@ -194,17 +218,45 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * Queue a quiet-hours push for delivery at 07:00 IST. Writes a DEFERRED
+   * NotificationLog row first (inbox visibility while the push waits) and
+   * threads its id through the job so the worker reconciles it on delivery.
+   * Returns false when the queue is unavailable — callers then DROP the
+   * non-critical push (quiet hours stay enforced even without Redis).
+   */
   private async enqueueDeferred(job: DeferredJob): Promise<boolean> {
     const delay = msUntilNextQuietEndIST(new Date());
     if (!this.deferQueue || delay <= 0) {
       this.logger.debug('[push] cannot queue deferred push (no Redis queue or delay)');
       return false;
     }
-    await this.deferQueue.add('deliver', job, {
-      delay,
-      removeOnComplete: { count: 500 },
-      removeOnFail: { count: 50 },
+    const logId = await this.writeLog({
+      userId: job.kind === 'user' ? job.userId : null,
+      societyId: job.kind === 'society' ? job.societyId : null,
+      notification: job.notification,
+      data: job.data,
+      status: 'DEFERRED',
     });
+    try {
+      await this.deferQueue.add(
+        'deliver',
+        { ...job, logId: logId ?? undefined },
+        {
+          delay,
+          removeOnComplete: { count: 500 },
+          removeOnFail: { count: 50 },
+        },
+      );
+    } catch (e) {
+      this.logger.warn(`[push] defer queue unavailable: ${(e as Error).message}`);
+      if (logId) {
+        // The push is dropped (quiet hours enforced) — remove the DEFERRED row
+        // so it doesn't linger forever inflating badge counts / the inbox.
+        await this.prisma.notificationLog.delete({ where: { id: logId } }).catch(() => undefined);
+      }
+      return false;
+    }
     this.logger.debug(`[push] deferred job=${job.kind} delayMs=${delay}`);
     return true;
   }
@@ -263,6 +315,7 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
     tokens: string[],
     notification: PushNotification,
     data?: Record<string, string>,
+    opts?: { badge?: number },
   ): admin.messaging.MulticastMessage {
     // Resolve coarse-grained type (MARKETING/DELIVERY/EMERGENCY) from the
     // category key (preferred) or the free-form data.type. `notification.critical`
@@ -277,10 +330,16 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
     // The CHANNEL owns the Android sound + vibration + importance; we do NOT
     // set `notification.sound` on the FCM payload because doing so would
     // override the per-channel sound chosen by the app.
-    const channelId =
-      ntype === 'EMERGENCY' ? 'emergency_sos'
-      : ntype === 'DELIVERY' ? 'deliveries'
-      : 'marketing';
+    // Registry categories carry an explicit channelId; anything else falls
+    // back to the coarse-type mapping ('community' replaced the legacy
+    // 'marketing' channel — the apps no longer register the latter).
+    const category = notification.category ? getCategory(notification.category) : undefined;
+    const channelId: string = notification.critical
+      ? 'emergency_sos'
+      : category?.channelId ??
+        (ntype === 'EMERGENCY' ? 'emergency_sos'
+        : ntype === 'DELIVERY' ? 'deliveries'
+        : 'community');
 
     // iOS interruption level: EMERGENCY uses 'critical' (needs the critical-alerts
     // entitlement to actually break through silent mode; harmless otherwise),
@@ -314,6 +373,16 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
       apnsHeaders['apns-collapse-id'] = notification.collapseKey;
     }
 
+    // Time-boxed relevance: an approval/delivery prompt is useless after ~30
+    // minutes, so let FCM/APNs expire it instead of waking the user later.
+    // SOS and community-style pushes keep the platform default (no expiry).
+    if (channelId === 'approvals' || channelId === 'deliveries') {
+      android.ttl = ACTIONABLE_TTL_MS;
+      apnsHeaders['apns-expiration'] = String(
+        Math.floor((Date.now() + ACTIONABLE_TTL_MS) / 1000),
+      );
+    }
+
     const message: admin.messaging.MulticastMessage = {
       tokens,
       data,
@@ -333,13 +402,29 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
       richData.title = notification.title;
       richData.body = notification.body;
       richData.channelId = channelId;
+      // Android tray-stack group (analog of the iOS thread-id below). FCM v1
+      // has NO android.notification.group field — the v1 API rejects unknown
+      // names — so the group rides in `data` for the client-side renderer.
+      richData.group = channelId;
       if (notification.imageUrl) richData.imageUrl = notification.imageUrl;
       if (hasActions) richData.actions = JSON.stringify(notification.actions);
       message.data = richData;
-      // NOTE: intentionally NO `android.notification` block here — a data-only
-      // message must omit it so the client's background handler fires and builds
-      // the notification + action buttons (channel id carried in `data`).
-      message.android = android;
+      // A backgrounded/killed Android app never gets to run the JS handler for
+      // a pure data message in time, which made actionable pushes (visitor /
+      // delivery / help / task approvals) invisible until the next app-open.
+      // Ship a real tray notification alongside the FULL data payload — the
+      // foreground client still renders the rich notification + action buttons
+      // itself and dedupes via the collapse key.
+      message.android = {
+        ...android,
+        notification: {
+          channelId,
+          title: notification.title,
+          body: notification.body,
+          ...(notification.imageUrl ? { imageUrl: notification.imageUrl } : {}),
+          ...(opts?.badge !== undefined ? { notificationCount: opts.badge } : {}),
+        },
+      };
       message.apns = {
         ...(Object.keys(apnsHeaders).length ? { headers: apnsHeaders } : {}),
         payload: {
@@ -349,6 +434,9 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
             alert: { title: notification.title, body: notification.body },
             ...(apnsCategory ? { category: apnsCategory } : {}),
             ...(apnsSound ? { sound: apnsSound } : {}),
+            ...(opts?.badge !== undefined ? { badge: opts.badge } : {}),
+            // Group the notification-center stack per Android channel bucket.
+            'thread-id': channelId,
             'interruption-level': apnsInterruptionLevel,
           },
         },
@@ -358,11 +446,16 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
 
     // Simple message: top-level notification block.
     message.notification = { title: notification.title, body: notification.body };
+    // Android tray-stack group (analog of the iOS thread-id below). FCM v1 has
+    // NO android.notification.group field — the v1 API rejects unknown names —
+    // so the group rides in `data` for the client-side renderer.
+    message.data = { ...(data ?? {}), group: channelId };
     message.android = {
       ...android,
       notification: {
         channelId,
         ...(notification.imageUrl ? { imageUrl: notification.imageUrl } : {}),
+        ...(opts?.badge !== undefined ? { notificationCount: opts.badge } : {}),
       },
     };
     message.apns = {
@@ -371,6 +464,9 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
         aps: {
           ...(apnsCategory ? { category: apnsCategory } : {}),
           ...(apnsSound ? { sound: apnsSound } : {}),
+          ...(opts?.badge !== undefined ? { badge: opts.badge } : {}),
+          // Group the notification-center stack per Android channel bucket.
+          'thread-id': channelId,
           // iOS interruption level — EMERGENCY uses 'critical' (requires the
           // Apple critical-alerts entitlement to actually break through silent
           // mode; harmless otherwise). DELIVERY uses 'time-sensitive' so it
@@ -397,20 +493,55 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
     return cleaned;
   }
 
-  /** Best-effort audit row; never throws into the send path. */
+  /**
+   * NotificationLog.type — the deep-link key both app inboxes switch on.
+   * Prefers the registry category key passed to send(), then the legacy
+   * free-form data.type, then the coarse pipeline type.
+   */
+  private resolveLogType(
+    notification: PushNotification,
+    data?: Record<string, string>,
+  ): string {
+    return (
+      notification.category ?? data?.type ?? (notification.critical ? 'EMERGENCY' : 'MARKETING')
+    );
+  }
+
+  /**
+   * Best-effort audit/inbox row; never throws into the send path. Returns the
+   * row id (threaded through deferred jobs for reconciliation) or null. When
+   * `id` is set, the DEFERRED row written at defer time is updated in place
+   * instead of inserting a duplicate.
+   */
   private async writeLog(entry: {
+    id?: string | null;
     userId?: string | null;
     societyId?: string | null;
     notification: PushNotification;
     data?: Record<string, string>;
-    status: 'SENT' | 'FAILED' | 'SKIPPED';
-  }): Promise<void> {
+    status: 'SENT' | 'FAILED' | 'SKIPPED' | 'DEFERRED';
+  }): Promise<string | null> {
+    if (entry.id) {
+      try {
+        await this.prisma.notificationLog.update({
+          where: { id: entry.id },
+          data: {
+            status: entry.status as any,
+            sentAt: entry.status === 'SENT' ? new Date() : null,
+          },
+        });
+        return entry.id;
+      } catch {
+        /* deferred row vanished — fall through to a fresh insert */
+      }
+    }
     try {
-      await this.prisma.notificationLog.create({
+      const row = await this.prisma.notificationLog.create({
         data: {
           userId: entry.userId ?? null,
           societyId: entry.societyId ?? null,
           category: entry.notification.category ?? 'uncategorized',
+          type: this.resolveLogType(entry.notification, entry.data),
           title: entry.notification.title,
           body: entry.notification.body,
           data: (entry.data ?? undefined) as any,
@@ -419,9 +550,24 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
           sentAt: entry.status === 'SENT' ? new Date() : null,
         },
       });
+      return row?.id ?? null;
     } catch (e) {
       this.logger.debug(`[push] notification log skipped: ${(e as Error).message}`);
+      return null;
     }
+  }
+
+  /**
+   * Mark a DEFERRED inbox row as SKIPPED when delivery can't proceed (user
+   * gone, no tokens, Firebase down, empty fan-out). Both badge queries count
+   * status DEFERRED, so leaving the row untouched would inflate every future
+   * badge for that user forever and leave a phantom inbox entry.
+   */
+  private async reconcileDeferredSkipped(deferredLogId?: string): Promise<void> {
+    if (!deferredLogId) return;
+    await this.prisma.notificationLog
+      .update({ where: { id: deferredLogId }, data: { status: 'SKIPPED' as any } })
+      .catch(() => undefined);
   }
 
   /**
@@ -431,29 +577,50 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
     userId: string,
     notification: PushNotification,
     data?: Record<string, string>,
+    deferredLogId?: string,
   ): Promise<{ ok: boolean; reason?: string }> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { id: true, phone: true },
     });
-    if (!user) return { ok: false, reason: 'user_not_found' };
+    if (!user) {
+      await this.reconcileDeferredSkipped(deferredLogId);
+      return { ok: false, reason: 'user_not_found' };
+    }
 
     if (await this.isOptedOut(userId, notification.category, notification.critical)) {
-      await this.writeLog({ userId, notification, data, status: 'SKIPPED' });
+      await this.writeLog({ id: deferredLogId, userId, notification, data, status: 'SKIPPED' });
       return { ok: false, reason: 'opted_out' };
     }
 
     const tokens = await this.resolveTokens(userId);
     if (!tokens.length) {
+      await this.reconcileDeferredSkipped(deferredLogId);
       return { ok: false, reason: 'no_token' };
     }
 
     if (!this.initialized) {
+      await this.reconcileDeferredSkipped(deferredLogId);
       return { ok: false, reason: 'firebase_not_initialized' };
     }
 
+    // OS badge = the recipient's unread inbox count. +1 for this push (its log
+    // row is written after the send); the DEFERRED row from quiet hours, if
+    // any, already represents this push, so exclude it from the count.
+    const unread = await this.prisma.notificationLog
+      .count({
+        where: {
+          userId,
+          readAt: null,
+          status: { in: ['SENT', 'DEFERRED'] },
+          ...(deferredLogId ? { id: { not: deferredLogId } } : {}),
+        },
+      })
+      .catch(() => null);
+    const badge = unread === null ? undefined : unread + 1;
+
     try {
-      const message = this.buildMessage(tokens, notification, data);
+      const message = this.buildMessage(tokens, notification, data, { badge });
       const res = await admin.messaging().sendEachForMulticast(message);
 
       const invalidTokens: string[] = [];
@@ -469,17 +636,36 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
       await this.cleanupInvalidTokens(invalidTokens);
 
       if (res.successCount > 0) {
-        await this.writeLog({ userId, notification, data, status: 'SENT' });
+        await this.writeLog({ id: deferredLogId, userId, notification, data, status: 'SENT' });
         return { ok: true };
       }
-      await this.writeLog({ userId, notification, data, status: 'FAILED' });
+      await this.writeLog({ id: deferredLogId, userId, notification, data, status: 'FAILED' });
       return { ok: false, reason: 'all_failed' };
     } catch (err) {
       const code = (err as any)?.errorInfo?.code || (err as Error).message;
       this.logger.warn(`FCM send failed user=${userId}: ${code}`);
-      await this.writeLog({ userId, notification, data, status: 'FAILED' });
+      await this.writeLog({ id: deferredLogId, userId, notification, data, status: 'FAILED' });
       return { ok: false, reason: String(code) };
     }
+  }
+
+  /**
+   * Whether a push must be delivered IMMEDIATELY even during quiet hours.
+   * Beyond `critical` (SOS), this covers:
+   *   - ACTIONABLE approvals (gate/visitor/delivery) — a guard is physically
+   *     waiting at the gate; deferring the resident's approval prompt to 07:00
+   *     defeats the entire feature.
+   *   - Force-on "always on" categories (e.g. urgent water/power/safety
+   *     notices) — these are explicitly not opt-out-able and must not sit in a
+   *     defer queue overnight.
+   * Ordinary community/marketing pushes still respect quiet hours.
+   */
+  private isTimeSensitive(notification: PushNotification): boolean {
+    if (notification.critical) return true;
+    const cat = notification.category ? getCategory(notification.category) : undefined;
+    if (cat?.actionable) return true;
+    if (notification.category && isForceOn(notification.category)) return true;
+    return false;
   }
 
   async send(
@@ -497,13 +683,19 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
       return { ok: false, reason: 'opted_out' };
     }
 
-    if (!notification.critical && isInQuietHoursIST()) {
+    if (!this.isTimeSensitive(notification) && isInQuietHoursIST()) {
       const queued = await this.enqueueDeferred({ kind: 'user', userId, notification, data });
       if (queued) {
         return { ok: true, reason: 'queued_quiet_hours' };
       }
-      this.logger.debug(`[push] quiet hours, not queued user=${userId}`);
-      return { ok: false, reason: 'quiet_hours' };
+      // Queue unavailable (Redis down / not configured). Dropping a
+      // notification is worse than a late-night buzz, and time-sensitive
+      // pushes already bypass this path — so fall through to an immediate
+      // send rather than losing it entirely.
+      this.logger.warn(
+        `[push] quiet-hours queue unavailable, sending immediately user=${userId}`,
+      );
+      return this.sendNow(userId, notification, data);
     }
 
     return this.sendNow(userId, notification, data);
@@ -514,8 +706,32 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
     role: string | null,
     notification: PushNotification,
     data?: Record<string, string>,
+    deferredLogId?: string,
   ): Promise<{ sent: number; failed: number; cleaned: number }> {
-    if (!this.initialized) return { sent: 0, failed: 0, cleaned: 0 };
+    if (deferredLogId) {
+      // Idempotency guard: BullMQ redelivers stalled/crashed deferred jobs, and
+      // the per-recipient fan-out below has no unique key, so a re-run would
+      // duplicate every recipient's inbox row and re-send every push.
+      // Atomically claim the DEFERRED summary row; a redelivery finds it
+      // already claimed and bails out.
+      const claimed = await this.prisma.notificationLog
+        .updateMany({
+          where: { id: deferredLogId, status: 'DEFERRED' as any },
+          data: { status: 'SENT' as any, sentAt: new Date() },
+        })
+        .catch(() => null);
+      if (claimed && claimed.count === 0) {
+        this.logger.warn(
+          `[push] deferred society fan-out log=${deferredLogId} already claimed; skipping redelivery`,
+        );
+        return { sent: 0, failed: 0, cleaned: 0 };
+      }
+    }
+
+    if (!this.initialized) {
+      await this.reconcileDeferredSkipped(deferredLogId);
+      return { sent: 0, failed: 0, cleaned: 0 };
+    }
 
     const where: Record<string, unknown> = { societyId };
     if (role) where.role = role;
@@ -523,7 +739,10 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
       where: where as any,
       select: { id: true, fcmToken: true, notificationPrefs: true },
     });
-    if (!users.length) return { sent: 0, failed: 0, cleaned: 0 };
+    if (!users.length) {
+      await this.reconcileDeferredSkipped(deferredLogId);
+      return { sent: 0, failed: 0, cleaned: 0 };
+    }
 
     // Batch eligibility (no per-user queries — avoids N+1 on a society broadcast).
     const category = notification.category;
@@ -550,28 +769,44 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
         pref !== undefined ? !pref : ((u.notificationPrefs as any) || {})[category!] === false;
       if (!optedOut) eligibleIds.add(u.id);
     }
-    if (!eligibleIds.size) return { sent: 0, failed: 0, cleaned: 0 };
+    if (!eligibleIds.size) {
+      await this.reconcileDeferredSkipped(deferredLogId);
+      return { sent: 0, failed: 0, cleaned: 0 };
+    }
 
-    // One query for all device tokens of eligible recipients (+ legacy fcmToken).
+    const recipientIds = [...eligibleIds];
+
+    // One query for all device tokens of eligible recipients (+ legacy fcmToken),
+    // grouped per user so small fan-outs can carry per-recipient badges.
     const devices = await this.prisma.device.findMany({
-      where: { userId: { in: [...eligibleIds] } },
-      select: { token: true },
+      where: { userId: { in: recipientIds } },
+      select: { userId: true, token: true },
     });
-    const tokenSet = new Set<string>();
-    for (const d of devices) if (d.token) tokenSet.add(d.token);
-    for (const u of users) if (eligibleIds.has(u.id) && u.fcmToken) tokenSet.add(u.fcmToken);
+    const tokensByUser = new Map<string, Set<string>>();
+    const addToken = (uid: string, token: string | null | undefined) => {
+      if (!token) return;
+      let set = tokensByUser.get(uid);
+      if (!set) tokensByUser.set(uid, (set = new Set()));
+      set.add(token);
+    };
+    for (const d of devices) addToken(d.userId, d.token);
+    for (const u of users) if (eligibleIds.has(u.id)) addToken(u.id, u.fcmToken);
 
+    const tokenSet = new Set<string>();
+    for (const set of tokensByUser.values()) for (const t of set) tokenSet.add(t);
     const tokens = [...tokenSet];
-    if (!tokens.length) return { sent: 0, failed: 0, cleaned: 0 };
+    if (!tokens.length) {
+      await this.reconcileDeferredSkipped(deferredLogId);
+      return { sent: 0, failed: 0, cleaned: 0 };
+    }
 
     let sent = 0;
     let failed = 0;
     let cleaned = 0;
 
-    const chunks = chunk(tokens, 500);
-    for (const c of chunks) {
+    const dispatch = async (batchTokens: string[], badge?: number) => {
       try {
-        const message = this.buildMessage(c, notification, data);
+        const message = this.buildMessage(batchTokens, notification, data, { badge });
         const res = await admin.messaging().sendEachForMulticast(message);
         sent += res.successCount;
         failed += res.failureCount;
@@ -580,17 +815,80 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
         res.responses.forEach((r, i) => {
           const code = (r.error as any)?.errorInfo?.code || r.error?.message;
           if (code && /Unregistered|registration-token-not-registered|invalid-argument/i.test(String(code))) {
-            invalidTokens.push(c[i]);
+            invalidTokens.push(batchTokens[i]);
           }
         });
         cleaned += await this.cleanupInvalidTokens(invalidTokens);
       } catch (e) {
         this.logger.warn(`multicast chunk failed: ${(e as Error).message}`);
-        failed += c.length;
+        failed += batchTokens.length;
+      }
+    };
+
+    if (recipientIds.length <= SOCIETY_BADGE_MAX_RECIPIENTS) {
+      // Small fan-out: one message per recipient so every device carries its
+      // own unread badge. One grouped count query for all recipients (not N).
+      const unreadByUser = new Map<string, number>();
+      try {
+        const grouped = await this.prisma.notificationLog.groupBy({
+          by: ['userId'],
+          where: {
+            userId: { in: recipientIds },
+            readAt: null,
+            status: { in: ['SENT', 'DEFERRED'] },
+          },
+          _count: { _all: true },
+        });
+        for (const g of grouped) if (g.userId) unreadByUser.set(g.userId, g._count._all);
+      } catch (e) {
+        this.logger.debug(`[push] badge count skipped: ${(e as Error).message}`);
+      }
+
+      const withTokens = recipientIds.filter((uid) => tokensByUser.get(uid)?.size);
+      for (const batch of chunk(withTokens, 20)) {
+        await Promise.all(
+          batch.map((uid) =>
+            // +1: the fan-out log row for this push is written after the send.
+            dispatch([...tokensByUser.get(uid)!], (unreadByUser.get(uid) ?? 0) + 1),
+          ),
+        );
+      }
+    } else {
+      // Large broadcast: flat 500-token chunks (FCM hard limit), no badge.
+      for (const c of chunk(tokens, 500)) {
+        await dispatch(c);
       }
     }
 
-    await this.writeLog({ societyId, notification, data, status: 'SENT' });
+    // Per-recipient inbox rows — the userId=null summary row below never
+    // matches the inbox query (it filters on userId), which used to make
+    // society broadcasts invisible in the in-app inbox.
+    const logType = this.resolveLogType(notification, data);
+    const sentAt = new Date();
+    for (const idsChunk of chunk(recipientIds, 500)) {
+      try {
+        await this.prisma.notificationLog.createMany({
+          data: idsChunk.map((uid) => ({
+            userId: uid,
+            societyId,
+            category: notification.category ?? 'uncategorized',
+            type: logType,
+            title: notification.title,
+            body: notification.body,
+            data: (data ?? undefined) as any,
+            status: 'SENT' as any,
+            dedupKey: notification.collapseKey ?? null,
+            sentAt,
+          })),
+        });
+      } catch (e) {
+        this.logger.debug(`[push] fan-out log chunk skipped: ${(e as Error).message}`);
+      }
+    }
+
+    // Society-level audit summary (userId=null → never surfaces in an inbox);
+    // reconciles the DEFERRED row when this ran off the quiet-hours queue.
+    await this.writeLog({ id: deferredLogId, societyId, notification, data, status: 'SENT' });
     return { sent, failed, cleaned };
   }
 
@@ -606,7 +904,7 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
   ): Promise<{ sent: number; failed: number; cleaned: number; queued?: boolean }> {
     if (!this.initialized) return { sent: 0, failed: 0, cleaned: 0 };
 
-    if (!notification.critical && isInQuietHoursIST()) {
+    if (!this.isTimeSensitive(notification) && isInQuietHoursIST()) {
       const ok = await this.enqueueDeferred({
         kind: 'society',
         societyId,
@@ -617,8 +915,15 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
       if (ok) {
         return { sent: 0, failed: 0, cleaned: 0, queued: true };
       }
-      this.logger.debug(`[push] society quiet-hours not queued society=${societyId}`);
-      return { sent: 0, failed: 0, cleaned: 0 };
+      // Queue unavailable (Redis down / not configured). Rather than dropping
+      // the broadcast, send it immediately — time-sensitive/urgent broadcasts
+      // already bypass this path, so only ordinary community pushes land here
+      // and a late-night delivery beats losing it.
+      this.logger.warn(
+        `[push] quiet-hours queue unavailable, sending broadcast immediately society=${societyId}`,
+      );
+      const r = await this.sendToSocietyNow(societyId, role, notification, data);
+      return { ...r, queued: false };
     }
 
     const r = await this.sendToSocietyNow(societyId, role, notification, data);

@@ -134,18 +134,20 @@ export class ResidentService {
       },
     });
 
-    // Notify admins of new pending resident
+    // Notify admins of new pending resident via the full push pipeline
+    // (category-aware, preference-checked, logged to the inbox). Token
+    // resolution happens inside the pipeline, so no fcmToken filter here.
     const admins = await this.prisma.user.findMany({
-      where: { societyId, role: { in: ['ADMIN', 'SUPER_ADMIN'] as any }, fcmToken: { not: null } },
-      select: { fcmToken: true },
+      where: { societyId, role: { in: ['ADMIN', 'SUPER_ADMIN'] as any } },
+      select: { id: true },
     });
-    const adminTokens = admins.map((a) => a.fcmToken).filter(Boolean) as string[];
-    if (adminTokens.length > 0) {
-      await this.notificationService.sendToMultiple(adminTokens, {
-        title: 'New Resident Pending Approval',
-        body: `${data.name} has registered for Flat ${flat.block}-${flat.number}. Please review.`,
-        data: { type: 'NEW_RESIDENT_PENDING', userId },
-      });
+    for (const adminUser of admins) {
+      await this.notificationService.notifyUser(
+        adminUser.id,
+        'New Resident Pending Approval',
+        `${data.name} has registered for Flat ${flat.block}-${flat.number}. Please review.`,
+        { category: 'account_auth', data: { type: 'NEW_RESIDENT_PENDING', userId } },
+      );
     }
 
     if (data.consentAccepted) {

@@ -51,16 +51,24 @@ const IOS_CATEGORIES: Notifications.NotificationCategory[] = [
 // avoid redundant POSTs but always re-register when the token rotates.
 const DEVICE_TOKEN_KEY = 'fcm_device_token';
 
-// Android notification channels are grouped under three coarse user-facing
-// types — MARKETING, DELIVERY, EMERGENCY — that mirror the backend's
-// NotificationType. The three "primary" channels (marketing/deliveries/
-// emergency_sos) are what the backend now targets via FCM channelId. The
-// legacy ids below them (visitors_gate, daily_help, sos, default) are kept
-// as ALIASES so devices that already have those channels registered keep
-// working with the same importance/sound — Android locks importance once
-// a channel is created, so renaming or dropping them would silently degrade
-// behavior on existing installs. New installs get the same three primary
-// channels under their final names.
+// Android notification channels. The six "primary" channels are the contract
+// the backend routes to via the per-category `channelId` field in
+// backend/src/common/notification/notification-categories.ts:
+//
+//   emergency_sos — MAX, bypasses DND, public lockscreen
+//   approvals     — HIGH (visitor/delivery/help/task approvals + results)
+//   deliveries    — HIGH
+//   community     — DEFAULT (notices, events, polls, welfare; replaces the
+//                   legacy 'marketing' channel)
+//   payments      — DEFAULT
+//   system        — DEFAULT (account/auth, app updates, misc)
+//
+// The legacy ids below them (marketing, visitors_gate, daily_help, sos,
+// default) are kept as ALIASES so devices that already have those channels
+// registered keep working with the same importance/sound — Android locks
+// importance once a channel is created, so renaming or dropping them would
+// silently degrade behavior on existing installs. New installs get the six
+// primary channels under their final names.
 //
 // Per-channel sound is intentionally LEFT EMPTY for v1: users hear the OS
 // default through differentiated importance + distinct vibration patterns.
@@ -78,6 +86,8 @@ type ChannelSpec = {
   sound?: string;
   vibrationPattern?: number[];
   enableLights?: boolean;
+  /** Notification LED color (brand maroon) — only meaningful with enableLights. */
+  lightColor?: string;
   enableVibrate?: boolean;
   /**
    * Attempt to bypass Do Not Disturb. Silently no-ops without the
@@ -89,14 +99,26 @@ type ChannelSpec = {
 };
 
 const ANDROID_CHANNELS: ChannelSpec[] = [
-  // ─── Primary channels — what the backend targets going forward ──────────
+  // ─── Primary channels — what the backend targets via channelId ──────────
   {
-    id: 'marketing',
-    name: 'News & Updates',
-    importance: Notifications.AndroidImportance.DEFAULT,
-    visibility: Notifications.AndroidNotificationVisibility.PRIVATE,
-    // Short single buzz — informational, doesn't demand attention.
-    vibrationPattern: [0, 200],
+    id: 'emergency_sos',
+    name: 'Emergency Alerts',
+    importance: Notifications.AndroidImportance.MAX,
+    visibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+    // Long siren-style pattern — unmistakable, keeps buzzing on lockscreen.
+    vibrationPattern: [0, 500, 250, 500, 250, 500, 250, 500],
+    enableVibrate: true,
+    enableLights: true,
+    lightColor: '#821A52',
+    bypassDnd: true,
+  },
+  {
+    id: 'approvals',
+    name: 'Approvals',
+    importance: Notifications.AndroidImportance.HIGH,
+    visibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+    // Two-pulse pattern — "someone is waiting on your decision".
+    vibrationPattern: [0, 250, 250, 250],
     enableVibrate: true,
   },
   {
@@ -109,21 +131,43 @@ const ANDROID_CHANNELS: ChannelSpec[] = [
     enableVibrate: true,
   },
   {
-    id: 'emergency_sos',
-    name: 'Emergency Alerts',
-    importance: Notifications.AndroidImportance.MAX,
-    visibility: Notifications.AndroidNotificationVisibility.PUBLIC,
-    // Long siren-style pattern — unmistakable, keeps buzzing on lockscreen.
-    vibrationPattern: [0, 500, 250, 500, 250, 500, 250, 500],
+    id: 'community',
+    name: 'Community & Notices',
+    importance: Notifications.AndroidImportance.DEFAULT,
+    visibility: Notifications.AndroidNotificationVisibility.PRIVATE,
+    // Short single buzz — informational, doesn't demand attention.
+    vibrationPattern: [0, 200],
     enableVibrate: true,
-    enableLights: true,
-    bypassDnd: true,
+  },
+  {
+    id: 'payments',
+    name: 'Payments & Dues',
+    importance: Notifications.AndroidImportance.DEFAULT,
+    visibility: Notifications.AndroidNotificationVisibility.PRIVATE,
+    vibrationPattern: [0, 200],
+    enableVibrate: true,
+  },
+  {
+    id: 'system',
+    name: 'Account & System',
+    importance: Notifications.AndroidImportance.DEFAULT,
+    visibility: Notifications.AndroidNotificationVisibility.PRIVATE,
+    vibrationPattern: [0, 200],
+    enableVibrate: true,
   },
   // ─── Legacy aliases — already exist on installed devices ────────────────
   // Importance is locked after a channel is created on a device, so we keep
   // these (identical importance to the primary channel they map to) and the
   // backend stops sending to them after this release. If/when zero devices
   // are on a pre-fix build we can drop these.
+  {
+    id: 'marketing',
+    name: 'News & Updates',
+    importance: Notifications.AndroidImportance.DEFAULT,
+    visibility: Notifications.AndroidNotificationVisibility.PRIVATE,
+    vibrationPattern: [0, 200],
+    enableVibrate: true,
+  },
   {
     id: 'visitors_gate',
     name: 'Visitor & Gate Alerts',
@@ -148,6 +192,7 @@ const ANDROID_CHANNELS: ChannelSpec[] = [
     vibrationPattern: [0, 500, 250, 500, 250, 500, 250, 500],
     enableVibrate: true,
     enableLights: true,
+    lightColor: '#821A52',
     bypassDnd: true,
   },
   {
@@ -161,16 +206,35 @@ const ANDROID_CHANNELS: ChannelSpec[] = [
 ];
 
 /**
- * Foreground display behaviour. Show banners/alerts even when the app is open
- * so gate/SOS pushes are never silently swallowed.
+ * Foreground display behaviour. While a session is active, the
+ * ForegroundBannerBridge in app/_layout.tsx renders EVERY foreground push as
+ * the rich in-app banner (deliveries divert to DeliveryApprovalModal), so the
+ * OS banner would be a duplicate — suppress it. Logged out the bridge is
+ * unmounted, so we keep the OS alert as the fallback surface.
+ *
+ * shouldSetBadge stays true: the backend sends the recipient's unread
+ * NotificationLog count as the badge; the inbox screen clears it on focus.
  */
 export function setupNotificationHandler() {
   Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowAlert: true,
-      shouldPlaySound: true,
-      shouldSetBadge: false,
-    }),
+    handleNotification: async () => {
+      let bannerCoversForeground = false;
+      try {
+        // Lazy import — auth.store statically imports this module (logout →
+        // unregisterDeviceToken), so a static import here would be a cycle.
+        const { useAuthStore } = await import('../store/auth.store');
+        bannerCoversForeground = !!useAuthStore.getState().token;
+      } catch {
+        /* conservative: keep the OS alert */
+      }
+      return {
+        shouldShowAlert: !bannerCoversForeground,
+        shouldShowBanner: !bannerCoversForeground,
+        shouldShowList: true,
+        shouldPlaySound: true,
+        shouldSetBadge: true,
+      };
+    },
   });
 }
 
@@ -201,6 +265,7 @@ export async function ensureAndroidChannels() {
         vibrationPattern: c.vibrationPattern,
         enableVibrate: c.enableVibrate,
         enableLights: c.enableLights,
+        lightColor: c.lightColor,
         // sound: c.sound — set once we ship custom .mp3 assets. expo-notifications
         // treats `undefined` as "use platform default", which is what we want
         // until then.
@@ -218,7 +283,22 @@ export async function ensureAndroidChannels() {
 export async function ensurePermission(): Promise<boolean> {
   const { status: existing } = await Notifications.getPermissionsAsync();
   if (existing === 'granted') return true;
-  const { status } = await Notifications.requestPermissionsAsync();
+  // NOTE: allowCriticalAlerts is deliberately NOT requested. The
+  // com.apple.developer.usernotifications.critical-alerts entitlement
+  // (Apple-approved, per bundle ID) is not configured in app.json, and
+  // requesting .criticalAlert on an unentitled build risks the whole
+  // authorization request failing — registerDeviceToken() swallows errors,
+  // so that would silently kill iOS push registration for fresh installs.
+  // Re-enable here AND in NotificationPrimerModal once the entitlement is
+  // granted and declared under ios.entitlements.
+  const { status } = await Notifications.requestPermissionsAsync({
+    ios: {
+      allowAlert: true,
+      allowBadge: true,
+      allowSound: true,
+      allowProvisional: false,
+    },
+  });
   return status === 'granted';
 }
 
@@ -235,8 +315,13 @@ export function openNotificationSettings() {
  */
 export async function registerDeviceToken(): Promise<void> {
   try {
-    const granted = await ensurePermission();
-    if (!granted) return;
+    // Do NOT request permission here — only register when it is ALREADY
+    // granted. The one-shot OS prompt is owned by NotificationPrimerModal (a
+    // primed soft-prompt that dramatically lifts opt-in). Firing the bare OS
+    // dialog here at login would pre-empt and silently defeat that primer.
+    // The primer calls registerDeviceToken() itself once permission is granted.
+    const { status } = await Notifications.getPermissionsAsync();
+    if (status !== 'granted') return;
 
     // getDevicePushTokenAsync returns the NATIVE token: an FCM registration
     // token on Android, an APNS token on iOS. This is what the Firebase Admin
@@ -308,18 +393,43 @@ function extractData(response: Notifications.NotificationResponse | null): PushD
   return null;
 }
 
-/** Route the app in response to a notification tap (no action identifier). */
+/**
+ * Route the app in response to a notification tap (no action identifier).
+ * `data.type` is the backend category-registry key on current builds
+ * (visitor_approvals, deliveries, …); the SCREAMING_SNAKE cases are legacy
+ * aliases from older payloads and are kept as fallbacks.
+ */
 function routeFromData(data: PushData | null) {
   if (!data) return;
+  // visitId is the legacy field; entityId is the canonical one going forward.
+  const id = (data.entityId as string | undefined) ?? data.visitId;
   switch (data.type) {
+    // ── Category registry keys ──────────────────────────────────────────
+    case 'visitor_approvals':
+    case 'visitors_gate':
+      if (id) router.push(`/visitor/review/${id}` as any);
+      return;
+    case 'deliveries':
+      if (id) router.push(`/visitor/review/${id}` as any);
+      else router.push('/packages' as any);
+      return;
+    case 'complaints':
+      if (id) router.push(`/complaints/${id}` as any);
+      else router.push('/complaints' as any);
+      return;
+    case 'notices':
+    case 'notices_urgent':
+    case 'community':
+      router.push('/(tabs)/notices' as any);
+      return;
+    case 'emergency_sos':
+      router.push('/medical/sos' as any);
+      return;
+    // ── Legacy aliases ──────────────────────────────────────────────────
     case 'VISITOR_APPROVAL_REQUEST':
     case 'DELIVERY_APPROVAL_REQUEST':
     case 'VISITOR_ARRIVAL':
-      // visitId is the legacy field; entityId is the canonical one going forward.
-      {
-        const id = (data.entityId as string | undefined) ?? data.visitId;
-        if (id) router.push(`/visitor/review/${id}` as any);
-      }
+      if (id) router.push(`/visitor/review/${id}` as any);
       return;
     case 'COMPLAINT_UPDATED':
       if (data.entityId) router.push(`/complaints/${data.entityId}` as any);
@@ -346,8 +456,16 @@ function routeFromData(data: PushData | null) {
  * multi-device fan-out collapse to a no-op.
  */
 async function handleAction(actionIdentifier: string, data: PushData): Promise<void> {
+  // actionGroup is the canonical signal on current payloads; the type checks
+  // cover both the category-registry keys and the legacy event names.
   const isVisitor =
-    data.type === 'VISITOR_APPROVAL_REQUEST' || data.type === 'DELIVERY_APPROVAL_REQUEST';
+    data.actionGroup === 'visitor_approval' ||
+    data.actionGroup === 'delivery_approval' ||
+    data.type === 'visitor_approvals' ||
+    data.type === 'visitors_gate' ||
+    data.type === 'deliveries' ||
+    data.type === 'VISITOR_APPROVAL_REQUEST' ||
+    data.type === 'DELIVERY_APPROVAL_REQUEST';
   if (!isVisitor) return;
   const id = (data.entityId as string | undefined) ?? (data.visitId as string | undefined);
   if (!id) return;

@@ -103,11 +103,11 @@ export default function OtpVerifyScreen() {
     <SafeAreaView className="flex-1 bg-primary-500">
       <View className="flex-1 px-8 justify-center">
         <TouchableOpacity onPress={() => router.back()} className="mb-8">
-          <Text className="text-blue-200 text-base">← Back</Text>
+          <Text className="text-primary-100 text-base">← Back</Text>
         </TouchableOpacity>
 
         <Text className="text-3xl font-bold text-white mb-2">Enter OTP</Text>
-        <Text className="text-blue-200 text-base mb-8">
+        <Text className="text-primary-100 text-base mb-8">
           Sent to +91 {phone}
         </Text>
 
@@ -137,7 +137,7 @@ export default function OtpVerifyScreen() {
 
         <View className="items-center">
           {resendCountdown > 0 ? (
-            <Text className="text-blue-300 text-sm">Resend in {resendCountdown}s</Text>
+            <Text className="text-primary-200 text-sm">Resend in {resendCountdown}s</Text>
           ) : (
             <TouchableOpacity onPress={handleResend}>
               <Text className="text-white font-semibold text-sm">Resend OTP</Text>

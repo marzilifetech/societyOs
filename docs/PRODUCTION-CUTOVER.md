@@ -9,6 +9,7 @@ backend + admin panel, and publish the apps.
 > has the AWS `marzi` profile and the SSH key — not from CI.
 
 ### Discovered infra values (fill-ins for the commands below)
+
 ```
 INSTANCE   ubuntu@43.204.82.22          (Lightsail: societyos-dev-backend)
 SECRET     societyos/dev                (AWS Secrets Manager, region ap-south-1)
@@ -16,6 +17,7 @@ PEM        marzi-lightsail-key.pem      (in mig/secrets/ssh-pem-keys/ — confir
 ROOT ADMIN phone 9936142128  email tech@marzi.life  name "Marzi Admin"
 LOGIN      MARZI_AUTH_BASE_URL=https://prod.marzitech.in   NODE_ENV=production
 ```
+
 > Terraform state is LOCAL and lives on your original deploy machine — do NOT
 > `terraform init`/`apply` from a fresh checkout (it would try to create
 > duplicate infra). The commands below use the discovered values directly and
@@ -51,15 +53,18 @@ rm /tmp/secret.json
 ## 2. Deploy the backend
 
 From THIS machine (no Terraform state needed — discovers infra via AWS CLI):
+
 ```bash
 cd infra/instance
 ./deploy-local.sh    # discover IP + secret → rsync → docker build → prisma db push → restart
 ```
+
 (If SSH auth fails, the Lightsail key may be a different file — retry with
 `DEPLOY_KEY=~/Documents/mig/secrets/ssh-pem-keys/marzi-ec2-key.pem ./deploy-local.sh`.)
 
 Or from your ORIGINAL machine that has terraform.tfstate: `./deploy.sh`.
 Wait ~30s for Caddy TLS, then confirm the API is up:
+
 ```bash
 curl -s https://society-dev.marzitech.in/v1/health   # or your health route
 ```
@@ -77,11 +82,12 @@ atomic helper instead — it validates before it ever touches the live file:
 # ON the box:
 cd /opt/societyos && bash /opt/societyos/repo/infra/instance/refresh-env.sh
 ```
+
 It writes to a temp file, checks it has DATABASE_URL + ≥10 keys, backs up the
 current file, swaps atomically, and recreates the backend container. If AWS
 isn't usable on the box it stops without touching backend.env.
 
-## 3. Wipe the DB + seed ONE root Super Admin  (⚠️ irreversible)
+## 3. Wipe the DB + seed ONE root Super Admin (⚠️ irreversible)
 
 This project deploys with `prisma db push` (not migrations), so wipe with
 `db push --force-reset` (drops all data, re-creates schema from schema.prisma).
@@ -106,6 +112,7 @@ docker compose run --rm \
   -e ROOT_ADMIN_EMAIL="you@yourdomain.com" \
   backend pnpm exec ts-node prisma/seed-production.ts
 ```
+
 Seed script: `backend/prisma/seed-production.ts` — creates only the Platform
 society + one SUPER_ADMIN. It refuses to run on a non-empty DB unless `FORCE=1`.
 
@@ -126,10 +133,10 @@ Root admin logs in at the admin panel with the phone from step 3c → SMS OTP.
 
 No app changes needed — both already talk to `society-dev.marzitech.in`.
 
-| App | Package | AAB to upload |
-|-----|---------|----------------|
+| App             | Package              | AAB to upload                                                                      |
+| --------------- | -------------------- | ---------------------------------------------------------------------------------- |
 | Resident (user) | `com.marzi.resident` | `apps/resident-app/android/app/build/outputs/bundle/release/app-release.aab` (vc7) |
-| Staff | `com.marzi.staff` | `apps/staff-app/android/app/build/outputs/bundle/release/app-release.aab` (vc4) |
+| Staff           | `com.marzi.staff`    | `apps/staff-app/android/app/build/outputs/bundle/release/app-release.aab` (vc4)    |
 
 Staff also has `app/build/outputs/mapping/release/mapping.txt` (upload as the
 deobfuscation file). Keystore for both: the Marzi upload key (SHA1 DC:56:E1:CE…).
@@ -137,6 +144,7 @@ deobfuscation file). Keystore for both: the Marzi upload key (SHA1 DC:56:E1:CE�
 ---
 
 ## Verify after cutover
+
 - [ ] Backend `/health` returns OK on society-dev
 - [ ] Login from the resident app with a real number → SMS OTP arrives → logs in
 - [ ] Admin panel: root Super Admin logs in, can create a society + a society admin
@@ -144,6 +152,7 @@ deobfuscation file). Keystore for both: the Marzi upload key (SHA1 DC:56:E1:CE�
 - [ ] No dev/demo residents/staff remain
 
 ## Rollback
+
 - Restore the DB from `~/backup-before-prod-*.sql`:
   `docker compose exec -T backend sh -lc 'psql "$DATABASE_URL"' < backup-…​.sql`
 - Revert the Secrets Manager keys and re-run `./deploy.sh`.

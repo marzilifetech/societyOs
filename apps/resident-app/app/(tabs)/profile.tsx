@@ -4,9 +4,20 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
+import { HEALTH_ENABLED } from '../../src/lib/features';
 import { useAuthStore } from '../../src/store/auth.store';
 import { useAccessibilityStore } from '../../src/store/accessibility.store';
 import { useTheme } from '../../src/hooks/useTheme';
+import { Display, StatusPill } from '../../src/components/ui';
+
+// Soft card shadow matching the redesign-kit RoundCard surface.
+const cardShadow = {
+  shadowColor: '#000',
+  shadowOffset: { width: 0, height: 6 },
+  shadowOpacity: 0.06,
+  shadowRadius: 14,
+  elevation: 2,
+} as const;
 
 type DocsStatus = 'PENDING' | 'UPLOADED' | 'VERIFIED' | 'REJECTED';
 type MyDocs = {
@@ -25,23 +36,16 @@ type MenuItem = { icon: IoniconName; label: string; route: string; tint: string 
 
 /** Chip showing where the KYC documents stand in the admin review cycle. */
 function DocStatusChip({ status }: { status: DocsStatus }) {
-  const meta = (() => {
-    switch (status) {
-      case 'VERIFIED':
-        return { label: 'Verified', bg: 'bg-green-50', text: 'text-green-700', border: 'border-green-200' };
-      case 'REJECTED':
-        return { label: 'Re-upload needed', bg: 'bg-red-50', text: 'text-red-700', border: 'border-red-200' };
-      case 'UPLOADED':
-        return { label: 'Under review', bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200' };
-      default:
-        return { label: 'Pending', bg: 'bg-gray-100', text: 'text-gray-600', border: 'border-gray-200' };
-    }
-  })();
-  return (
-    <View className={`${meta.bg} ${meta.border} border rounded-full px-3 py-1`}>
-      <Text className={`${meta.text} font-semibold text-xs`}>{meta.label}</Text>
-    </View>
-  );
+  switch (status) {
+    case 'VERIFIED':
+      return <StatusPill label="Verified" tone="resolved" />;
+    case 'REJECTED':
+      return <StatusPill label="Re-upload needed" tone="cancelled" />;
+    case 'UPLOADED':
+      return <StatusPill label="Under review" tone="active" />;
+    default:
+      return <StatusPill label="Pending" tone="neutral" />;
+  }
 }
 
 /**
@@ -76,7 +80,7 @@ function DocRow({
       disabled={!imageUrl}
       accessibilityRole={imageUrl ? 'button' : 'text'}
       accessibilityLabel={imageUrl ? `View ${label}` : `${label} not uploaded`}
-      className={`flex-row items-center ${showDivider ? 'border-t border-gray-200' : ''}`}
+      className={`flex-row items-center ${showDivider ? 'border-t border-gray-100' : ''}`}
       style={{
         minHeight: t.touchTarget,
         paddingHorizontal: t.cardPadding,
@@ -113,7 +117,7 @@ function DocRow({
           {imageUrl ? caption ?? 'Tap to view' : 'Not uploaded'}
         </Text>
       </View>
-      {imageUrl ? <Ionicons name="eye-outline" size={t.iconSm} color="#821A52" /> : null}
+      {imageUrl ? <Ionicons name="eye-outline" size={t.iconSm} color={t.accentPrimary} /> : null}
     </TouchableOpacity>
   );
 }
@@ -122,7 +126,10 @@ const MENU_ITEMS: MenuItem[] = [
   { icon: 'card', label: 'Maintenance & Dues', route: '/maintenance', tint: '#0EA5E9' },
   { icon: 'restaurant', label: 'Canteen Menu', route: '/canteen', tint: '#D97706' },
   { icon: 'sparkles', label: 'Events', route: '/events', tint: '#DB2777' },
-  { icon: 'medkit', label: 'Medical Appointments', route: '/medical', tint: '#16A34A' },
+  // 'Medical Appointments' is gated by HEALTH_ENABLED (Play health-policy) — see src/lib/features.ts.
+  ...(HEALTH_ENABLED
+    ? [{ icon: 'medkit', label: 'Medical Appointments', route: '/medical', tint: '#16A34A' } as MenuItem]
+    : []),
   { icon: 'chatbubble-ellipses', label: 'Complaints & Support', route: '/complaints', tint: '#7C3AED' },
   // Always-on entry to the troubleshoot screen — even when permission is
   // granted users may need to tweak battery saver / DnD / lockscreen.
@@ -182,7 +189,7 @@ export default function ProfileScreen() {
         {/* Header */}
         <View style={{ paddingHorizontal: t.screenPadding, paddingTop: 16, paddingBottom: t.sectionGap }}>
           <View className="flex-row justify-between items-center mb-6">
-            <Text className="font-bold text-gray-900" style={{ fontSize: t.font2xl }}>Profile</Text>
+            <Display size="md">Profile</Display>
             {seniorMode && (
               <View className="bg-primary-50 border border-primary-500 rounded-full px-3 py-1">
                 <Text className="text-primary-500 font-semibold" style={{ fontSize: t.fontXs }}>Larger Fonts</Text>
@@ -197,8 +204,8 @@ export default function ProfileScreen() {
 
           {/* Profile Card */}
           <TouchableOpacity
-            className="bg-gray-50 border border-gray-200 rounded-2xl flex-row items-center"
-            style={{ padding: t.cardPadding }}
+            className="bg-white border border-gray-100 rounded-2xl flex-row items-center"
+            style={{ padding: t.cardPadding, ...cardShadow }}
             onPress={() => router.push('/profile/edit' as any)}
             accessibilityRole="button"
             accessibilityLabel="Edit profile"
@@ -207,7 +214,7 @@ export default function ProfileScreen() {
               className="rounded-full bg-primary-50 items-center justify-center"
               style={{ width: t.iconXl + 16, height: t.iconXl + 16, marginRight: t.cardPadding * 0.75 }}
             >
-              <Ionicons name="person-circle" size={t.iconXl + 8} color="#821A52" />
+              <Ionicons name="person-circle" size={t.iconXl + 8} color={t.accentPrimary} />
             </View>
             <View className="flex-1">
               <Text className="text-gray-900 font-bold" style={{ fontSize: t.fontLg }}>{name}</Text>
@@ -228,9 +235,7 @@ export default function ProfileScreen() {
             them to the upload screen instead of showing an edit button. */}
         <View style={{ paddingHorizontal: t.screenPadding, marginBottom: t.sectionGap }}>
           <View className="flex-row items-center justify-between mb-4">
-            <Text className="font-semibold text-gray-900" style={{ fontSize: t.fontXl }}>
-              My Documents
-            </Text>
+            <Display size="sm">My Documents</Display>
             {myDocs && (myDocs.aadhaarUrl || myDocs.panUrl || myDocs.addressProofUrl) ? (
               <DocStatusChip status={myDocs.status} />
             ) : null}
@@ -255,7 +260,7 @@ export default function ProfileScreen() {
                     marginRight: 12,
                   }}
                 >
-                  <Ionicons name="document-text-outline" size={t.iconMd} color="#821A52" />
+                  <Ionicons name="document-text-outline" size={t.iconMd} color={t.accentPrimary} />
                 </View>
                 <View className="flex-1">
                   <Text className="text-primary-500 font-bold" style={{ fontSize: t.fontBase }}>
@@ -265,12 +270,12 @@ export default function ProfileScreen() {
                     Aadhaar, PAN, and address proof. Needed once for the society office.
                   </Text>
                 </View>
-                <Ionicons name="chevron-forward" size={t.iconSm} color="#821A52" />
+                <Ionicons name="chevron-forward" size={t.iconSm} color={t.accentPrimary} />
               </View>
             </TouchableOpacity>
           ) : (
             // Documents present — show read-only thumbnails + masked numbers.
-            <View className="bg-gray-50 border border-gray-200 rounded-2xl overflow-hidden">
+            <View className="bg-white border border-gray-100 rounded-2xl overflow-hidden" style={cardShadow}>
               <DocRow
                 label="Aadhaar"
                 imageUrl={myDocs.aadhaarUrl}
@@ -315,12 +320,12 @@ export default function ProfileScreen() {
 
         {/* Menu */}
         <View style={{ paddingHorizontal: t.screenPadding, marginBottom: t.sectionGap }}>
-          <Text className="font-semibold text-gray-900 mb-4" style={{ fontSize: t.fontXl }}>Quick Links</Text>
-          <View className="bg-gray-50 border border-gray-200 rounded-2xl overflow-hidden">
+          <Display size="sm" style={{ marginBottom: 16 }}>Quick Links</Display>
+          <View className="bg-white border border-gray-100 rounded-2xl overflow-hidden" style={cardShadow}>
             {MENU_ITEMS.map((item, idx) => (
               <TouchableOpacity
                 key={item.route}
-                className={`flex-row items-center ${idx < MENU_ITEMS.length - 1 ? 'border-b border-gray-200' : ''}`}
+                className={`flex-row items-center ${idx < MENU_ITEMS.length - 1 ? 'border-b border-gray-100' : ''}`}
                 style={{ minHeight: t.touchTarget, paddingHorizontal: t.cardPadding, paddingVertical: t.cardPadding * 0.75 }}
                 onPress={() => router.push(item.route as any)}
                 accessibilityRole="button"
@@ -341,17 +346,17 @@ export default function ProfileScreen() {
 
         {/* Accessibility */}
         <View style={{ paddingHorizontal: t.screenPadding, marginBottom: t.sectionGap }}>
-          <Text className="font-semibold text-gray-900 mb-4" style={{ fontSize: t.fontXl }}>Accessibility</Text>
-          <View className="bg-gray-50 border border-gray-200 rounded-2xl overflow-hidden">
+          <Display size="sm" style={{ marginBottom: 16 }}>Accessibility</Display>
+          <View className="bg-white border border-gray-100 rounded-2xl overflow-hidden" style={cardShadow}>
             <View
               className="flex-row items-center"
               style={{ minHeight: t.touchTarget, paddingHorizontal: t.cardPadding, paddingVertical: t.cardPadding * 0.75 }}
             >
               <View
                 className="rounded-full items-center justify-center"
-                style={{ width: t.iconMd + 14, height: t.iconMd + 14, marginRight: 12, backgroundColor: '#821A521A' }}
+                style={{ width: t.iconMd + 14, height: t.iconMd + 14, marginRight: 12, backgroundColor: `${t.accentPrimary}1A` }}
               >
-                <Ionicons name="eye-outline" size={t.iconSm} color="#821A52" />
+                <Ionicons name="eye-outline" size={t.iconSm} color={t.accentPrimary} />
               </View>
               <View className="flex-1 mr-3">
                 <Text style={{ fontSize: t.fontBase }} className="text-gray-900 font-semibold">Larger Fonts</Text>
@@ -362,7 +367,7 @@ export default function ProfileScreen() {
               <Switch
                 value={seniorMode}
                 onValueChange={setSeniorMode}
-                trackColor={{ false: '#E5E7EB', true: '#821A52' }}
+                trackColor={{ false: '#E5E7EB', true: t.accentPrimary }}
                 thumbColor="#FFFFFF"
                 accessibilityLabel={`Senior mode toggle. Currently ${seniorMode ? 'on' : 'off'}`}
                 accessibilityRole="switch"
@@ -373,17 +378,17 @@ export default function ProfileScreen() {
 
         {/* Privacy */}
         <View style={{ paddingHorizontal: t.screenPadding, marginBottom: t.sectionGap }}>
-          <Text className="font-semibold text-gray-900 mb-4" style={{ fontSize: t.fontXl }}>Privacy</Text>
-          <View className="bg-gray-50 border border-gray-200 rounded-2xl overflow-hidden">
+          <Display size="sm" style={{ marginBottom: 16 }}>Privacy</Display>
+          <View className="bg-white border border-gray-100 rounded-2xl overflow-hidden" style={cardShadow}>
             <View
               className="flex-row items-center"
               style={{ minHeight: t.touchTarget, paddingHorizontal: t.cardPadding, paddingVertical: t.cardPadding * 0.75 }}
             >
               <View
                 className="rounded-full items-center justify-center"
-                style={{ width: t.iconMd + 14, height: t.iconMd + 14, marginRight: 12, backgroundColor: '#821A521A' }}
+                style={{ width: t.iconMd + 14, height: t.iconMd + 14, marginRight: 12, backgroundColor: `${t.accentPrimary}1A` }}
               >
-                <Ionicons name="shield-checkmark" size={t.iconSm} color="#821A52" />
+                <Ionicons name="shield-checkmark" size={t.iconSm} color={t.accentPrimary} />
               </View>
               <View className="flex-1 mr-3">
                 <Text style={{ fontSize: t.fontBase }} className="text-gray-900 font-semibold">Show in society directory</Text>
@@ -395,7 +400,7 @@ export default function ProfileScreen() {
                 value={profile?.showInDirectory ?? false}
                 onValueChange={(val) => directoryMutation.mutate(val)}
                 disabled={directoryMutation.isPending}
-                trackColor={{ false: '#E5E7EB', true: '#821A52' }}
+                trackColor={{ false: '#E5E7EB', true: t.accentPrimary }}
                 thumbColor="#FFFFFF"
                 accessibilityLabel={`Directory visibility toggle. Currently ${profile?.showInDirectory ? 'on' : 'off'}`}
                 accessibilityRole="switch"
@@ -407,8 +412,8 @@ export default function ProfileScreen() {
         {/* Sign Out */}
         <View style={{ paddingHorizontal: t.screenPadding, marginBottom: 32 }}>
           <TouchableOpacity
-            className="bg-gray-50 border border-gray-200 rounded-2xl flex-row items-center justify-center gap-2"
-            style={{ minHeight: t.touchTarget, paddingVertical: t.cardPadding * 0.875 }}
+            className="bg-white border border-gray-100 rounded-2xl flex-row items-center justify-center gap-2"
+            style={{ minHeight: t.touchTarget, paddingVertical: t.cardPadding * 0.875, ...cardShadow }}
             onPress={handleLogout}
             accessibilityRole="button"
             accessibilityLabel="Sign out of your account"

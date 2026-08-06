@@ -1,16 +1,30 @@
-import { View, Text, FlatList, TouchableOpacity, ActivityIndicator, Alert, Image } from 'react-native';
-import { router } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { View, Text, FlatList, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
+import { useTheme } from '../../src/hooks/useTheme';
+import {
+  ScreenHeader,
+  Display,
+  RoundCard,
+  PillButton,
+  IconCircle,
+  StatusPill,
+  rd,
+  type RdStatusTone,
+} from '../../src/components/ui';
 
-const CATEGORY_COLORS: Record<string, string> = {
-  CULTURAL: 'bg-purple-100 text-purple-700',
-  SPORTS: 'bg-green-100 text-green-700',
-  MEETING: 'bg-blue-100 text-blue-700',
-  CELEBRATION: 'bg-amber-100 text-amber-700',
-  WORKSHOP: 'bg-teal-100 text-teal-700',
-  OTHER: 'bg-gray-100 text-gray-600',
+type IoniconName = keyof typeof Ionicons.glyphMap;
+
+// Category chips reuse the StatusPill soft-tone vocabulary; icons render in
+// tinted IconCircles matching the redesign kit.
+const CATEGORY_META: Record<string, { tone: RdStatusTone; icon: IoniconName; iconBg: string }> = {
+  CULTURAL: { tone: 'cancelled', icon: 'color-palette-outline', iconBg: rd.crimsonSoft },
+  SPORTS: { tone: 'resolved', icon: 'football-outline', iconBg: rd.greenSoft },
+  MEETING: { tone: 'neutral', icon: 'people-outline', iconBg: '#EAF4FB' },
+  CELEBRATION: { tone: 'pending', icon: 'sparkles-outline', iconBg: rd.amberSoft },
+  WORKSHOP: { tone: 'active', icon: 'construct-outline', iconBg: rd.amberSoft },
+  OTHER: { tone: 'neutral', icon: 'calendar-outline', iconBg: rd.inkSoft },
 };
 
 type EventRegistration = {
@@ -31,6 +45,7 @@ type ResidentEvent = {
 };
 
 export default function EventsScreen() {
+  const t = useTheme();
   const qc = useQueryClient();
 
   const { data: events, isLoading, isError, refetch } = useQuery<ResidentEvent[]>({
@@ -57,39 +72,45 @@ export default function EventsScreen() {
   });
 
   return (
-    <SafeAreaView className="flex-1 bg-white">
-      <View className="px-6 pt-4 pb-3">
-        <TouchableOpacity onPress={() => router.back()}>
-          <Text className="text-primary-500 text-base mb-4">← Back</Text>
-        </TouchableOpacity>
-        <Text className="text-2xl font-bold text-gray-900 mb-6">Events</Text>
-      </View>
+    <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+      <ScreenHeader title="Events" />
 
       {isLoading ? (
         <View className="flex-1 items-center justify-center">
-          <ActivityIndicator color="#3B3FBF" />
+          <ActivityIndicator color={t.accentPrimary} />
         </View>
       ) : isError ? (
         <View className="flex-1 items-center justify-center px-8">
-          <Text className="text-5xl mb-4">⚠️</Text>
-          <Text className="text-gray-900 text-lg font-semibold mb-2 text-center">Failed to load events</Text>
-          <TouchableOpacity className="bg-primary-500 rounded-2xl px-6 py-3 mt-2" onPress={() => refetch()}>
-            <Text className="text-white font-semibold">Retry</Text>
-          </TouchableOpacity>
+          <IconCircle icon="alert-circle-outline" size={64} bg={rd.crimsonSoft} color={rd.crimson} style={{ marginBottom: 16 }} />
+          <Display size="md" align="center" style={{ marginBottom: 8 }}>Failed to load events</Display>
+          <PillButton
+            label="Retry"
+            tone="dark"
+            fullWidth={false}
+            onPress={() => refetch()}
+            style={{ marginTop: 8 }}
+          />
         </View>
       ) : !events?.length ? (
         <View className="flex-1 items-center justify-center px-8">
-          <Text className="text-5xl mb-4">🎉</Text>
-          <Text className="text-gray-500 text-center">No upcoming events</Text>
+          <IconCircle icon="sparkles-outline" size={64} bg={rd.crimsonSoft} color={t.accentPrimary} style={{ marginBottom: 16 }} />
+          <Display size="md" align="center" style={{ marginBottom: 6 }}>No upcoming events</Display>
+          <Text style={{ fontSize: t.fontSm, color: t.textMuted, textAlign: 'center' }}>
+            When your society plans something, it will show up here.
+          </Text>
         </View>
       ) : (
         <FlatList
           data={events}
           keyExtractor={(e: ResidentEvent) => e.id}
-          contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 32 }}
+          initialNumToRender={10}
+          maxToRenderPerBatch={10}
+          windowSize={7}
+          contentContainerStyle={{ paddingHorizontal: t.screenPadding, paddingTop: 8, paddingBottom: 32 }}
+          ListHeaderComponent={<Display size="md" style={{ marginBottom: 14 }}>Upcoming Events</Display>}
           ItemSeparatorComponent={() => <View className="h-4" />}
           renderItem={({ item }: { item: ResidentEvent }) => {
-            const colorClass = CATEGORY_COLORS[item.category] ?? CATEGORY_COLORS.OTHER;
+            const meta = CATEGORY_META[item.category] ?? CATEGORY_META.OTHER;
             const registered = item.myRegistration?.status === 'REGISTERED';
             const waitlisted = item.myRegistration?.status === 'WAITLISTED';
             const full =
@@ -101,100 +122,138 @@ export default function EventsScreen() {
             const isPast = eventDate < new Date();
 
             return (
-              <View className="bg-white border border-gray-100 rounded-2xl overflow-hidden shadow-sm">
-                {/* Header band */}
-                <View className="bg-primary-500 px-5 pt-5 pb-4">
-                  <View className={`self-start rounded-full px-3 py-0.5 mb-2 ${colorClass.split(' ')[0]}`}>
-                    <Text className={`text-xs font-semibold ${colorClass.split(' ')[1]}`}>{item.category}</Text>
+              <RoundCard tone="white" padding={t.cardPaddingLg}>
+                {/* Title row */}
+                <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 12 }}>
+                  <IconCircle size={48} bg={meta.iconBg}>
+                    <Ionicons name={meta.icon} size={22} color={rd.ink} />
+                  </IconCircle>
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <StatusPill label={item.category} tone={meta.tone} />
+                    <Text
+                      style={{ fontSize: t.fontLg, fontWeight: '700', color: t.textPrimary, marginTop: 6 }}
+                    >
+                      {item.title}
+                    </Text>
                   </View>
-                  <Text className="text-white text-lg font-bold leading-snug">{item.title}</Text>
                 </View>
 
-                <View className="px-5 py-4">
-                  {item.description && (
-                    <Text className="text-sm text-gray-600 mb-3 leading-5" numberOfLines={2}>
-                      {item.description}
-                    </Text>
-                  )}
+                {item.description && (
+                  <Text
+                    numberOfLines={2}
+                    style={{ fontSize: t.fontSm, color: t.textSecondary, marginBottom: 12, lineHeight: t.fontSm * t.lineHeightBase }}
+                  >
+                    {item.description}
+                  </Text>
+                )}
 
-                  <View className="flex-row gap-5 mb-4">
-                    <View className="flex-row items-center gap-1.5">
-                      <Text className="text-gray-400 text-xs">📅</Text>
-                      <Text className="text-xs text-gray-600">
-                        {eventDate.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 14, marginBottom: 14 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                    <Ionicons name="calendar-outline" size={13} color={t.textMuted} />
+                    <Text style={{ fontSize: t.fontXs, color: t.textSecondary }}>
+                      {eventDate.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}
+                    </Text>
+                  </View>
+                  {item.eventTime && (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                      <Ionicons name="time-outline" size={13} color={t.textMuted} />
+                      <Text style={{ fontSize: t.fontXs, color: t.textSecondary }}>{item.eventTime}</Text>
+                    </View>
+                  )}
+                  {item.venue && (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                      <Ionicons name="location-outline" size={13} color={t.textMuted} />
+                      <Text style={{ fontSize: t.fontXs, color: t.textSecondary }}>{item.venue}</Text>
+                    </View>
+                  )}
+                </View>
+
+                {item.capacity && (
+                  <View style={{ marginBottom: 14 }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <Text style={{ fontSize: t.fontXs, color: t.textMuted }}>Registrations</Text>
+                      <Text style={{ fontSize: t.fontXs, color: t.textSecondary }}>
+                        {item.registrationCount ?? 0} / {item.capacity}
                       </Text>
                     </View>
-                    {item.eventTime && (
-                      <View className="flex-row items-center gap-1.5">
-                        <Text className="text-gray-400 text-xs">🕐</Text>
-                        <Text className="text-xs text-gray-600">{item.eventTime}</Text>
-                      </View>
-                    )}
-                    {item.venue && (
-                      <View className="flex-row items-center gap-1.5">
-                        <Text className="text-gray-400 text-xs">📍</Text>
-                        <Text className="text-xs text-gray-600">{item.venue}</Text>
-                      </View>
-                    )}
-                  </View>
-
-                  {item.capacity && (
-                    <View className="mb-3">
-                      <View className="flex-row justify-between mb-1">
-                        <Text className="text-xs text-gray-400">Registrations</Text>
-                        <Text className="text-xs text-gray-600">
-                          {item.registrationCount ?? 0} / {item.capacity}
-                        </Text>
-                      </View>
-                      <View className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                        <View
-                          className="h-full bg-primary-400 rounded-full"
-                          style={{ width: `${Math.min(100, ((item.registrationCount ?? 0) / item.capacity) * 100)}%` }}
-                        />
-                      </View>
+                    <View style={{ height: 6, backgroundColor: rd.inkSoft, borderRadius: rd.radiusPill, overflow: 'hidden' }}>
+                      <View
+                        style={{
+                          height: '100%',
+                          backgroundColor: t.accentPrimary,
+                          borderRadius: rd.radiusPill,
+                          width: `${Math.min(100, ((item.registrationCount ?? 0) / item.capacity) * 100)}%`,
+                        }}
+                      />
                     </View>
-                  )}
+                  </View>
+                )}
 
-                  {!isPast && (
-                    <>
-                      {registered && (
-                        <View className="flex-row items-center justify-between">
-                          <View className="bg-green-100 rounded-xl px-3 py-2 flex-1 mr-3">
-                            <Text className="text-green-700 text-sm font-medium text-center">Registered ✓</Text>
-                          </View>
-                          <TouchableOpacity
-                            className="border border-gray-200 rounded-xl px-3 py-2"
-                            onPress={() => cancelMutation.mutate(item.id)}
-                            disabled={cancelMutation.isPending}
-                          >
-                            <Text className="text-gray-500 text-sm">Cancel</Text>
-                          </TouchableOpacity>
-                        </View>
-                      )}
-                      {waitlisted && (
-                        <View className="bg-amber-50 rounded-xl px-3 py-2">
-                          <Text className="text-amber-700 text-sm font-medium text-center">On Waitlist</Text>
-                        </View>
-                      )}
-                      {!registered && !waitlisted && (
-                        <TouchableOpacity
-                          className={`rounded-2xl py-3 items-center ${full ? 'bg-gray-100' : 'bg-primary-500'}`}
-                          onPress={() => registerMutation.mutate(item.id)}
-                          disabled={full || registerMutation.isPending}
+                {!isPast && (
+                  <>
+                    {registered && (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                        <View
+                          style={{
+                            flex: 1,
+                            backgroundColor: rd.greenSoft,
+                            borderRadius: rd.radiusPill,
+                            paddingVertical: 10,
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 6,
+                          }}
                         >
-                          <Text className={`font-semibold text-sm ${full ? 'text-gray-400' : 'text-white'}`}>
-                            {full ? 'Event Full' : 'Register'}
-                          </Text>
+                          <Ionicons name="checkmark-circle" size={16} color={rd.green} />
+                          <Text style={{ color: '#1F7A45', fontSize: t.fontSm, fontWeight: '600' }}>Registered</Text>
+                        </View>
+                        <TouchableOpacity
+                          style={{
+                            borderWidth: 1,
+                            borderColor: 'rgba(0,0,0,0.12)',
+                            borderRadius: rd.radiusPill,
+                            paddingHorizontal: 16,
+                            paddingVertical: 10,
+                          }}
+                          onPress={() => cancelMutation.mutate(item.id)}
+                          disabled={cancelMutation.isPending}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Cancel registration for ${item.title}`}
+                        >
+                          <Text style={{ color: t.textMuted, fontSize: t.fontSm }}>Cancel</Text>
                         </TouchableOpacity>
-                      )}
-                    </>
-                  )}
-                </View>
-              </View>
+                      </View>
+                    )}
+                    {waitlisted && (
+                      <View
+                        style={{
+                          backgroundColor: rd.amberSoft,
+                          borderRadius: rd.radiusPill,
+                          paddingVertical: 10,
+                          alignItems: 'center',
+                        }}
+                      >
+                        <Text style={{ color: rd.amberInk, fontSize: t.fontSm, fontWeight: '600' }}>On Waitlist</Text>
+                      </View>
+                    )}
+                    {!registered && !waitlisted && (
+                      <PillButton
+                        label={full ? 'Event Full' : 'Register'}
+                        tone={full ? 'light' : 'dark'}
+                        size="md"
+                        onPress={() => registerMutation.mutate(item.id)}
+                        disabled={full || registerMutation.isPending}
+                        accessibilityLabel={`Register for ${item.title}`}
+                      />
+                    )}
+                  </>
+                )}
+              </RoundCard>
             );
           }}
         />
       )}
-    </SafeAreaView>
+    </View>
   );
 }

@@ -28,11 +28,12 @@ export const defaultTokens = {
   sectionGap: 16,
   screenPadding: 20,
 
-  // Paper design — corners are nearly flat (was 12 / 16 / 20 / 28).
-  radiusSm: 2,
-  radiusMd: 4,
-  radiusLg: 6,
-  radiusXl: 8,
+  // 2026 redesign geometry — soft rounded surfaces matching the Figma
+  // RoundCard language (cards 16, sheets/hero cards 20).
+  radiusSm: 8,
+  radiusMd: 12,
+  radiusLg: 16,
+  radiusXl: 20,
 
   bgPrimary: '#FFFFFF',
   bgCard: '#F7F7F8',
@@ -88,12 +89,12 @@ export const seniorTokens: typeof defaultTokens = {
   sectionGap: 18,
   screenPadding: 20,
 
-  // Same flat paper radii as default — the senior treatment is bigger text
-  // and contrast, NOT rounder shapes.
-  radiusSm: 2,
-  radiusMd: 4,
-  radiusLg: 6,
-  radiusXl: 8,
+  // Same rounded redesign radii as default — the senior treatment is bigger
+  // text and contrast, not different shapes.
+  radiusSm: 8,
+  radiusMd: 12,
+  radiusLg: 16,
+  radiusXl: 20,
 
   bgPrimary: '#FFFFFF',
   bgCard: '#F4F4F6',

@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, Modal } from 'react-native';
-import { router, Stack } from 'expo-router';
+import { Stack } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import WebView from 'react-native-webview';
 import { api } from '../../src/lib/api';
 import { ErrorCard } from '../../src/components/ErrorCard';
+import { AppHeader, Card, EmptyState } from '../../src/components/ui';
 
 interface SalarySlip {
   id: string;
@@ -46,12 +47,7 @@ export default function SalaryScreen() {
   return (
     <SafeAreaView className="flex-1 bg-gray-50" edges={['top']}>
       <Stack.Screen options={{ headerShown: false }} />
-      <View className="bg-primary-500 px-5 py-4 flex-row items-center">
-        <TouchableOpacity onPress={() => router.back()} className="w-10 h-10 items-center justify-center">
-          <Text className="text-white text-2xl">‹</Text>
-        </TouchableOpacity>
-        <Text className="text-white text-lg font-bold ml-2">Salary Slips</Text>
-      </View>
+      <AppHeader title="Salary Slips" />
 
       <View className="px-5 pt-4">
         <View className="flex-row gap-2">
@@ -81,10 +77,9 @@ export default function SalaryScreen() {
       ) : (
         <ScrollView className="flex-1" contentContainerClassName="p-5 gap-3">
           {(data ?? []).length === 0 ? (
-            <View className="bg-white rounded-2xl p-8 items-center mt-8">
-              <Text className="text-5xl mb-3">💰</Text>
-              <Text className="text-gray-700 font-semibold text-base">No salary slips for {year}</Text>
-            </View>
+            <Card padding="none" className="mt-8">
+              <EmptyState icon="cash-outline" title={`No salary slips for ${year}`} />
+            </Card>
           ) : (
             (data ?? []).map((s) => (
               <View key={s.id} className="bg-white rounded-2xl p-4 shadow-sm">
