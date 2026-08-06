@@ -33,3 +33,10 @@ export class VerifyOtpDto {
   @Length(4, 6)
   otp: string;
 }
+
+export class CareHandoffExchangeDto {
+  @ApiProperty({ description: 'One-time Care portal handoff token' })
+  @IsString()
+  @Length(16, 200)
+  token: string;
+}

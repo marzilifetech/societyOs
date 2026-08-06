@@ -13,7 +13,7 @@ import { ApiTags, ApiBearerAuth, ApiProperty, ApiPropertyOptional } from '@nestj
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { TotpService } from './totp.service';
-import { SendOtpDto, VerifyOtpDto } from './dto/auth.dto';
+import { SendOtpDto, VerifyOtpDto, CareHandoffExchangeDto } from './dto/auth.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { LocalOtpEnabledGuard } from '../../common/guards/local-otp-enabled.guard';
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
@@ -125,6 +125,30 @@ export class AuthController {
       totpCode: dto.totpCode,
       otp: dto.otp,
     });
+  }
+
+  /**
+   * Mint a one-time handoff token so the resident app can open the web /care
+   * portal already signed-in (no second OTP). Requires the app's live session.
+   */
+  @Post('care-handoff')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @HttpCode(200)
+  careHandoff(@CurrentUser() user: JwtPayload) {
+    return this.authService.issueCareHandoff(user.sub);
+  }
+
+  /**
+   * Exchange a one-time handoff token for a fresh session. Public — the token
+   * is the credential; it is single-use and short-lived.
+   */
+  @Post('care-handoff/exchange')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @HttpCode(200)
+  careHandoffExchange(@Body() dto: CareHandoffExchangeDto) {
+    return this.authService.exchangeCareHandoff(dto.token);
   }
 
   @Post('logout')

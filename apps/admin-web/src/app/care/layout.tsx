@@ -17,20 +17,22 @@ export default function CareLayout({ children }: { children: React.ReactNode }) 
   const token = useCareAuth((s) => s.token);
   const [mounted, setMounted] = useState(false);
 
-  const isLogin = pathname === '/care/login';
+  // Public routes that must render WITHOUT a session: the OTP login and the
+  // app→web seamless-entry handoff (which establishes the session itself).
+  const isPublic = pathname === '/care/login' || pathname === '/care/enter';
 
   useEffect(() => setMounted(true), []);
 
   useEffect(() => {
     if (!mounted) return;
-    if (!token && !isLogin) {
+    if (!token && !isPublic) {
       router.replace('/care/login');
     }
-  }, [mounted, token, isLogin, router]);
+  }, [mounted, token, isPublic, router]);
 
   // Until the persisted store has hydrated we don't know auth state; render a
   // neutral frame to avoid a flash of the wrong screen.
-  const gateReady = mounted && (isLogin || !!token);
+  const gateReady = mounted && (isPublic || !!token);
 
   return (
     <div className="min-h-screen bg-gray-100">
