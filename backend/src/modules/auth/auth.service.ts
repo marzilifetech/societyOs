@@ -30,6 +30,14 @@ const ADMIN_SESSION_IDLE_SECONDS = 30 * 60; // 30 minutes
 const REAUTH_TOKEN_TTL_SECONDS = 5 * 60;
 
 /**
+ * One-time "Care portal" handoff token TTL. The resident mobile app mints one
+ * of these from its live session and opens the web /care portal with it, so the
+ * resident lands signed-in without a second OTP. Deliberately tiny + single-use
+ * + opaque (not a JWT) so a leaked link is useless after ~2 min / one use.
+ */
+const CARE_HANDOFF_TTL_SECONDS = 2 * 60;
+
+/**
  * Hardcoded QA test numbers. These bypass the SMS OTP entirely: `sendOtp` does
  * NOT dispatch a code (no SMS, no Marzi call), and `verifyOtp` accepts ONLY the
  * fixed code below — nothing else. Keyed by the 10-digit national number and
@@ -322,6 +330,72 @@ export class AuthService {
         name: user.name,
       },
       isNewUser,
+    };
+  }
+
+  /**
+   * Mint a one-time handoff token for the authenticated resident. Called by the
+   * mobile app; the returned opaque token is passed to the web /care portal,
+   * which exchanges it for a real session (see exchangeCareHandoff). Stored in
+   * Redis keyed to the userId with a short TTL and consumed on first use.
+   */
+  async issueCareHandoff(userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException({ code: 'USER_NOT_FOUND' });
+    // Opaque, high-entropy, NOT a JWT — nothing to forge or replay.
+    const token = `${randomUUID()}${randomUUID().replace(/-/g, '')}`;
+    await this.redis.set(`care-handoff:${token}`, user.id, CARE_HANDOFF_TTL_SECONDS);
+    return { token, expiresIn: CARE_HANDOFF_TTL_SECONDS };
+  }
+
+  /**
+   * Exchange a one-time handoff token for a fresh LOCAL token pair. Public
+   * (no bearer) — the token itself is the credential. It is consumed on read
+   * (single-use) and the same society/account gates as verify-otp are applied.
+   */
+  async exchangeCareHandoff(token?: string) {
+    if (!token) throw new UnauthorizedException({ code: 'INVALID_HANDOFF' });
+    const key = `care-handoff:${token}`;
+    const userId = await this.redis.get(key);
+    // Consume immediately regardless of outcome so it can never be reused.
+    await this.redis.del(key);
+    if (!userId) throw new UnauthorizedException({ code: 'INVALID_HANDOFF' });
+
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException({ code: 'USER_NOT_FOUND' });
+    if (user.status === UserStatus.SUSPENDED) {
+      throw new UnauthorizedException({ code: 'ACCOUNT_SUSPENDED' });
+    }
+
+    const society = await this.prisma.society.findUnique({
+      where: { id: user.societyId },
+      select: { id: true, status: true, name: true },
+    });
+    if (!society) throw new NotFoundException('Society not found');
+    this.assertSocietyAccessible(society.status, society.id);
+
+    const pair = await this.tokens.issuePair({
+      sub: user.id,
+      phone: user.phone,
+      role: user.role,
+      societyId: user.societyId,
+      managedBlocks: (user as any).managedBlocks ?? [],
+    });
+    await this.bumpActivity(user.id);
+
+    return {
+      token: pair.accessToken,
+      accessToken: pair.accessToken,
+      refreshToken: pair.refreshToken,
+      user: {
+        id: user.id,
+        phone: user.phone,
+        role: user.role,
+        status: user.status,
+        name: user.name,
+        societyId: user.societyId,
+        societyName: society.name,
+      },
     };
   }
 
