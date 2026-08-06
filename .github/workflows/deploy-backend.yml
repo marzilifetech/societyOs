@@ -1,0 +1,102 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Deploy the NestJS backend to the Lightsail box (societyos-dev-backend).
+#
+# Mirrors infra/instance/deploy-local.sh, but runs from GitHub instead of an
+# operator laptop: rsync source → docker compose build → prisma db push →
+# restart. It deliberately does NOT touch backend.env — the box keeps the env it
+# already materialised from Secrets Manager, so this workflow needs no AWS
+# credentials, only SSH access.
+#
+# ── One-time setup (repo → Settings → Secrets and variables → Actions) ───────
+#   Secret   LIGHTSAIL_SSH_KEY   contents of the Lightsail private key that
+#                                authenticates to the box, i.e. the same
+#                                marzi-lightsail-key.pem deploy-local.sh uses.
+#                                Paste the whole file, BEGIN/END lines included.
+#   Variable LIGHTSAIL_HOST      (optional) box IP — defaults to 43.204.82.22.
+#
+# The box's Lightsail firewall must allow SSH (22) from GitHub's runners. If it's
+# locked to specific IPs, open 22 (or use a self-hosted runner on the box).
+# ─────────────────────────────────────────────────────────────────────────────
+name: Deploy Backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'infra/instance/docker-compose.yml'
+      - 'infra/instance/Caddyfile'
+      - '.github/workflows/deploy-backend.yml'
+  workflow_dispatch: {} # manual "Run workflow" button
+
+# Never let two backend deploys race — queue them instead.
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy backend → Lightsail
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      SSH_HOST: ${{ vars.LIGHTSAIL_HOST || '43.204.82.22' }}
+      SSH_USER: ubuntu
+    steps:
+      - name: Checkout (deploying commit)
+        uses: actions/checkout@v4
+
+      - name: Configure SSH key
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          cat > ~/.ssh/deploy.pem <<'PEM'
+          ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          PEM
+          chmod 600 ~/.ssh/deploy.pem
+          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Sync source to box
+        # Backend build only needs repo SOURCE — exclude mobile native/build dirs
+        # and any signing material (keystores/APKs/AABs must never reach the box).
+        run: |
+          rsync -az --delete \
+            -e "ssh -i ~/.ssh/deploy.pem -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts" \
+            --exclude node_modules --exclude .git --exclude dist \
+            --exclude .next --exclude .expo --exclude .turbo \
+            --exclude 'apps/*/android' --exclude 'apps/*/ios' \
+            --exclude build --exclude .gradle \
+            --exclude '*.apk' --exclude '*.aab' --exclude '*.jks' --exclude '*.keystore' \
+            ./ "$SSH_USER@$SSH_HOST:/opt/societyos/repo/"
+
+      - name: Copy compose + Caddyfile
+        run: |
+          scp -i ~/.ssh/deploy.pem -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            infra/instance/docker-compose.yml infra/instance/Caddyfile \
+            "$SSH_USER@$SSH_HOST:/opt/societyos/"
+
+      - name: Build image, apply schema, restart
+        # `prisma db push` WITHOUT --accept-data-loss: additive schema changes
+        # apply automatically; anything destructive fails the deploy loudly
+        # rather than silently dropping data. (deploy-local.sh uses the
+        # --accept-data-loss variant for disposable dev resets — not wanted in CI.)
+        run: |
+          ssh -i ~/.ssh/deploy.pem -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts "$SSH_USER@$SSH_HOST" '
+              set -euo pipefail
+              cd /opt/societyos
+              docker compose build backend
+              docker compose run --rm backend pnpm exec prisma db push
+              docker compose up -d backend
+              docker image prune -f >/dev/null 2>&1 || true
+            '
+
+      - name: Health check
+        # Non-fatal: report status but do not fail the deploy on an unknown route.
+        run: |
+          sleep 12
+          code=$(curl -s -o /dev/null -w '%{http_code}' https://society-dev.marzitech.in/v1/health || echo 000)
+          echo "health /v1/health → HTTP $code"
+          if [ "$code" = "000" ]; then
+            echo "::warning::Backend health check did not respond — verify the box manually."
+          fi
