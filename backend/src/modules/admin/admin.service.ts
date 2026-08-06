@@ -2478,6 +2478,9 @@ async createStaff(
     city: string;
     pincode: string;
     showInDirectory?: boolean;
+    contactEmail?: string;
+    contactPhone?: string;
+    shortCode?: string;
     adminName: string;
     adminPhone: string;
     adminEmail?: string;
@@ -2492,20 +2495,36 @@ async createStaff(
       throw new BadRequestException('Admin name and phone are required');
     }
 
+    // Normalise + pre-validate the optional join code. It's a UNIQUE column, so
+    // catch a collision here with a friendly message instead of letting the
+    // transaction blow up on a Prisma P2002.
+    const shortCode = dto.shortCode?.trim().toUpperCase() || undefined;
+    if (shortCode) {
+      const clash = await this.prisma.society.findUnique({ where: { shortCode } });
+      if (clash) {
+        throw new BadRequestException(`Short code "${shortCode}" is already in use`);
+      }
+    }
+
     return this.prisma.$transaction(async (tx) => {
-      const society = await tx.society.create({
-        data: {
-          name: dto.name.trim(),
-          address: dto.address.trim(),
-          city: dto.city.trim(),
-          pincode: dto.pincode.trim(),
-          // Default new/onboarded societies to visible in the resident-app
-          // pre-login directory. Admin can still explicitly pass `false` to
-          // keep a society hidden, or hide it later via updateSocietyAdmin.
-          showInDirectory: dto.showInDirectory ?? true,
-          config: this.societySeeder.buildDefaultConfig(dto.config) as any,
-        },
-      });
+      // Build the write payload as a loose record (mirrors updateSocietyAdmin)
+      // so the optional contact/shortCode columns are only set when provided.
+      const societyData: Record<string, unknown> = {
+        name: dto.name.trim(),
+        address: dto.address.trim(),
+        city: dto.city.trim(),
+        pincode: dto.pincode.trim(),
+        // Default new/onboarded societies to visible in the resident-app
+        // pre-login directory. Admin can still explicitly pass `false` to
+        // keep a society hidden, or hide it later via updateSocietyAdmin.
+        showInDirectory: dto.showInDirectory ?? true,
+        config: this.societySeeder.buildDefaultConfig(dto.config),
+      };
+      if (dto.contactEmail?.trim()) societyData.contactEmail = dto.contactEmail.trim();
+      if (dto.contactPhone?.trim()) societyData.contactPhone = dto.contactPhone.trim();
+      if (shortCode) societyData.shortCode = shortCode;
+
+      const society = await tx.society.create({ data: societyData as any });
 
       const admin = await tx.user.create({
         data: {
