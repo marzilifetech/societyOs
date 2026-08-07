@@ -61,6 +61,10 @@ import { TravelPauseModule } from '../modules/travel-request/travel-pause.module
 
 import { ComplianceModule } from '../modules/compliance/compliance.module';
 import { MedicalModule } from '../modules/medical/medical.module';
+// Resident health features (vitals/medications/records). Aliased to avoid the
+// name clash with the infra liveness HealthModule already imported in
+// create-lambda-app. Belongs in the 'health-medical' group below.
+import { HealthModule as ResidentHealthModule } from '../modules/health/health.module';
 
 export type LambdaName =
   | 'core-identity'
@@ -124,5 +128,5 @@ export const MODULE_GROUPS: Record<LambdaName, Type<unknown>[]> = {
     AmenityModule,
     TravelPauseModule,
   ],
-  'health-medical': [MedicalModule, ComplianceModule],
+  'health-medical': [MedicalModule, ResidentHealthModule, ComplianceModule],
 };
