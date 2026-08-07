@@ -7,11 +7,9 @@ import {
   Stethoscope,
   Star,
   Clock,
-  ChevronRight,
   CalendarDays,
   CalendarPlus,
   Phone,
-  Siren,
   AlertCircle,
 } from 'lucide-react';
 import { careApi } from '@/lib/care-api';
@@ -23,18 +21,6 @@ import {
   doctorSpeciality,
   doctorQualification,
 } from './_components';
-
-function SosButton() {
-  return (
-    <Link
-      href="/care/sos"
-      className="inline-flex items-center gap-1.5 h-9 px-3 rounded-full bg-red-600 text-white text-[13px] font-semibold hover:bg-red-700 active:bg-red-800 transition-colors"
-    >
-      <Siren className="w-4 h-4" />
-      SOS
-    </Link>
-  );
-}
 
 function DoctorCard({ doctor }: { doctor: Doctor }) {
   const router = useRouter();
@@ -134,11 +120,7 @@ export default function MedicalHome() {
 
   return (
     <>
-      <CareHeader
-        title="Med Help Desk"
-        subtitle="Book a doctor & manage visits"
-        right={<SosButton />}
-      />
+      <CareHeader title="Med Help Desk" subtitle="Book a doctor & manage visits" />
       <CareBody>
         {/* Quick actions */}
         <div className="grid grid-cols-2 gap-3 mb-5">
@@ -163,21 +145,6 @@ export default function MedicalHome() {
             <p className="text-[12px] text-gray-500 mt-0.5">Upcoming & past</p>
           </Link>
         </div>
-
-        {/* Emergency SOS call-out */}
-        <Link
-          href="/care/sos"
-          className="flex items-center gap-3 p-4 rounded-2xl bg-red-600 text-white shadow-sm active:bg-red-700 transition-colors mb-5"
-        >
-          <div className="w-11 h-11 rounded-xl bg-white/15 flex items-center justify-center">
-            <Siren className="w-6 h-6" />
-          </div>
-          <div className="flex-1">
-            <p className="text-[15px] font-semibold">Emergency SOS</p>
-            <p className="text-[12px] text-white/80">Alert security & responders instantly</p>
-          </div>
-          <ChevronRight className="w-5 h-5 text-white/70" />
-        </Link>
 
         {/* Doctors */}
         <h2 className="text-[15px] font-semibold text-gray-950 mb-3">Available doctors</h2>

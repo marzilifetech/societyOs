@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
-import { ArrowLeft, Home, Stethoscope, HeartPulse, Siren } from 'lucide-react';
+import { ArrowLeft, Home, Stethoscope, HeartPulse } from 'lucide-react';
 import { cn } from '@/components/primitives';
 
 /**
@@ -48,7 +48,6 @@ const TABS = [
   { href: '/care', label: 'Home', icon: Home, match: (p: string) => p === '/care' },
   { href: '/care/medical', label: 'Medical', icon: Stethoscope, match: (p: string) => p.startsWith('/care/medical') },
   { href: '/care/health', label: 'Health', icon: HeartPulse, match: (p: string) => p.startsWith('/care/health') },
-  { href: '/care/sos', label: 'SOS', icon: Siren, match: (p: string) => p.startsWith('/care/sos'), danger: true },
 ];
 
 /** Fixed bottom tab bar. Mounted by the care layout on the main sections. */
@@ -56,7 +55,7 @@ export function BottomNav() {
   const pathname = usePathname();
   return (
     <nav className="fixed bottom-0 inset-x-0 z-20 mx-auto max-w-md bg-white border-t border-gray-100 pb-[env(safe-area-inset-bottom)]">
-      <ul className="grid grid-cols-4">
+      <ul className="grid grid-cols-3">
         {TABS.map((t) => {
           const active = t.match(pathname);
           return (
@@ -65,14 +64,10 @@ export function BottomNav() {
                 href={t.href}
                 className={cn(
                   'flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-medium transition-colors',
-                  active
-                    ? t.danger
-                      ? 'text-red-600'
-                      : 'text-primary-700'
-                    : 'text-gray-400 hover:text-gray-600',
+                  active ? 'text-primary-700' : 'text-gray-400 hover:text-gray-600',
                 )}
               >
-                <t.icon className={cn('w-5 h-5', active && t.danger && 'fill-red-100')} />
+                <t.icon className="w-5 h-5" />
                 {t.label}
               </Link>
             </li>
