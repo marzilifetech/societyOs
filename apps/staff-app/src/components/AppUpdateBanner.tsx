@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Tappable } from './ui/Tappable';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -19,11 +20,12 @@ export function AppUpdateBanner({ url, message }: { url: string; message: string
   return (
     <SafeAreaView edges={['top']} style={styles.safe} pointerEvents="box-none">
       <View style={styles.row}>
-        <Pressable
+        <Tappable
           onPress={onTap}
           accessibilityRole="button"
           accessibilityLabel="A new version is available. Tap to update."
-          style={({ pressed }) => [styles.tap, pressed && { opacity: 0.85 }]}
+          style={styles.tap}
+          pressedStyle={{ opacity: 0.85 }}
           hitSlop={4}
         >
           <View style={styles.iconCircle}>
@@ -33,7 +35,7 @@ export function AppUpdateBanner({ url, message }: { url: string; message: string
             {message ?? 'A newer version is ready. Tap to update.'}
           </Text>
           <Ionicons name="chevron-forward" size={16} color="#1D4ED8" />
-        </Pressable>
+        </Tappable>
         <Pressable
           onPress={() => setDismissed(true)}
           accessibilityRole="button"

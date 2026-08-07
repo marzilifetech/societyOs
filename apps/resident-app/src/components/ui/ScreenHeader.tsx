@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StatusBar } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useSegments } from 'expo-router';
 import { useTheme } from '../../hooks/useTheme';
 
 interface ScreenHeaderProps {
@@ -25,7 +25,24 @@ export function ScreenHeader({
 }: ScreenHeaderProps) {
   const t = useTheme();
   const insets = useSafeAreaInsets();
-  const showBack = onBack !== null;
+  const segments = useSegments();
+
+  // Tab roots must never show a back chevron. canGoBack() is not a usable
+  // signal here: switching tabs adds history, so it reports true on a tab root
+  // and the chevron would either sit there doing nothing or yank the user out
+  // of the tab they just opened. The segment check is the deterministic test.
+  //
+  // Screens like app/events/index.tsx are rendered BOTH as a tab and as a
+  // pushed route from Home, so this has to be decided at runtime rather than
+  // hard-coded per screen.
+  const isTabRoot = segments[0] === '(tabs)';
+  const showBack =
+    onBack === null
+      ? false
+      : typeof onBack === 'function'
+      ? true
+      : !isTabRoot && router.canGoBack();
+
   const handleBack = () => {
     if (typeof onBack === 'function') return onBack();
     if (router.canGoBack()) router.back();
@@ -62,9 +79,10 @@ export function ScreenHeader({
           >
             <Ionicons name="chevron-back" size={24} color={t.textPrimary} />
           </TouchableOpacity>
-        ) : (
-          <View style={{ width: t.touchTargetSm, marginRight: 8 }} />
-        )}
+        ) : null}
+        {/* No placeholder spacer when the back button is hidden — reserving the
+            chevron's width pushed the title inwards, so "Notice Board" sat
+            indented while every other screen's title started at the margin. */}
 
         <View style={{ flex: 1 }}>
           <Text

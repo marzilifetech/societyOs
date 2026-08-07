@@ -197,10 +197,9 @@ export default function ProfileScreen() {
             )}
           </View>
 
-          {/* Notification permission warning lives at the GLOBAL banner level
-              now (see _layout.tsx → NotificationPermissionBanner). Removing
-              the duplicate here also reclaims vertical space on Profile,
-              addressing the "Profile UI is complex" feedback. */}
+          {/* No notification-permission warning here. Permission is requested
+              once by NotificationOnboarding right after sign-in, and recovery
+              lives in Settings → Notifications and the setup screen. */}
 
           {/* Profile Card */}
           <TouchableOpacity

@@ -1,4 +1,5 @@
 import { FlatList, Image, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Tappable } from './ui/Tappable';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -96,9 +97,10 @@ function Row({ visitor, onPress }: { visitor: Visitor; onPress: () => void }) {
   const status = visitor.approvalStatus ?? visitor.status ?? '';
   const badge = statusBadge(status);
   return (
-    <Pressable
+    <Tappable
       onPress={onPress}
-      style={({ pressed }) => [styles.row, pressed && { opacity: 0.85 }]}
+      style={styles.row}
+      pressedStyle={{ opacity: 0.85 }}
     >
       {visitor.photoUrl ? (
         <Image source={{ uri: visitor.photoUrl }} style={styles.avatar} />
@@ -136,7 +138,7 @@ function Row({ visitor, onPress }: { visitor: Visitor; onPress: () => void }) {
           </Text>
         </View>
       ) : null}
-    </Pressable>
+    </Tappable>
   );
 }
 

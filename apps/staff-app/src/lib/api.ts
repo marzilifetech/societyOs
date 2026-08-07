@@ -38,14 +38,57 @@ async function persistTokens(pair: TokenPair | null) {
   }
 }
 
+/**
+ * Guards against a burst of concurrent 401s (Home alone fires five queries)
+ * each running the sign-out + navigation.
+ */
+let _signingOut = false;
+
+/**
+ * Terminal session end: the access token was rejected AND the refresh token
+ * could not rescue it (see TERMINAL_401_CODES / tryRefresh in the api-client).
+ *
+ * This used to clear ONLY the in-memory token cache and navigate away. Both
+ * SecureStore keys and the auth store survived, which produced a session that
+ * was dead on the server but alive on the device:
+ *
+ *   1. Every query 401s, so Home renders "Your home screen couldn't be
+ *      loaded" — a dead end whose "Try Again" can never succeed.
+ *   2. On the next cold start `useAuthStore.hydrate()` reads the same stale
+ *      token back out of SecureStore and re-caches it, so the app still
+ *      believes it is signed in and lands the user right back on the broken
+ *      Home instead of on the login flow.
+ *
+ * Reproduced on device against an expired staff session. Clearing the store
+ * (which also deletes the SecureStore keys) is what makes the state actually
+ * terminal, so the root layout's auth gate sees `token === null` and routes to
+ * sign-in on this launch and every launch after it.
+ */
+async function handleSessionEnded() {
+  if (_signingOut) return;
+  _signingOut = true;
+  _cachedAccess = null;
+  _cachedRefresh = null;
+  try {
+    // Lazy import: auth.store imports this module, so a static import here
+    // would be a require cycle (and `api` would be undefined at init time).
+    const { useAuthStore } = await import('../store/auth.store');
+    await useAuthStore.getState().clearAuth();
+  } catch {
+    // Even if the store could not be cleared, still get the user somewhere
+    // they can act rather than leaving them on a screen that cannot recover.
+  } finally {
+    router.replace('/(auth)/society-select' as any);
+    _signingOut = false;
+  }
+}
+
 export const api = new ApiClient({
   baseUrl: BASE_URL,
   getToken: () => _cachedAccess,
   getRefreshToken: () => _cachedRefresh,
   setTokens: persistTokens,
   onUnauthorized: () => {
-    _cachedAccess = null;
-    _cachedRefresh = null;
-    router.replace('/(auth)/society-select' as any);
+    void handleSessionEnded();
   },
 });

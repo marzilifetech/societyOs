@@ -26,12 +26,16 @@ export default function SettingsScreen() {
         </Group>
 
         <Group>
-          <ToggleRow
+          <SegmentedRow
             icon="moon-outline"
             label={t('settings.theme')}
-            value={theme === 'dark'}
-            onValueChange={(v) => setTheme(v ? 'dark' : 'light')}
-            hint={theme === 'system' ? t('settings.system') : theme === 'dark' ? t('settings.dark') : t('settings.light')}
+            value={theme}
+            options={[
+              { value: 'light', label: t('settings.light') },
+              { value: 'dark', label: t('settings.dark') },
+              { value: 'system', label: t('settings.system') },
+            ]}
+            onChange={setTheme}
           />
           <ToggleRow icon="text-outline" label={t('settings.largeText')} value={largeText} onValueChange={setLargeText} />
           <ToggleRow
@@ -43,8 +47,8 @@ export default function SettingsScreen() {
           />
           <Row
             icon="lock-closed-outline"
-            label={t('settings.biometric')}
-            onPress={() => router.push('/settings/notifications' as any)}
+            label="Screen lock"
+            onPress={() => router.push('/settings/security' as any)}
             value={biometricEnabled ? t('settings.on') : t('settings.off')}
           />
         </Group>
@@ -95,6 +99,62 @@ function Row({
       {value ? <Text className="text-sm text-gray-500 dark:text-gray-400 mr-2">{value}</Text> : null}
       <Ionicons name="chevron-forward" size={16} color="#9CA3AF" />
     </TouchableOpacity>
+  );
+}
+
+/**
+ * Row hosting a small segmented control. Used for settings with more than two
+ * states, where a switch would silently collapse the third option.
+ */
+function SegmentedRow<T extends string>({
+  icon,
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  icon: RowIcon;
+  label: string;
+  value: T;
+  options: { value: T; label: string }[];
+  onChange: (v: T) => void;
+}) {
+  return (
+    <View className="px-5 py-4 border-b border-gray-50 dark:border-gray-800">
+      <View className="flex-row items-center mb-3">
+        <RowIconCircle icon={icon} />
+        <Text className="flex-1 text-sm font-medium text-gray-900 dark:text-gray-100">{label}</Text>
+      </View>
+      <View className="flex-row gap-2">
+        {options.map((o) => {
+          const active = o.value === value;
+          return (
+            <TouchableOpacity
+              key={o.value}
+              onPress={() => onChange(o.value)}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: active }}
+              accessibilityLabel={o.label}
+              className={`flex-1 py-2 rounded-xl items-center border ${
+                active
+                  ? 'bg-primary-500 border-primary-500'
+                  : 'bg-transparent border-gray-200 dark:border-gray-700'
+              }`}
+            >
+              <Text
+                className={
+                  active
+                    ? 'text-white text-xs font-semibold'
+                    : 'text-gray-700 dark:text-gray-200 text-xs'
+                }
+              >
+                {o.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </View>
   );
 }
 

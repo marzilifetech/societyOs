@@ -2,7 +2,7 @@
   "expo": {
     "name": "Marzi Staff App",
     "slug": "societyos-staff",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -19,7 +19,7 @@
       }
     },
     "android": {
-      "versionCode": 5,
+      "versionCode": 6,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#6E0043"
@@ -47,7 +47,8 @@
         "expo-notifications",
         {
           "icon": "./assets/notification-icon.png",
-          "color": "#6E0043"
+          "color": "#6E0043",
+          "defaultChannel": "system"
         }
       ],
       "expo-local-authentication",
@@ -60,6 +61,6 @@
     "experiments": {
       "typedRoutes": true
     },
-    "newArchEnabled": true
+    "newArchEnabled": false
   }
 }

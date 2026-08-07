@@ -62,6 +62,8 @@ interface SettingsState {
   notifications: NotificationPrefs;
   badges: BadgeCounts;
   hydrated: boolean;
+  /** True once the legacy 'system' → 'light' default migration has run. */
+  themeMigrated: boolean;
 
   setTheme: (t: ThemeMode) => Promise<void>;
   setLargeText: (v: boolean) => Promise<void>;
@@ -97,6 +99,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   notifications: defaultNotifications,
   badges: { tasks: 0, reviews: 0, helpRequests: 0 },
   hydrated: false,
+  themeMigrated: false,
 
   setTheme: async (theme) => {
     set({ theme });
@@ -132,14 +135,24 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       const raw = await AsyncStorage.getItem(KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
-        // One-shot migration: every install before this build persisted theme
-        // 'system' (the old default), which renders dark on dark-mode phones.
-        // We coerce that single persisted value to 'light' so existing users
-        // get the new default without having to dig through Settings. Anyone
-        // who has explicitly picked 'light' or 'dark' is unaffected.
-        const persistedTheme: ThemeMode = parsed.theme === 'system' ? 'light' : (parsed.theme ?? 'light');
+        // Migration: every install before the "default to light" change
+        // persisted theme 'system' (the old default), which renders dark on
+        // dark-mode phones. That value is coerced to 'light' ONCE so existing
+        // users land on the new default without digging through Settings.
+        //
+        // The `themeMigrated` marker is what makes it once. Without it the
+        // coercion re-ran on every hydrate, so a user who deliberately chose
+        // "System" in Settings had it silently reverted to Light on the next
+        // app start — the option was effectively unselectable.
+        const migrated = parsed.themeMigrated === true;
+        const persistedTheme: ThemeMode = migrated
+          ? (parsed.theme ?? 'light')
+          : parsed.theme === 'system'
+            ? 'light'
+            : (parsed.theme ?? 'light');
         set({
           theme: persistedTheme,
+          themeMigrated: true,
           largeText: !!parsed.largeText,
           dataSaver: !!parsed.dataSaver,
           autoLockMinutes: parsed.autoLockMinutes ?? 5,
@@ -149,7 +162,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       const bio = await SecureStore.getItemAsync(BIO_KEY);
       set({ biometricEnabled: bio === '1' });
     } catch {}
-    set({ hydrated: true });
+    set({ hydrated: true, themeMigrated: true });
   },
 }));
 
@@ -159,6 +172,7 @@ async function persist(s: SettingsState) {
       KEY,
       JSON.stringify({
         theme: s.theme,
+        themeMigrated: true,
         largeText: s.largeText,
         dataSaver: s.dataSaver,
         autoLockMinutes: s.autoLockMinutes,

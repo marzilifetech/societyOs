@@ -182,15 +182,6 @@ export default function NotificationsInbox() {
   const qc = useQueryClient();
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
 
-  // Clear the OS app-icon badge whenever the inbox gains focus — the badge
-  // mirrors the unread NotificationLog count the backend sends, and opening
-  // the inbox is the "I've seen it" signal.
-  useFocusEffect(
-    useCallback(() => {
-      Notifications.setBadgeCountAsync(0).catch(() => {});
-    }, []),
-  );
-
   const {
     data,
     isLoading,
@@ -206,6 +197,23 @@ export default function NotificationsInbox() {
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
   });
+
+  // Clear the OS app-icon badge whenever the inbox gains focus — the badge
+  // mirrors the unread NotificationLog count the backend sends, and opening
+  // the inbox is the "I've seen it" signal.
+  //
+  // Refetch on focus too. The global QueryClient sets a 2-minute staleTime and
+  // refetchOnWindowFocus:false, which is right for most screens but wrong for
+  // an inbox: arriving here by tapping a push (the single most common entry
+  // point) would render the list as it was up to two minutes ago — often
+  // missing the very notification the user just tapped — until they thought to
+  // pull down. Notifications are exactly the data that must never look stale.
+  useFocusEffect(
+    useCallback(() => {
+      Notifications.setBadgeCountAsync(0).catch(() => {});
+      refetch();
+    }, [refetch]),
+  );
 
   // Optimistic per-item mark-read: flip readAt in the cache immediately so
   // the tint + dot clear without a network round-trip; roll back on error.
@@ -237,15 +245,39 @@ export default function NotificationsInbox() {
     },
   });
 
+  // Optimistic, same as the per-item mutation. Without this the whole list sat
+  // unchanged until the round-trip finished, so on a slow connection the tap
+  // read as "nothing happened" and users tapped it repeatedly.
   const markAllRead = useMutation({
     mutationFn: () => api.patch('/notifications/read-all', {}),
-    onSuccess: () => {
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: INBOX_KEY });
+      const previous = qc.getQueryData<InfiniteData<InboxPage>>(INBOX_KEY);
+      const now = new Date().toISOString();
+      qc.setQueryData<InfiniteData<InboxPage>>(INBOX_KEY, (old) =>
+        old
+          ? {
+              ...old,
+              pages: old.pages.map((p) => ({
+                ...p,
+                items: p.items.map((it) => (it.readAt ? it : { ...it, readAt: now })),
+              })),
+            }
+          : old,
+      );
+      return { previous };
+    },
+    onError: (_err, _v, ctx) => {
+      if (ctx?.previous) qc.setQueryData(INBOX_KEY, ctx.previous);
+    },
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: INBOX_KEY });
       qc.invalidateQueries({ queryKey: ['notifications', 'unread-count'] });
     },
   });
 
   const items = useMemo(() => data?.pages.flatMap((p) => p.items) ?? [], [data]);
+  const unreadCount = useMemo(() => items.filter((it) => !it.readAt).length, [items]);
   const sections = useMemo(
     () => buildSections(filter === 'unread' ? items.filter((it) => !it.readAt) : items),
     [items, filter],
@@ -273,14 +305,19 @@ export default function NotificationsInbox() {
         >
           <Ionicons name="chevron-back" size={22} color="#141414" />
         </TouchableOpacity>
-        <TouchableOpacity
-          onPress={() => markAllRead.mutate()}
-          hitSlop={12}
-          accessibilityRole="button"
-          accessibilityLabel="Mark all as read"
-        >
-          <Text style={styles.headerAction}>Mark all read</Text>
-        </TouchableOpacity>
+        {/* Only offer the action when it would actually do something —
+            a permanently-visible "Mark all read" on an empty or fully-read
+            inbox is a dead control. */}
+        {unreadCount > 0 ? (
+          <TouchableOpacity
+            onPress={() => markAllRead.mutate()}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel={`Mark all ${unreadCount} notifications as read`}
+          >
+            <Text style={styles.headerAction}>Mark all read</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
 
       <View style={styles.headerBlock}>

@@ -9,6 +9,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { Tappable } from './ui/Tappable';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
@@ -115,15 +116,13 @@ export function DeliveryApprovalModal({
             <Text style={styles.sub}>What should we do?</Text>
 
             <View style={styles.buttons}>
-              <Pressable
+              <Tappable
                 onPress={() => submit('APPROVE')}
                 disabled={!!busy}
                 accessibilityRole="button"
                 accessibilityLabel="Approve and let them come up"
-                style={({ pressed }) => [
-                  styles.actionBtn,
-                  { backgroundColor: APPROVE_GREEN, opacity: pressed || busy ? 0.85 : 1 },
-                ]}
+                style={[styles.actionBtn, { backgroundColor: APPROVE_GREEN, opacity: busy ? 0.85 : 1 }]}
+                pressedStyle={{ opacity: 0.85 }}
               >
                 {busy === 'APPROVE' ? (
                   <ActivityIndicator color="#fff" />
@@ -133,17 +132,15 @@ export function DeliveryApprovalModal({
                     <Text style={styles.actionText}>Approve & let them in</Text>
                   </>
                 )}
-              </Pressable>
+              </Tappable>
 
-              <Pressable
+              <Tappable
                 onPress={() => submit('LEAVE_AT_SECURITY')}
                 disabled={!!busy}
                 accessibilityRole="button"
                 accessibilityLabel="Leave at security"
-                style={({ pressed }) => [
-                  styles.actionBtn,
-                  { backgroundColor: LEAVE_AMBER, opacity: pressed || busy ? 0.85 : 1 },
-                ]}
+                style={[styles.actionBtn, { backgroundColor: LEAVE_AMBER, opacity: busy ? 0.85 : 1 }]}
+                pressedStyle={{ opacity: 0.85 }}
               >
                 {busy === 'LEAVE_AT_SECURITY' ? (
                   <ActivityIndicator color="#fff" />
@@ -153,24 +150,22 @@ export function DeliveryApprovalModal({
                     <Text style={styles.actionText}>Leave at security</Text>
                   </>
                 )}
-              </Pressable>
+              </Tappable>
 
-              <Pressable
+              <Tappable
                 onPress={() => submit('REJECT')}
                 disabled={!!busy}
                 accessibilityRole="button"
                 accessibilityLabel="Reject"
-                style={({ pressed }) => [
-                  styles.rejectBtn,
-                  { opacity: pressed || busy ? 0.7 : 1 },
-                ]}
+                style={[styles.rejectBtn, { opacity: busy ? 0.7 : 1 }]}
+                pressedStyle={{ opacity: 0.7 }}
               >
                 {busy === 'REJECT' ? (
                   <ActivityIndicator color={REJECT_RED} />
                 ) : (
                   <Text style={styles.rejectText}>Reject</Text>
                 )}
-              </Pressable>
+              </Tappable>
             </View>
           </ScrollView>
         </SafeAreaView>

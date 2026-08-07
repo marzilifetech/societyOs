@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "Marzi Care",
+    "name": "One Community",
     "slug": "societyos-resident",
-    "version": "1.0.6",
+    "version": "1.0.13",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -22,7 +22,7 @@
       }
     },
     "android": {
-      "versionCode": 12,
+      "versionCode": 19,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#6E0043"
@@ -56,6 +56,6 @@
     ],
     "scheme": "societyos",
     "extra": {},
-    "newArchEnabled": true
+    "newArchEnabled": false
   }
 }

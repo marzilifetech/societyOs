@@ -10,6 +10,8 @@ import {
   Modal,
   Alert,
   Vibration,
+  Animated,
+  Easing,
 } from 'react-native';
 import { unwrapApiEnvelope } from '@societyos/api-client';
 import { router } from 'expo-router';
@@ -18,13 +20,6 @@ import * as Haptics from 'expo-haptics';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withRepeat,
-  withTiming,
-  Easing,
-} from 'react-native-reanimated';
 import { useQuery } from '@tanstack/react-query';
 import { io } from 'socket.io-client';
 type Socket = any; // socket.io-client deep type import is finicky under pnpm
@@ -558,15 +553,46 @@ function SosBeacon({ tone, pulse, children }: { tone: 'red' | 'green'; pulse?: b
   const coreColors: [string, string] =
     tone === 'red' ? ['#D6537A', '#A81B3C'] : ['#5FB983', '#1F7A45'];
 
-  const scale = useSharedValue(1);
+  // Uses React Native's built-in Animated rather than Reanimated.
+  //
+  // Reanimated threw "Cannot find host instance for this component" here and
+  // the ErrorBoundary swallowed the whole SOS screen into "Something went
+  // wrong" — on the one screen that must never fail. Its Animated.View could
+  // not resolve a host instance under the NativeWind JSX interop we are pinned
+  // to (see Tappable.tsx for the same class of problem). This file was the only
+  // Reanimated consumer in the app; every other animation already uses the
+  // built-in API, which needs no interop and no worklet runtime.
+  const scale = useRef(new Animated.Value(1)).current;
   useEffect(() => {
-    if (pulse) {
-      scale.value = withRepeat(withTiming(1.08, { duration: 1100, easing: Easing.inOut(Easing.ease) }), -1, true);
-    } else {
-      scale.value = withTiming(1, { duration: 200 });
+    if (!pulse) {
+      Animated.timing(scale, {
+        toValue: 1,
+        duration: 200,
+        easing: Easing.out(Easing.ease),
+        useNativeDriver: true,
+      }).start();
+      return;
     }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(scale, {
+          toValue: 1.08,
+          duration: 1100,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(scale, {
+          toValue: 1,
+          duration: 1100,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
   }, [pulse, scale]);
-  const ringStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+  const ringStyle = { transform: [{ scale }] };
 
   return (
     <View style={{ width: OUTER, height: OUTER, alignItems: 'center', justifyContent: 'center' }}>

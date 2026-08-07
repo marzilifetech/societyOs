@@ -8,9 +8,20 @@ import { Button } from './ui/Button';
 interface Props {
   message?: string;
   onRetry?: () => void;
+  /**
+   * The underlying failure, shown small beneath the friendly copy.
+   *
+   * Without this the screen said only "couldn't be loaded", which is
+   * indistinguishable between "you're offline", "your session ended" and
+   * "this endpoint is returning 500" — so neither the user nor whoever they
+   * call for help can tell whether retrying could ever work.
+   */
+  detail?: string;
+  /** Defaults to "Try Again"; override when retrying is not the real action. */
+  retryLabel?: string;
 }
 
-export function ErrorCard({ message, onRetry }: Props) {
+export function ErrorCard({ message, onRetry, detail, retryLabel }: Props) {
   const { colorScheme } = useColorScheme();
   const tint = colorScheme === 'dark' ? '#FCA5A5' : colors.error;
   return (
@@ -21,7 +32,12 @@ export function ErrorCard({ message, onRetry }: Props) {
       <Text className="font-body text-base text-gray-900 dark:text-gray-100 text-center leading-6 mb-5">
         {message ?? "Something didn't load. Please try again."}
       </Text>
-      {onRetry && <Button label="Try Again" onPress={onRetry} className="mb-4" />}
+      {detail ? (
+        <Text className="font-body text-[13px] text-gray-500 dark:text-gray-400 text-center mb-5 px-2">
+          {detail}
+        </Text>
+      ) : null}
+      {onRetry && <Button label={retryLabel ?? 'Try Again'} onPress={onRetry} className="mb-4" />}
       <Text className="font-body text-[13px] text-gray-400 dark:text-gray-500 text-center">
         If the problem continues, please inform your supervisor.
       </Text>

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Animated, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Tappable } from './ui/Tappable';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
@@ -158,55 +159,40 @@ export function PendingVisitorsPill() {
               Order matches typical reading: APPROVE first (most common, top),
               then Leave (deliveries only), then REJECT (destructive, bottom). */}
           <View style={styles.actions}>
-            <Pressable
+            <Tappable
               onPress={() => decide.mutate('APPROVE')}
               disabled={!!busy}
               accessibilityRole="button"
               accessibilityLabel="Approve visitor"
-              style={({ pressed }) => [
-                styles.actionBtn,
-                styles.approveBtn,
-                pressed && { opacity: 0.88 },
-                busy === 'APPROVE' && { opacity: 0.6 },
-              ]}
+              style={[styles.actionBtn, styles.approveBtn, busy === 'APPROVE' && { opacity: 0.6 }]} pressedStyle={{ opacity: 0.88 }}
             >
               <Ionicons name="checkmark-circle" size={20} color="#FFFFFF" />
               <Text style={styles.approveText}>
                 {isDelivery ? 'Approve & let them up' : 'Approve entry'}
               </Text>
-            </Pressable>
+            </Tappable>
             {isDelivery ? (
-              <Pressable
+              <Tappable
                 onPress={() => decide.mutate('LEAVE_AT_SECURITY')}
                 disabled={!!busy}
                 accessibilityRole="button"
                 accessibilityLabel="Leave at security"
-                style={({ pressed }) => [
-                  styles.actionBtn,
-                  styles.leaveBtn,
-                  pressed && { opacity: 0.88 },
-                  busy === 'LEAVE_AT_SECURITY' && { opacity: 0.6 },
-                ]}
+                style={[styles.actionBtn, styles.leaveBtn, busy === 'LEAVE_AT_SECURITY' && { opacity: 0.6 }]} pressedStyle={{ opacity: 0.88 }}
               >
                 <Ionicons name="arrow-down-circle" size={20} color="#FFFFFF" />
                 <Text style={styles.leaveText}>Leave at security</Text>
-              </Pressable>
+              </Tappable>
             ) : null}
-            <Pressable
+            <Tappable
               onPress={() => decide.mutate('REJECT')}
               disabled={!!busy}
               accessibilityRole="button"
               accessibilityLabel="Reject visitor"
-              style={({ pressed }) => [
-                styles.actionBtn,
-                styles.rejectBtn,
-                pressed && { opacity: 0.88 },
-                busy === 'REJECT' && { opacity: 0.6 },
-              ]}
+              style={[styles.actionBtn, styles.rejectBtn, busy === 'REJECT' && { opacity: 0.6 }]} pressedStyle={{ opacity: 0.88 }}
             >
               <Ionicons name="close-circle" size={20} color="#FFFFFF" />
               <Text style={styles.rejectText}>Reject</Text>
-            </Pressable>
+            </Tappable>
           </View>
         </View>
       </Animated.View>

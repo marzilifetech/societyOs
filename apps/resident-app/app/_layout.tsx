@@ -15,7 +15,7 @@ import {
 } from '../src/lib/push';
 import { NotificationProvider, useNotificationBanner } from '../src/contexts/NotificationContext';
 import { InAppBanner } from '../src/components/InAppBanner';
-import { NotificationPermissionBanner } from '../src/components/NotificationPermissionBanner';
+import { NotificationOnboarding } from '../src/components/NotificationOnboarding';
 import { AppUpdateGate } from '../src/components/AppUpdateGate';
 import { DeliveryApprovalModal, type DeliveryPayload } from '../src/components/DeliveryApprovalModal';
 import {
@@ -33,6 +33,7 @@ import {
 import { QueryClientProvider } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { bootstrapWindowMetrics } from '../src/lib/safe-area-bootstrap';
 import { queryClient } from '../src/lib/query-client';
 import { useAuthStore } from '../src/store/auth.store';
 import { initSentry, setSentryUser } from '../src/lib/sentry';
@@ -184,6 +185,11 @@ export default function RootLayout() {
             `fontsLoaded=${fontsLoaded} fontError=${fontError ? String(fontError) : 'none'}`,
         );
       }
+      // Hide unconditionally, not just from hydrate()'s `.finally`. If that
+      // promise never settles the splash would otherwise be held forever —
+      // which on iOS (and on any Android build where expo-splash-screen still
+      // manages the system splash) means a permanently frozen splash.
+      SplashScreen.hideAsync().catch(() => {});
       setFailsafeReady(true);
     }, 3500);
     return () => clearTimeout(timer);
@@ -225,7 +231,16 @@ export default function RootLayout() {
   return (
     <ErrorBoundary>
       <GestureHandlerRootView style={{ flex: 1 }}>
-        <SafeAreaProvider>
+        {/* initialMetrics is NOT optional here. SafeAreaProvider renders its
+            native view but NO CHILDREN while `insets` is null, and insets start
+            null unless seeded — the provider then waits on an async native
+            onInsetsChange event. Under Fabric/bridgeless startup on Android that
+            event is sometimes never delivered, and the ENTIRE app tree silently
+            never mounts: no crash, no log, just the maroon window background.
+            Measured ~50% of cold starts on Android 15 before this was added.
+            `initialWindowMetrics` is read synchronously from a native constant
+            at module load, so the first render already has insets. */}
+        <SafeAreaProvider initialMetrics={bootstrapWindowMetrics}>
           <QueryClientProvider client={queryClient}>
             <NotificationProvider>
               <RootShell token={token} />
@@ -250,12 +265,15 @@ function RootShell({ token }: { token: string | null }) {
       <NetworkBanner />
       {token ? <RealtimeProvider /> : null}
       <StatusBar style="auto" />
-      {/* Global "notifications are off" strip — IN-FLOW, above the navigator so
-          it pushes screens down instead of overlaying their headers (mirrors
-          NetworkBanner). Only rendered while authenticated so we don't pester a
-          brand new user before the primer modal has had its chance. A foreground
-          push (InAppBanner, absolute zIndex 9999) still overlays it cleanly. */}
-      {token ? <NotificationPermissionBanner /> : null}
+      {/* Asks the OS for notification permission once, just after sign-in, and
+          keeps the device token current. Renders nothing.
+
+          This replaces the old permanent "notifications are off" strip that sat
+          above the navigator on EVERY screen for as long as permission was
+          denied. It cost every user a band of screen height forever, duplicated
+          the OS's own dialog, and could not be dismissed. Recovery now lives in
+          Settings → Notifications and the setup screen, on demand. */}
+      <NotificationOnboarding active={!!token} />
       {/* AppUpdateGate wraps the navigation Stack so when the policy says
           'immediate' we replace the entire app with the blocker screen —
           even unauthenticated boot can't bypass it. */}

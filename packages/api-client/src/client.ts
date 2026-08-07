@@ -202,6 +202,23 @@ export class ApiClient {
     // "your OTP is wrong" or "your account is suspended" — surface the
     // server message inline; do NOT fire onUnauthorized (which would
     // hard-reload /login and lose the entered phone/OTP).
+    // A 403 is normally terminal — but NOT on this backend, because the role
+    // used for authorisation comes from the JWT CLAIM, not the database.
+    // `JwtStrategy.validate()` loads the user (to check status/society) and
+    // then returns `payload`, so `RolesGuard` compares against whatever role
+    // was baked in at login. When an account's role is changed server-side
+    // (e.g. RESIDENT → STAFF when someone is made a security guard) every
+    // existing token keeps asserting the OLD role and every role-gated route
+    // 403s — indefinitely, because a valid token never triggers a refresh.
+    //
+    // `/auth/refresh` DOES re-read `user.role` from the database, so one
+    // silent rotation adopts the new role and the retry succeeds. A genuinely
+    // forbidden request just costs one extra round-trip before surfacing.
+    if (res.status === 403 && !_retried && !isAuthRoute && this.config.getRefreshToken && this.config.setTokens) {
+      const newAccess = await this.tryRefresh();
+      if (newAccess) return this.request<T>(method, path, body, true);
+    }
+
     if (res.status === 401 || res.status === 400) {
       let code: string | undefined;
       let serverBody: any;

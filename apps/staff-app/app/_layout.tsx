@@ -3,6 +3,7 @@ import { AppState, View, ActivityIndicator } from 'react-native';
 import { Stack, router } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { bootstrapWindowMetrics } from '../src/lib/safe-area-bootstrap';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { persistQueryClient } from '@tanstack/react-query-persist-client';
 import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister';
@@ -26,15 +27,13 @@ import i18n, { initI18n } from '../src/lib/i18n';
 import { startOfflineDrainListener } from '../src/lib/offline-queue';
 import {
   setupNotificationHandler,
-  setupNotificationCategories,
-  registerForPushNotifications,
   attachNotificationTapHandler,
   detachNotificationTapHandler,
   subscribeToForegroundReceived,
 } from '../src/lib/notifications';
 import { NotificationProvider, useNotificationBanner } from '../src/contexts/NotificationContext';
 import { InAppBanner } from '../src/components/InAppBanner';
-import { NotificationPermissionBanner } from '../src/components/NotificationPermissionBanner';
+import { NotificationOnboarding } from '../src/components/NotificationOnboarding';
 import { AppUpdateGate } from '../src/components/AppUpdateGate';
 import { initSentry, setSentryUser } from '../src/lib/sentry';
 import { ErrorBoundary } from '../src/components/ErrorBoundary';
@@ -82,7 +81,7 @@ export default function RootLayout() {
   const [ready, setReady] = useState(false);
   const lastBackgroundedAt = useRef<number | null>(null);
 
-  const [fontsLoaded] = useFonts({
+  const [fontsLoaded, fontError] = useFonts({
     Montserrat_400Regular,
     Montserrat_500Medium,
     Montserrat_600SemiBold,
@@ -91,6 +90,29 @@ export default function RootLayout() {
     Lato_700Bold,
   });
 
+  /**
+   * Never hold the app hostage to font loading.
+   *
+   * The render gate below used `fontsLoaded` alone. `useFonts` resolves to
+   * `[false, error]` on failure and simply never flips to true, so a corrupt
+   * font cache or a failed asset read left the app on the maroon spinner
+   * FOREVER, with no crash and nothing in the logs — indistinguishable from a
+   * hang. A 2.5s deadline bounds the worst case: text falls back to the system
+   * font (Montserrat/Lato are a brand nicety, not a functional requirement)
+   * and the app is usable.
+   */
+  const [fontTimedOut, setFontTimedOut] = useState(false);
+  useEffect(() => {
+    if (fontsLoaded) return;
+    const id = setTimeout(() => setFontTimedOut(true), 2500);
+    return () => clearTimeout(id);
+  }, [fontsLoaded]);
+  const fontsReady = fontsLoaded || !!fontError || fontTimedOut;
+
+  // Boot work runs EXACTLY ONCE. It previously depended on [fontsLoaded],
+  // which flips false→true a beat after mount, so every launch ran hydrate(),
+  // settingsHydrate(), initI18n() and setupNotificationHandler() twice —
+  // duplicate AsyncStorage reads and a second i18n init on the critical path.
   useEffect(() => {
     (async () => {
       await Promise.all([hydrate(), settingsHydrate(), initI18n(), setupNotificationHandler()]);
@@ -99,9 +121,14 @@ export default function RootLayout() {
       // session so they don't block data loading after the user logs in.
       queryClient.removeQueries({ predicate: (q) => q.state.status === 'error' });
       setReady(true);
-      if (fontsLoaded) SplashScreen.hideAsync().catch(() => {});
     })();
-  }, [fontsLoaded]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Hide the splash once BOTH the boot work and the fonts have settled.
+  useEffect(() => {
+    if (ready && fontsReady) SplashScreen.hideAsync().catch(() => {});
+  }, [ready, fontsReady]);
 
   // Keep NativeWind / Tailwind `dark:` in sync with persisted theme (Settings → Theme).
   useEffect(() => {
@@ -135,17 +162,12 @@ export default function RootLayout() {
     };
   }, [ready, token]);
 
-  // Register push token whenever we have a session — fires after fresh OTP login
-  // too, not just when we re-enter a persisted session via PIN.
+  // Attach the notification-tap deep-link handler whenever we have a session.
+  // Permission, channels, iOS categories and device-token registration are all
+  // owned by <NotificationOnboarding /> below.
   useEffect(() => {
     if (!ready || !token) return;
-    (async () => {
-      // Register iOS action categories BEFORE the first push can arrive, or
-      // the lockscreen buttons won't render.
-      await setupNotificationCategories();
-      await registerForPushNotifications();
-      attachNotificationTapHandler();
-    })().catch(() => {});
+    attachNotificationTapHandler();
   }, [ready, token]);
 
   // Auto-lock after idle
@@ -166,7 +188,7 @@ export default function RootLayout() {
     return () => sub.remove();
   }, [autoLockMinutes, biometricEnabled]);
 
-  if (!fontsLoaded || !ready) {
+  if (!fontsReady || !ready) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#821A52' }}>
         <ActivityIndicator color="#fff" />
@@ -177,7 +199,14 @@ export default function RootLayout() {
   return (
     <ErrorBoundary>
       <GestureHandlerRootView style={{ flex: 1 }}>
-        <SafeAreaProvider>
+        {/* initialMetrics is NOT optional. SafeAreaProvider renders its native
+            view but NO CHILDREN while `insets` is null, and insets start null
+            unless seeded — the provider then waits on an async native
+            onInsetsChange event. Under Fabric/bridgeless startup on Android
+            that event is sometimes never delivered and the ENTIRE app tree
+            silently never mounts: no crash, no log, just a blank window.
+            Measured ~50% of cold starts in the resident app before this fix. */}
+        <SafeAreaProvider initialMetrics={bootstrapWindowMetrics}>
           <I18nextProvider i18n={i18n} defaultNS="translation">
             <ThemedStatusBar />
             <QueryClientProvider client={queryClient}>
@@ -189,10 +218,12 @@ export default function RootLayout() {
                 <AppUpdateGate>
                   <Stack screenOptions={{ headerShown: false }} />
                 </AppUpdateGate>
-                {/* Global "notifications are off" strip — zIndex 8000.
-                    Beneath InAppBanner (9999) so a foreground push overlays
-                    it. Only rendered while authenticated. */}
-                {token ? <NotificationPermissionBanner /> : null}
+                {/* Renders nothing: requests the OS permission once after
+                    sign-in and registers the push token. Replaces the old
+                    always-on "notifications are off" strip, which covered
+                    content and could not be dismissed. Guidance now lives in
+                    Settings → Notifications. */}
+                <NotificationOnboarding active={!!token} />
                 <ForegroundBannerBridge active={!!token} />
                 <InAppBanner />
               </NotificationProvider>

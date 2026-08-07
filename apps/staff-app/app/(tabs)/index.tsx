@@ -47,12 +47,22 @@ export default function StaffHomeScreen() {
   const { t } = useTranslation(undefined, { i18n: i18nInstance });
   const user = useAuthStore((s) => s.user);
 
-  const { data: summary, isLoading: loadingSummary, isError: summaryError, isFetching: fetchingSummary, refetch: refetchSummary } = useQuery({
+  const { data: summary, isLoading: loadingSummary, isError: summaryError, error: summaryErr, isFetching: fetchingSummary, refetch: refetchSummary } = useQuery({
     queryKey: ['staff-summary'],
     queryFn: () => getUnwrapped<StaffHomeSummary>('/staff/summary'),
     enabled: !!user,
-    retry: false,
+    // Inherit the client default (retry: 2 with backoff). This was `retry:
+    // false`, so a SINGLE transient failure — a backend 502 blip, a lost
+    // packet as the phone switches cell towers — dropped the user straight
+    // onto the full-screen "couldn't be loaded" state, and nothing ever
+    // recovered it: the query was settled, so no refetch was scheduled and
+    // the screen stayed broken long after the server came back. Observed
+    // live against a ~2 minute dev-backend outage.
     refetchOnMount: true,
+    refetchOnReconnect: 'always',
+    // The app is often opened straight from a push at the gate; re-checking
+    // on foreground is what makes a stale error self-heal.
+    refetchOnWindowFocus: true,
   });
 
   const { data: staffProfile } = useQuery<{ designation?: string; categories?: string[]; department?: string }>({
@@ -72,12 +82,14 @@ export default function StaffHomeScreen() {
     refetchInterval: 60_000,
   });
 
-  const { data: myTasks = [], isLoading: loadingTasks, isError: tasksError, isFetching: fetchingTasks, refetch: refetchTasks } = useQuery({
+  const { data: myTasks = [], isLoading: loadingTasks, isError: tasksError, error: tasksErr, isFetching: fetchingTasks, refetch: refetchTasks } = useQuery({
     queryKey: ['my-tasks'],
     queryFn: () => getUnwrappedArray<AssignedTask>('/service-requests/assigned'),
     enabled: !!user,
-    retry: false,
+    // See the summary query above — `retry: false` made one blip terminal.
     refetchOnMount: true,
+    refetchOnReconnect: 'always',
+    refetchOnWindowFocus: true,
   });
 
   const { data: todayShifts = [] } = useQuery({
@@ -107,9 +119,39 @@ export default function StaffHomeScreen() {
   const totalToday = pendingTasks.length + doneToday;
 
   if (summaryError && tasksError && !fetchingSummary && !fetchingTasks) {
+    // A 403 is NOT a loading failure — the account simply is not a staff
+    // member (e.g. a resident signed into the staff app), so the backend's
+    // role guard rejects /staff/* outright. Offering "Try Again" for that is
+    // a trap: it can never succeed, and the real fix is to sign in with a
+    // staff number. Observed on device with a RESIDENT-designation account,
+    // where the screen said only "Your home screen couldn't be loaded".
+    const forbidden =
+      (summaryErr as any)?.status === 403 || (tasksErr as any)?.status === 403;
+
+    if (forbidden) {
+      return (
+        <ErrorCard
+          message="This account doesn't have staff access."
+          detail="You're signed in with a number that isn't registered as staff for this society. Sign in with your staff number, or ask your supervisor to register this one."
+          retryLabel="Sign in with a different number"
+          onRetry={() => {
+            // clearAuth() alone only nulls the store — the router still sits on
+            // (tabs), and the root layout's auth gate has already run once
+            // (gatedRef), so nothing re-routes. Without the explicit replace
+            // the button appeared to do nothing at all.
+            void (async () => {
+              await useAuthStore.getState().clearAuth();
+              router.replace('/(auth)/society-select' as any);
+            })();
+          }}
+        />
+      );
+    }
+
     return (
       <ErrorCard
         message={t('home.loadError')}
+        detail={(summaryErr as any)?.message ?? (tasksErr as any)?.message ?? undefined}
         onRetry={() => { refetchSummary(); refetchTasks(); }}
       />
     );

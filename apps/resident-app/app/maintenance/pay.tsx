@@ -9,6 +9,7 @@ const getRazorpay = (): typeof import('react-native-razorpay').default | null =>
   try { return require('react-native-razorpay').default; } catch { return null; }
 };
 import { api } from '../../src/lib/api';
+import { APP_NAME } from '../../src/lib/app-version';
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
 
@@ -100,7 +101,7 @@ export default function PayScreen() {
         amount: order.amount,
         order_id: order.orderId,
         key: order.key ?? process.env.EXPO_PUBLIC_RAZORPAY_KEY_ID ?? 'rzp_test_xxx',
-        name: 'SocietyOS',
+        name: APP_NAME,
         prefill: { contact: '', email: '' },
         theme: { color: '#821A52' },
       };

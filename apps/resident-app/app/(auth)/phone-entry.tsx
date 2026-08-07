@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Alert, KeyboardAvoidingView, Linking, Platform, Pressable, TextInput, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as SecureStore from 'expo-secure-store';
 import { api } from '../../src/lib/api';
+import { requestPhoneNumberHint } from '../../src/hooks/useSmsOtpAutoRead';
 import { useTheme } from '../../src/hooks/useTheme';
 import { ThemedText, ThemedButton } from '../../src/components/ui';
 
@@ -81,6 +82,23 @@ export default function PhoneEntryScreen() {
       }
     };
     tryBiometric();
+  }, []);
+
+  // Android: offer the system phone-number picker once, so the common case is
+  // "tap your own number" instead of typing ten digits. Delayed slightly so it
+  // does not race the screen transition, and fired only once per mount — the
+  // sheet reappearing after a dismissal would be obnoxious. A null result
+  // (dismissed, no Play Services, no SIM) silently leaves manual entry.
+  const hintTried = useRef(false);
+  useEffect(() => {
+    if (hintTried.current) return;
+    hintTried.current = true;
+    const t = setTimeout(() => {
+      requestPhoneNumberHint().then((num) => {
+        if (num) setPhone(num);
+      });
+    }, 600);
+    return () => clearTimeout(t);
   }, []);
 
   const isValid = phone.length === 10;
@@ -192,8 +210,9 @@ export default function PhoneEntryScreen() {
             placeholderTextColor={t.textMuted}
             keyboardType="number-pad"
             inputMode="numeric"
-            textContentType="telephoneNumber"
-            autoComplete="tel-national"
+            textContentType="none"
+            autoComplete="off"
+            importantForAutofill="no"
             autoCorrect={false}
             spellCheck={false}
             maxLength={11 /* 10 digits + 1 inserted space */}

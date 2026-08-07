@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Tappable } from './ui/Tappable';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -10,7 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
  * persisted — we want the next foreground to remind them again until they
  * actually update).
  *
- * Sits at the top of the screen ABOVE the global NotificationPermissionBanner
+ * Sits at the top of the screen, above the navigator
  * (zIndex 8500 vs 8000) so a user with BOTH problems sees the update nudge
  * first — the update is the more critical fix.
  */
@@ -25,11 +26,11 @@ export function AppUpdateBanner({ url, message }: { url: string; message: string
   return (
     <SafeAreaView edges={['top']} style={styles.safe} pointerEvents="box-none">
       <View style={styles.row}>
-        <Pressable
+        <Tappable
           onPress={onTap}
           accessibilityRole="button"
           accessibilityLabel="A new version is available. Tap to update."
-          style={({ pressed }) => [styles.tap, pressed && { opacity: 0.85 }]}
+          style={styles.tap} pressedStyle={{ opacity: 0.85 }}
           hitSlop={4}
         >
           <View style={styles.iconCircle}>
@@ -39,7 +40,7 @@ export function AppUpdateBanner({ url, message }: { url: string; message: string
             {message ?? 'A newer version is ready. Tap to update.'}
           </Text>
           <Ionicons name="chevron-forward" size={16} color="#1D4ED8" />
-        </Pressable>
+        </Tappable>
         <Pressable
           onPress={() => setDismissed(true)}
           accessibilityRole="button"

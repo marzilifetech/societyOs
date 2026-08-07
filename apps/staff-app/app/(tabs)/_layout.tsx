@@ -64,10 +64,16 @@ function tabBarLabel(text: string) {
   return function TabBarLabel({ focused, color }: { focused: boolean; color: string }) {
     return (
       <Text
+        numberOfLines={1}
         style={{
           color,
-          fontSize: 14,
-          lineHeight: 17,
+          // 14/17 overflowed the tab bar's content box: 4 (icon margin) + 24
+          // (icon) + 2 + 17 (label) = 47px inside a 50px slot, before React
+          // Navigation's own item padding — so descenders and the whole last
+          // line were clipped ("Home"/"Profile" cut in half on device).
+          // 12/15 is also the conventional tab-label size.
+          fontSize: 12,
+          lineHeight: 15,
           fontWeight: focused ? '600' : '500',
           marginTop: 2,
           textAlign: 'center',
@@ -95,7 +101,11 @@ export default function TabLayout() {
   // dark mode but turned into a stark horizontal line once light became
   // the default theme.
   const bottomPad = Math.max(insets.bottom, 8);
-  const tabBarHeight = 56 + bottomPad;
+  // 56 left only 50px of content once paddingTop was applied, which the
+  // icon + label stack did not fit into (see tabBarLabel below). 62 gives
+  // the stack ~8px of headroom so labels are never clipped, on top of the
+  // device's own bottom inset.
+  const tabBarHeight = 62 + bottomPad;
 
   return (
     <Tabs
