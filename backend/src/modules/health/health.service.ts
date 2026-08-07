@@ -2,11 +2,22 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { PrismaService } from '../../prisma/prisma.service';
 import { requireResidentByUserId } from '../../common/utils/resident-context';
 import { CreateVitalDto, CreateMedicationDto, UpdateMedicationDto, CreateHealthRecordDto } from './dto/health.dto';
-import { HealthVitalType } from '@prisma/client';
+import { HealthVitalType, HealthRecordType, type HealthRecord } from '@prisma/client';
+import { MarziMediaSigner } from '../../common/storage/marzi-media-signer.service';
 
 @Injectable()
 export class HealthService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    // Records store the Marzi media s3_key in `fileUrl`; we sign short-lived GET
+    // URLs on read (same pattern as resident/admin document viewing).
+    private mediaSigner: MarziMediaSigner,
+  ) {}
+
+  /** A stored fileUrl is a private s3 key ending in .pdf → 'pdf', else 'image'. */
+  private fileTypeFromKey(key: string | null | undefined): 'pdf' | 'image' {
+    return (key ?? '').toLowerCase().split('?')[0].endsWith('.pdf') ? 'pdf' : 'image';
+  }
 
   private assertVitalPlausible(type: HealthVitalType, value: number, _unit: string) {
     const range = (min: number, max: number, hint: string) => {
@@ -219,10 +230,30 @@ export class HealthService {
 
   async getRecords(userId: string) {
     const resident = await requireResidentByUserId(this.prisma, userId);
-    return this.prisma.healthRecord.findMany({
+    const rows = await this.prisma.healthRecord.findMany({
       where: { residentId: resident.id },
       orderBy: { date: 'desc' },
     });
+
+    // The Care web expects records grouped by category, with UI-friendly field
+    // names ({ id, name, type, date, fileType }). No file URL here — the list is
+    // metadata-only; the detail view signs the URL on demand.
+    const toItem = (r: HealthRecord) => ({
+      id: r.id,
+      name: r.title,
+      type: r.type,
+      date: r.date,
+      fileType: this.fileTypeFromKey(r.fileUrl),
+    });
+    const byType = (t: HealthRecordType) => rows.filter((r) => r.type === t).map(toItem);
+
+    return {
+      prescriptions: byType(HealthRecordType.PRESCRIPTION),
+      labReports: byType(HealthRecordType.LAB_REPORT),
+      scans: byType(HealthRecordType.SCAN),
+      vaccination: byType(HealthRecordType.VACCINATION),
+      insurance: byType(HealthRecordType.INSURANCE),
+    };
   }
 
   async getToday(userId: string) {
@@ -338,8 +369,10 @@ export class HealthService {
     const record = await this.prisma.healthRecord.findUnique({ where: { id } });
     if (!record || record.residentId !== resident.id) throw new NotFoundException('Record not found');
 
-    const lower = (record.fileUrl ?? '').toLowerCase();
-    const fileType: 'pdf' | 'image' = lower.endsWith('.pdf') ? 'pdf' : 'image';
+    // Derive the type from the stored key (before signing appends query params),
+    // then sign a short-lived GET URL for the private object.
+    const fileType = this.fileTypeFromKey(record.fileUrl);
+    const url = (await this.mediaSigner.sign(record.fileUrl)) ?? record.fileUrl;
 
     return {
       id: record.id,
@@ -348,7 +381,7 @@ export class HealthService {
       date: record.date,
       uploadedAt: record.createdAt,
       fileType,
-      url: record.fileUrl,
+      url,
     };
   }
 
@@ -356,7 +389,8 @@ export class HealthService {
     const resident = await requireResidentByUserId(this.prisma, userId);
     const record = await this.prisma.healthRecord.findUnique({ where: { id } });
     if (!record || record.residentId !== resident.id) throw new NotFoundException('Record not found');
-    return { fileUrl: record.fileUrl };
+    const fileUrl = (await this.mediaSigner.sign(record.fileUrl)) ?? record.fileUrl;
+    return { fileUrl };
   }
 
   async deleteRecord(id: string, userId: string) {
