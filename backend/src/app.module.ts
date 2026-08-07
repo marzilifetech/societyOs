@@ -16,6 +16,10 @@ import { ComplaintModule } from './modules/complaint/complaint.module';
 import { CanteenModule } from './modules/canteen/canteen.module';
 import { EventModule } from './modules/event/event.module';
 import { MedicalModule } from './modules/medical/medical.module';
+// Resident health features (vitals, medications, records). Aliased because the
+// name collides with the infra liveness `HealthModule` in ./common/health.
+// Without this the /health/* feature routes 404 (used by the Care web portal).
+import { HealthModule as ResidentHealthModule } from './modules/health/health.module';
 import { MaintenanceModule } from './modules/maintenance/maintenance.module';
 import { NoticeModule } from './modules/notice/notice.module';
 import { SosModule } from './modules/sos/sos.module';
@@ -121,6 +125,7 @@ tryAdd('./modules/compliance/compliance.module', 'ComplianceModule');
     CanteenModule,
     EventModule,
     MedicalModule,
+    ResidentHealthModule,
     MaintenanceModule,
     NoticeModule,
     SosModule,

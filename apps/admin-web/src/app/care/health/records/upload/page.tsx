@@ -10,7 +10,15 @@ import { CareHeader, CareBody } from '@/components/care/chrome';
 import { Button, Field, Input, cn } from '@/components/primitives';
 import { uploadViaCareMedia, cardClass } from '../../_components';
 
-const DOC_TYPES = ['Prescription', 'Lab Report', 'Scan / X-Ray', 'Vaccination', 'Insurance', 'Other'];
+// Labels shown to the resident → the backend HealthRecordType enum. Only the
+// five enum values the API accepts (no "Other" — it isn't a valid category).
+const DOC_TYPES: { label: string; value: string }[] = [
+  { label: 'Prescription', value: 'PRESCRIPTION' },
+  { label: 'Lab Report', value: 'LAB_REPORT' },
+  { label: 'Scan / X-Ray', value: 'SCAN' },
+  { label: 'Vaccination', value: 'VACCINATION' },
+  { label: 'Insurance', value: 'INSURANCE' },
+];
 
 export default function UploadRecordPage() {
   const router = useRouter();
@@ -27,10 +35,12 @@ export default function UploadRecordPage() {
   const { mutate, isPending } = useMutation({
     mutationFn: () =>
       careApi.post('/health/records', {
-        type: docType,
-        date: docDate,
-        name: docName.trim(),
-        fileKey: uploadedKey,
+        // Field names + types must match CreateHealthRecordDto exactly — the API
+        // runs a whitelisting ValidationPipe that 400s on unknown/extra props.
+        type: docType, // HealthRecordType enum value
+        title: docName.trim(),
+        fileUrl: uploadedKey, // Marzi media s3_key; signed to a GET URL on read
+        date: docDate ? new Date(docDate).toISOString() : new Date().toISOString(),
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['health-records'] });
@@ -86,12 +96,12 @@ export default function UploadRecordPage() {
             <p className="text-[13px] font-medium text-gray-800 mb-2">Document type</p>
             <div className="flex flex-wrap gap-2">
               {DOC_TYPES.map((t) => {
-                const active = docType === t;
+                const active = docType === t.value;
                 return (
                   <button
-                    key={t}
+                    key={t.value}
                     type="button"
-                    onClick={() => setDocType(t)}
+                    onClick={() => setDocType(t.value)}
                     className={cn(
                       'h-11 px-4 rounded-xl border text-[13px] font-semibold transition-colors',
                       active
@@ -99,7 +109,7 @@ export default function UploadRecordPage() {
                         : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300',
                     )}
                   >
-                    {t}
+                    {t.label}
                   </button>
                 );
               })}
