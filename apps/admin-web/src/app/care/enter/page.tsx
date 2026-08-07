@@ -27,6 +27,13 @@ function EnterInner() {
     if (ran.current) return; // exchange is one-shot — never fire twice
     ran.current = true;
 
+    // Resilience: if a session already exists (e.g. the WebView reloaded this
+    // URL after the token was consumed), don't re-exchange — just go in.
+    if (typeof window !== 'undefined' && localStorage.getItem('care_token')) {
+      router.replace('/care');
+      return;
+    }
+
     if (!token) {
       setError('This link is missing its sign-in code. Please reopen it from the app.');
       return;
