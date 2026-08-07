@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Tappable } from './ui/Tappable';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '@societyos/theme';
@@ -93,11 +94,12 @@ export function RecentGateActivityCard() {
 
   return (
     <>
-      <Pressable
+      <Tappable
         onPress={handleOpen}
         accessibilityRole="button"
         accessibilityLabel={`Recent gate activity — ${recent.length} in last 24 hours${newCount ? `, ${newCount} new` : ''}, tap to view all`}
-        style={({ pressed }) => [styles.card, pressed && { opacity: 0.92 }]}
+        style={styles.card}
+        pressedStyle={{ opacity: 0.92 }}
       >
         <View style={styles.avatarWrap}>
           {latest.photoUrl ? (
@@ -136,7 +138,7 @@ export function RecentGateActivityCard() {
         <View style={styles.chevWrap}>
           <Ionicons name="chevron-up" size={18} color="#9CA3AF" />
         </View>
-      </Pressable>
+      </Tappable>
 
       <RecentGateActivitySheet
         visible={sheetOpen}

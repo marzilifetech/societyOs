@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
+import { APP_NAME } from '../../src/lib/app-version';
 import { ErrorCard } from '../../src/components/ErrorCard';
 
 // Lazy-load Razorpay so we don't crash in Expo Go where the native module isn't linked.
@@ -89,7 +90,7 @@ export default function WalletScreen() {
         amount: order.amount,
         order_id: order.orderId,
         key: order.key ?? process.env.EXPO_PUBLIC_RAZORPAY_KEY_ID ?? 'rzp_test_xxx',
-        name: 'SocietyOS',
+        name: APP_NAME,
         prefill: { contact: '', email: '' },
         theme: { color: '#821A52' },
       };

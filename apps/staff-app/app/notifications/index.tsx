@@ -20,6 +20,7 @@ import {
 } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { api } from '../../src/lib/api';
+import { SkeletonCard } from '../../src/components/ui/Skeleton';
 
 const BRAND = '#821A52'; // berry primary-500 (was legacy navy)
 const INBOX_KEY = ['notifications', 'inbox'] as const;
@@ -328,9 +329,9 @@ export default function StaffNotificationsInbox() {
 
       {isLoading ? (
         <View className="gap-3 px-4 pt-1">
-          <View className="h-20 rounded-2xl bg-gray-100 dark:bg-gray-800 animate-pulse" />
-          <View className="h-20 rounded-2xl bg-gray-100 dark:bg-gray-800 animate-pulse" />
-          <View className="h-20 rounded-2xl bg-gray-100 dark:bg-gray-800 animate-pulse" />
+          <SkeletonCard height={80} />
+          <SkeletonCard height={80} />
+          <SkeletonCard height={80} />
         </View>
       ) : isError ? (
         <View className="flex-1 items-center justify-center px-6">

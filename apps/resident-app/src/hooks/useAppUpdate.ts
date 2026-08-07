@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { api } from '../lib/api';
+import { APP_BUILD } from '../lib/app-version';
 
 /**
  * Mirrors the backend `AppUpdateLevel` union — keep them lockstep.
@@ -78,14 +79,23 @@ export function useAppUpdate(appKey: 'resident' | 'staff' = 'resident'): AppUpda
 }
 
 /**
- * Read the current build's versionCode from the bundled Expo config.
- * Expo prebuild bakes app.json's android.versionCode into the Gradle file
- * AND into Constants.expoConfig at runtime, so this is the same number a
- * Play Store / Internal App Sharing install would carry. Falls back to 0
- * (which the backend reads as "no policy applies") if the field is missing
- * — e.g. running under Expo Go for development.
+ * Read the build number this install actually carries.
+ *
+ * The NATIVE value is authoritative and must be tried first: `eas.json` sets
+ * `appVersionSource: "remote"` with `autoIncrement`, so EAS — not app.json —
+ * assigns the versionCode that Play ships. Reading the bundled Expo config
+ * alone reports whatever app.json happened to say when the bundle was built,
+ * which drifts from the installed build and makes the update gate judge the
+ * wrong version.
+ *
+ * Falls back to the Expo config (Expo Go / dev, where the native module
+ * reports null) and finally to 0, which the backend reads as "no policy
+ * applies".
  */
 function readVersionCode(): number {
+  const native = Number.parseInt(APP_BUILD, 10);
+  if (Number.isFinite(native) && native > 0) return native;
+
   const cfg = (Constants.expoConfig ?? Constants.manifest2 ?? Constants.manifest) as any;
   const fromAndroid = cfg?.android?.versionCode;
   if (typeof fromAndroid === 'number' && Number.isFinite(fromAndroid)) return fromAndroid;

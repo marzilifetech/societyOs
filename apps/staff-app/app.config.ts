@@ -77,6 +77,16 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ...(config as ExpoConfig),
     plugins: [
       ...(config.plugins ?? []),
+      // Disables expo-splash-screen's androidx system-splash management. Its
+      // OnPreDrawListener blocks EVERY draw pass until hideAsync() lands, which
+      // hangs the app on the splash forever on Android 15 / edge-to-edge /
+      // New Arch. Reproduced and fixed in the resident app first. See the
+      // plugin for the full rationale.
+      './plugins/withAndroidNoSystemSplash',
+      // Release signing lives here rather than hand-edited into the gitignored
+      // android/ folder, where every `expo prebuild` silently reverted it to
+      // the debug keystore. Credentials stay out of git — see the plugin.
+      './plugins/withAndroidReleaseSigning',
       [
         'expo-build-properties',
         {
@@ -87,6 +97,24 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           },
         },
       ],
+      // Kotlin bridge: creates every notification channel in
+      // Application.onCreate (before JS loads, so a push that starts the
+      // process finds its channel already present with the right importance /
+      // DND policy) and exposes per-channel diagnostics + settings deep links.
+      // Also sets the FCM default_notification_channel_id meta-data, whose
+      // absence was silently downgrading pushes to a DEFAULT-importance
+      // "Miscellaneous" channel. See the plugin for the full rationale.
+      //
+      // Registered LAST on purpose: expo-notifications' own manifest mod runs
+      // after any plugin listed before it and rebuilds the <application>
+      // meta-data list, which silently dropped this entry when this plugin sat
+      // higher in the array.
+      './plugins/withNativeNotifications',
+      // Kotlin bridge: CameraX + MLKit QR scanner. Detection, same-code
+      // de-duplication and torch control all happen natively, so JS receives
+      // exactly one event per physical scan instead of ~25/sec of bridge
+      // traffic. Falls back to expo-camera when absent — see the plugin.
+      './plugins/withNativeQrScanner',
     ],
     ios: {
       ...(config.ios ?? {}),

@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Platform, Pressable, ScrollView, View } from 'react-native';
+import { Tappable } from '../../src/components/ui/Tappable';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -14,7 +15,8 @@ import {
   openNotificationSettings,
   registerDeviceToken,
 } from '../../src/lib/push';
-import { APP_VERSION_LABEL } from '../../src/lib/app-version';
+import { APP_NAME, APP_VERSION_LABEL } from '../../src/lib/app-version';
+import { getSmsRetrieverHash } from '../../src/hooks/useSmsOtpAutoRead';
 
 const BRAND_SOFT = 'rgba(130,26,82,0.08)';
 
@@ -47,6 +49,11 @@ export default function NotificationTestScreen() {
   const [note, setNote] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const [busy, setBusy] = useState<'send' | 'enable' | 'register' | null>(null);
   const [token, setToken] = useState<string | null>(null);
+  const [smsHash, setSmsHash] = useState<string | null>(null);
+
+  useEffect(() => {
+    getSmsRetrieverHash().then(setSmsHash);
+  }, []);
 
   const meta = permMeta(status);
 
@@ -86,9 +93,13 @@ export default function NotificationTestScreen() {
           title: 'Test notification ✅',
           body: 'If you can see this, notifications are working on this device.',
           data: { type: 'TEST' },
-          ...(Platform.OS === 'android' ? { channelId: 'default' } : {}),
         },
-        trigger: null, // deliver immediately
+        // Android routes by CHANNEL, and the channel is read from the trigger —
+        // a `channelId` inside `content` is silently ignored, which dumped this
+        // notification into expo's fallback channel (wrong importance, and it
+        // shows up under a junk name in system settings). A channel-aware
+        // trigger still delivers immediately, exactly like `trigger: null`.
+        trigger: Platform.OS === 'android' ? { channelId: 'system' } : null,
       });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       setNote({
@@ -223,12 +234,12 @@ export default function NotificationTestScreen() {
         )}
 
         {/* Primary: send a local test notification */}
-        <Pressable
+        <Tappable
           onPress={sendLocal}
           disabled={busy !== null}
           accessibilityRole="button"
           accessibilityLabel="Send a test notification"
-          style={({ pressed }) => ({
+          style={{
             flexDirection: 'row',
             alignItems: 'center',
             justifyContent: 'center',
@@ -236,24 +247,25 @@ export default function NotificationTestScreen() {
             backgroundColor: t.accentPrimary,
             borderRadius: t.radiusLg,
             minHeight: t.touchTargetLg,
-            opacity: pressed || busy ? 0.85 : 1,
+            opacity: busy ? 0.85 : 1,
             marginBottom: 12,
-          })}
+          }}
+          pressedStyle={{ opacity: 0.85 }}
         >
           <Ionicons name="notifications" size={18} color="#FFFFFF" />
           <ThemedText weight="bold" color="#FFFFFF" style={{ fontSize: t.fontBase }}>
             {busy === 'send' ? 'Sending…' : 'Send a test notification'}
           </ThemedText>
-        </Pressable>
+        </Tappable>
 
         {/* Secondary: enable / register */}
         {status !== 'granted' && (
-          <Pressable
+          <Tappable
             onPress={enable}
             disabled={busy !== null}
             accessibilityRole="button"
             accessibilityLabel="Enable notifications"
-            style={({ pressed }) => ({
+            style={{
               flexDirection: 'row',
               alignItems: 'center',
               justifyContent: 'center',
@@ -261,23 +273,24 @@ export default function NotificationTestScreen() {
               backgroundColor: BRAND_SOFT,
               borderRadius: t.radiusLg,
               minHeight: t.touchTargetLg,
-              opacity: pressed || busy ? 0.85 : 1,
+              opacity: busy ? 0.85 : 1,
               marginBottom: 12,
-            })}
+            }}
+          pressedStyle={{ opacity: 0.85 }}
           >
             <Ionicons name="power" size={18} color={t.accentPrimary} />
             <ThemedText weight="semibold" color={t.accentPrimary} style={{ fontSize: t.fontBase }}>
               {busy === 'enable' ? 'Working…' : 'Enable notifications'}
             </ThemedText>
-          </Pressable>
+          </Tappable>
         )}
 
-        <Pressable
+        <Tappable
           onPress={registerDevice}
           disabled={busy !== null}
           accessibilityRole="button"
           accessibilityLabel="Register this device for push"
-          style={({ pressed }) => ({
+          style={{
             flexDirection: 'row',
             alignItems: 'center',
             justifyContent: 'center',
@@ -285,14 +298,15 @@ export default function NotificationTestScreen() {
             backgroundColor: BRAND_SOFT,
             borderRadius: t.radiusLg,
             minHeight: t.touchTargetLg,
-            opacity: pressed || busy ? 0.85 : 1,
-          })}
+            opacity: busy ? 0.85 : 1,
+          }}
+          pressedStyle={{ opacity: 0.85 }}
         >
           <Ionicons name="cloud-upload-outline" size={18} color={t.accentPrimary} />
           <ThemedText weight="semibold" color={t.accentPrimary} style={{ fontSize: t.fontBase }}>
             {busy === 'register' ? 'Registering…' : 'Register this device for push'}
           </ThemedText>
-        </Pressable>
+        </Tappable>
 
         {/* Device token (for debugging server pushes) */}
         {token && (
@@ -313,12 +327,45 @@ export default function NotificationTestScreen() {
           </View>
         )}
 
+        {/* SMS Retriever app hash. Belongs on this diagnostics screen because
+            the value is BUILD-SPECIFIC: it is derived from the package name
+            plus the SIGNING certificate, so the debug, upload-key and
+            Play-signed builds each produce a different hash. Whoever owns the
+            SMS template needs the one from the build users actually install
+            (i.e. read it from a Play-installed copy), and there is no way to
+            compute that off-device once Play re-signs the bundle. */}
+        {smsHash && (
+          <View
+            style={{
+              backgroundColor: t.bgCard,
+              borderRadius: t.radiusMd,
+              padding: 12,
+              marginTop: t.sectionGap,
+            }}
+          >
+            <ThemedText variant="caption" color={t.textMuted} style={{ marginBottom: 4 }}>
+              SMS auto-read hash (this build)
+            </ThemedText>
+            <ThemedText
+              weight="bold"
+              color={t.textPrimary}
+              style={{ fontSize: 15, letterSpacing: 0.5 }}
+            >
+              {smsHash}
+            </ThemedText>
+            <ThemedText variant="caption" color={t.textMuted} style={{ fontSize: 11, marginTop: 6 }}>
+              The OTP SMS must end with this exact string for the code to fill in
+              automatically.
+            </ThemedText>
+          </View>
+        )}
+
         <ThemedText
           variant="caption"
           color={t.textMuted}
           style={{ textAlign: 'center', marginTop: t.sectionGap * 1.5 }}
         >
-          SocietyOS · {APP_VERSION_LABEL}
+          {APP_NAME} · {APP_VERSION_LABEL}
         </ThemedText>
       </ScrollView>
     </SafeAreaView>

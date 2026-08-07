@@ -195,6 +195,28 @@ describe('useSettingsStore', () => {
     expect(useSettingsStore.getState().biometricEnabled).toBe(false);
   });
 
+  it('hydrate coerces legacy theme "system" to "light" only ONCE', async () => {
+    // Pre-migration blob (no themeMigrated marker) → coerced to light.
+    (AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(
+      JSON.stringify({ theme: 'system' }),
+    );
+    (SecureStore.getItemAsync as jest.Mock).mockResolvedValueOnce(null);
+    await useSettingsStore.getState().hydrate();
+    expect(useSettingsStore.getState().theme).toBe('light');
+  });
+
+  it('hydrate preserves a deliberately chosen "system" theme after migration', async () => {
+    // Once migrated, picking System must survive a restart. Before the
+    // themeMigrated marker existed this reverted to 'light' on every launch,
+    // making the System option impossible to keep.
+    (AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(
+      JSON.stringify({ theme: 'system', themeMigrated: true }),
+    );
+    (SecureStore.getItemAsync as jest.Mock).mockResolvedValueOnce(null);
+    await useSettingsStore.getState().hydrate();
+    expect(useSettingsStore.getState().theme).toBe('system');
+  });
+
   it('hydrate always sets hydrated: true even when AsyncStorage throws', async () => {
     (AsyncStorage.getItem as jest.Mock).mockRejectedValueOnce(new Error('disk full'));
     // SecureStore mock may or may not be called depending on where the throw is caught
@@ -204,14 +226,15 @@ describe('useSettingsStore', () => {
     expect(useSettingsStore.getState().hydrated).toBe(true);
   });
 
-  it('hydrate defaults theme to "system" when field is absent from stored object', async () => {
-    // stored object exists but has no `theme` key → parsed.theme is undefined → ?? 'system'
+  it('hydrate defaults theme to "light" when field is absent from stored object', async () => {
+    // No `theme` key → falls back to the app default, which is 'light'
+    // (deliberately NOT 'system': see the store's default-theme comment).
     const stored = { largeText: true, autoLockMinutes: 10 };
     (AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify(stored));
     (SecureStore.getItemAsync as jest.Mock).mockResolvedValueOnce(null);
 
     await useSettingsStore.getState().hydrate();
-    expect(useSettingsStore.getState().theme).toBe('system');
+    expect(useSettingsStore.getState().theme).toBe('light');
     // Other fields from stored data should still be applied
     expect(useSettingsStore.getState().largeText).toBe(true);
     expect(useSettingsStore.getState().autoLockMinutes).toBe(10);

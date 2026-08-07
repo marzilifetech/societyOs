@@ -1,13 +1,21 @@
-import { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
+import { useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  ActivityIndicator,
+  ScrollView,
+  StyleSheet,
+} from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Camera, CameraView } from 'expo-camera';
+import { Camera } from 'expo-camera';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
 import { AppHeader, Card } from '../../src/components/ui';
+import { QrScanner, nativeScannerAvailable } from '../../src/components/QrScanner';
 
 type Visitor = {
   id: string;
@@ -19,6 +27,14 @@ type Visitor = {
   resident?: { flat?: { number?: string; block?: string } };
 };
 
+/** What the guard is currently looking at. */
+type Phase =
+  | { kind: 'scanning' }
+  | { kind: 'verifying' }
+  | { kind: 'visitor'; visitor: Visitor }
+  | { kind: 'error'; message: string }
+  | { kind: 'done'; allowed: boolean; name: string };
+
 function flatLabel(visitor: Visitor): string {
   const flat = visitor.resident?.flat;
   if (!flat) return '—';
@@ -28,8 +44,8 @@ function flatLabel(visitor: Visitor): string {
 export default function QrScanScreen() {
   const qc = useQueryClient();
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
-  const [scanned, setScanned] = useState(false);
-  const [visitor, setVisitor] = useState<Visitor | null>(null);
+  const [phase, setPhase] = useState<Phase>({ kind: 'scanning' });
+  const [torch, setTorch] = useState(false);
   const [token, setToken] = useState<string | null>(null);
 
   useEffect(() => {
@@ -38,16 +54,24 @@ export default function QrScanScreen() {
     });
   }, []);
 
+  const invalidateVisitors = () => {
+    qc.invalidateQueries({ queryKey: ['staff-visitors-pending'] });
+    qc.invalidateQueries({ queryKey: ['staff-visitors-pending-count'] });
+  };
+
+  const reset = () => {
+    setPhase({ kind: 'scanning' });
+    setToken(null);
+  };
+
   const lookup = useMutation({
     mutationFn: (qr: string) => api.get<Visitor>(`/visitors/qr/${qr}`),
     onSuccess: (data) => {
-      setVisitor(data);
+      setPhase({ kind: 'visitor', visitor: data });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     },
     onError: (err: any) => {
-      Alert.alert('Invalid QR', err.message, [
-        { text: 'Try Again', onPress: () => setScanned(false) },
-      ]);
+      setPhase({ kind: 'error', message: err?.message ?? 'This pass could not be read.' });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
     },
   });
@@ -55,262 +79,422 @@ export default function QrScanScreen() {
   const approve = useMutation({
     mutationFn: (id: string) => api.patch(`/staff/visitors/${id}/approve`, {}),
     onSuccess: (data) => {
-      setVisitor(data as Visitor);
-      qc.invalidateQueries({ queryKey: ['staff-visitors-pending'] });
-      qc.invalidateQueries({ queryKey: ['staff-visitors-pending-count'] });
-      Alert.alert('Approved', 'Visitor can now be checked in.');
+      setPhase({ kind: 'visitor', visitor: data as Visitor });
+      invalidateVisitors();
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     },
-    onError: (err: any) => Alert.alert('Could not approve', err?.message ?? 'Try again'),
+    onError: (err: any) =>
+      setPhase({ kind: 'error', message: err?.message ?? 'Could not approve. Try again.' }),
   });
 
   const reject = useMutation({
     mutationFn: (id: string) => api.patch(`/staff/visitors/${id}/reject`, {}),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['staff-visitors-pending'] });
-      qc.invalidateQueries({ queryKey: ['staff-visitors-pending-count'] });
-      Alert.alert('Rejected', undefined, [
-        {
-          text: 'OK',
-          onPress: () => {
-            setScanned(false);
-            setVisitor(null);
-            setToken(null);
-          },
-        },
-      ]);
+    onSuccess: (_d, id) => {
+      invalidateVisitors();
+      const name = phase.kind === 'visitor' ? phase.visitor.name : 'Visitor';
+      setPhase({ kind: 'done', allowed: false, name });
     },
-    onError: (err: any) => Alert.alert('Could not reject', err?.message ?? 'Try again'),
+    onError: (err: any) =>
+      setPhase({ kind: 'error', message: err?.message ?? 'Could not reject. Try again.' }),
   });
 
   const decision = useMutation({
     mutationFn: ({ allow }: { allow: boolean }) =>
-      api.post('/visitors/check-in', {
-        qrToken: token,
-        decision: allow ? 'ALLOW' : 'DENY',
-      }),
+      api.post('/visitors/check-in', { qrToken: token, decision: allow ? 'ALLOW' : 'DENY' }),
     onSuccess: (_data, vars) => {
-      Alert.alert(vars.allow ? 'Entry Allowed ✓' : 'Entry Denied', undefined, [
-        {
-          text: 'OK',
-          onPress: () => {
-            setScanned(false);
-            setVisitor(null);
-            setToken(null);
-          },
-        },
-      ]);
+      const name = phase.kind === 'visitor' ? phase.visitor.name : 'Visitor';
+      setPhase({ kind: 'done', allowed: vars.allow, name });
+      invalidateVisitors();
+      Haptics.notificationAsync(
+        vars.allow
+          ? Haptics.NotificationFeedbackType.Success
+          : Haptics.NotificationFeedbackType.Warning,
+      ).catch(() => {});
     },
-    onError: (err: any) => Alert.alert('Error', err.message),
+    onError: (err: any) =>
+      setPhase({ kind: 'error', message: err?.message ?? 'Could not record entry. Try again.' }),
   });
 
-  const handleBarcode = ({ data }: { data: string }) => {
-    if (scanned || lookup.isPending) return;
-    setScanned(true);
+  const handleScan = (data: string) => {
+    // The scanner de-dupes, but a second DIFFERENT code arriving while a
+    // lookup is in flight would still race — hold the phase as the guard.
+    if (phase.kind !== 'scanning') return;
     setToken(data);
+    setPhase({ kind: 'verifying' });
+    Haptics.selectionAsync().catch(() => {});
     lookup.mutate(data);
   };
 
-  const resetScan = () => {
-    setScanned(false);
-    setVisitor(null);
-    setToken(null);
-  };
+  /* ── permission states ────────────────────────────────────────────────── */
 
   if (hasPermission === null) {
     return (
-      <SafeAreaView className="flex-1 bg-black items-center justify-center">
+      <View className="flex-1 bg-black items-center justify-center">
         <ActivityIndicator color="white" />
-      </SafeAreaView>
+      </View>
     );
   }
 
   if (!hasPermission) {
     return (
-      <SafeAreaView className="flex-1 bg-black items-center justify-center px-8">
-        <Text className="text-white text-center text-base mb-6">
-          Camera access is required to scan visitor QR codes.
-        </Text>
-        <TouchableOpacity
-          className="bg-white rounded-2xl px-6 py-3"
-          onPress={() =>
-            Camera.requestCameraPermissionsAsync().then(({ status }) =>
-              setHasPermission(status === 'granted'),
-            )
-          }
-        >
-          <Text className="text-gray-900 font-semibold">Grant Access</Text>
-        </TouchableOpacity>
-      </SafeAreaView>
-    );
-  }
-
-  if (visitor) {
-    const pendingApproval = visitor.approvalStatus === 'PENDING';
-    const rejected = visitor.approvalStatus === 'REJECTED';
-    const busy = approve.isPending || reject.isPending || decision.isPending;
-
-    return (
       <SafeAreaView className="flex-1 bg-gray-50 dark:bg-gray-950" edges={['top']}>
-        <AppHeader
-          title="Visitor Details"
-          subtitle={pendingApproval ? 'Approve before allowing entry.' : 'Verify before allowing entry.'}
-          onBack={() => router.back()}
-        />
-        <View className="flex-1 px-6 pt-6">
-          <Card padding="lg" className="rounded-3xl">
-            <Text className="text-xs text-gray-400 dark:text-gray-500">NAME</Text>
-            <Text className="text-2xl font-heading text-gray-900 dark:text-gray-100 mb-4">{visitor.name}</Text>
-
-            <DetailRow label="Flat" value={flatLabel(visitor)} />
-            {visitor.purpose && <DetailRow label="Purpose" value={visitor.purpose} />}
-            {visitor.validUntil && (
-              <DetailRow
-                label="Expires"
-                value={new Date(visitor.validUntil).toLocaleString('en-IN')}
-              />
-            )}
-            {visitor.status && <DetailRow label="Visit status" value={visitor.status} />}
-            {visitor.approvalStatus && (
-              <DetailRow label="Approval" value={visitor.approvalStatus} />
-            )}
-          </Card>
-
-          {pendingApproval ? (
-            <View className="flex-row gap-3 mt-8">
-              <TouchableOpacity
-                className="flex-1 bg-red-500 rounded-2xl py-4 items-center"
-                onPress={() => reject.mutate(visitor.id)}
-                disabled={busy}
-              >
-                {reject.isPending ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text className="text-white font-bold">Reject</Text>
-                )}
-              </TouchableOpacity>
-              <TouchableOpacity
-                className="flex-1 bg-amber-500 rounded-2xl py-4 items-center"
-                onPress={() => approve.mutate(visitor.id)}
-                disabled={busy}
-              >
-                {approve.isPending ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text className="text-white font-bold">Approve</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          ) : rejected ? (
-            <View className="mt-8 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-2xl p-4">
-              <Text className="text-red-700 dark:text-red-200 text-center text-sm">
-                This visitor was rejected and cannot enter.
-              </Text>
-            </View>
-          ) : (
-            <View className="flex-row gap-3 mt-8">
-              <TouchableOpacity
-                className="flex-1 bg-red-500 rounded-2xl py-4 items-center"
-                onPress={() => decision.mutate({ allow: false })}
-                disabled={busy}
-              >
-                {decision.isPending ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text className="text-white font-bold">Deny</Text>
-                )}
-              </TouchableOpacity>
-              <TouchableOpacity
-                className="flex-1 bg-green-500 rounded-2xl py-4 items-center"
-                onPress={() => decision.mutate({ allow: true })}
-                disabled={busy}
-              >
-                {decision.isPending ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text className="text-white font-bold">Allow Entry</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          )}
-
-          <TouchableOpacity className="mt-6 self-center" onPress={resetScan}>
-            <Text className="text-gray-500 dark:text-gray-400 text-sm">Scan another</Text>
+        <AppHeader title="Scan gate pass" onBack={() => router.back()} />
+        <View className="flex-1 items-center justify-center px-8">
+          <View className="w-16 h-16 rounded-full bg-primary-50 dark:bg-primary-900/50 items-center justify-center mb-5">
+            <Ionicons name="camera-outline" size={28} color="#821A52" />
+          </View>
+          <Text className="font-heading text-lg text-gray-900 dark:text-gray-100 text-center">
+            Camera access needed
+          </Text>
+          <Text className="font-body text-sm text-gray-500 dark:text-gray-400 text-center mt-2">
+            The camera is only used to read visitor QR passes at the gate.
+          </Text>
+          <TouchableOpacity
+            className="bg-primary-500 rounded-2xl px-7 py-3.5 mt-7"
+            accessibilityRole="button"
+            onPress={() =>
+              Camera.requestCameraPermissionsAsync().then(({ status }) =>
+                setHasPermission(status === 'granted'),
+              )
+            }
+          >
+            <Text className="text-white font-heading">Allow camera</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
   }
 
+  /* ── result states (camera released) ──────────────────────────────────── */
+
+  if (phase.kind === 'done') {
+    return <ResultScreen allowed={phase.allowed} name={phase.name} onNext={reset} />;
+  }
+
+  if (phase.kind === 'visitor' || phase.kind === 'error') {
+    return (
+      <SafeAreaView className="flex-1 bg-gray-50 dark:bg-gray-950" edges={['top']}>
+        <AppHeader
+          title={phase.kind === 'error' ? 'Pass not valid' : 'Visitor details'}
+          subtitle={
+            phase.kind === 'error'
+              ? 'Ask the visitor to check with the resident'
+              : phase.visitor.approvalStatus === 'PENDING'
+                ? 'Approve before allowing entry'
+                : 'Verify before allowing entry'
+          }
+          onBack={reset}
+        />
+        <ScrollView contentContainerClassName="p-5 pb-10">
+          {phase.kind === 'error' ? (
+            <>
+              <Card padding="lg" className="items-center">
+                <View className="w-14 h-14 rounded-full bg-red-50 dark:bg-red-950/40 items-center justify-center mb-4">
+                  <Ionicons name="close-circle" size={28} color="#DC2626" />
+                </View>
+                <Text className="font-heading text-base text-gray-900 dark:text-gray-100 text-center">
+                  {phase.message}
+                </Text>
+              </Card>
+              <TouchableOpacity
+                className="bg-primary-500 rounded-2xl py-4 items-center mt-6"
+                accessibilityRole="button"
+                onPress={reset}
+              >
+                <Text className="text-white font-heading">Scan again</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <VisitorDecision
+              visitor={phase.visitor}
+              busy={approve.isPending || reject.isPending || decision.isPending}
+              approving={approve.isPending}
+              rejecting={reject.isPending}
+              deciding={decision.isPending}
+              onApprove={() => approve.mutate(phase.visitor.id)}
+              onReject={() => reject.mutate(phase.visitor.id)}
+              onAllow={() => decision.mutate({ allow: true })}
+              onDeny={() => decision.mutate({ allow: false })}
+              onRescan={reset}
+            />
+          )}
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
+  /* ── live camera ──────────────────────────────────────────────────────── */
+
+  const verifying = phase.kind === 'verifying';
+
   return (
     <View className="flex-1 bg-black">
-      <CameraView
+      <QrScanner
         style={{ flex: 1 }}
-        facing="back"
-        onBarcodeScanned={handleBarcode}
-        barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-      >
-        <SafeAreaView className="flex-1">
-          {/* Camera viewfinder stays dark by design — only the back idiom is unified. */}
-          <View className="flex-row items-center px-5 pt-4 mb-8">
-            <TouchableOpacity
-              onPress={() => router.back()}
-              className="w-10 h-10 rounded-full bg-white/15 items-center justify-center"
-              accessibilityRole="button"
-              accessibilityLabel="Go back"
-            >
-              <Ionicons name="chevron-back" size={22} color="#FFFFFF" />
-            </TouchableOpacity>
-            <Text className="text-white font-heading text-base flex-1 text-center mr-10">
-              Scan Visitor QR
-            </Text>
-          </View>
+        torch={torch}
+        // Stop emitting while a lookup is in flight rather than unmounting the
+        // camera — remounting costs ~400ms of black preview on re-entry.
+        paused={verifying}
+        onScan={handleScan}
+      />
 
-          <View className="flex-1 items-center justify-center">
-            <View style={{ width: 240, height: 240 }}>
-              {[
-                { top: 0, left: 0, borderTopWidth: 4, borderLeftWidth: 4 },
-                { top: 0, right: 0, borderTopWidth: 4, borderRightWidth: 4 },
-                { bottom: 0, left: 0, borderBottomWidth: 4, borderLeftWidth: 4 },
-                { bottom: 0, right: 0, borderBottomWidth: 4, borderRightWidth: 4 },
-              ].map((style, i) => (
-                <View
-                  key={i}
-                  style={[
-                    {
-                      position: 'absolute',
-                      width: 40,
-                      height: 40,
-                      borderColor: 'white',
-                      borderRadius: 4,
-                    },
-                    style as any,
-                  ]}
-                />
-              ))}
+      {/* Overlay chrome. pointerEvents box-none so taps fall through to
+          nothing except the actual buttons. */}
+      {/* StyleSheet.absoluteFill, not `className="absolute inset-0"`: NativeWind
+          does not translate `inset-0` on this version, so the overlay collapsed
+          to its content height and the scan frame + hint bunched up against the
+          top of the screen instead of centring over the preview. */}
+      <SafeAreaView style={StyleSheet.absoluteFill} pointerEvents="box-none">
+        <View className="flex-row items-center px-5 pt-4" pointerEvents="box-none">
+          <TouchableOpacity
+            onPress={() => router.back()}
+            className="w-10 h-10 rounded-full bg-black/40 items-center justify-center"
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+          >
+            <Ionicons name="chevron-back" size={22} color="#FFFFFF" />
+          </TouchableOpacity>
+          <Text className="text-white font-heading text-base flex-1 text-center">
+            Scan gate pass
+          </Text>
+          <TouchableOpacity
+            onPress={() => setTorch((v) => !v)}
+            className={`w-10 h-10 rounded-full items-center justify-center ${
+              torch ? 'bg-white' : 'bg-black/40'
+            }`}
+            accessibilityRole="button"
+            accessibilityLabel={torch ? 'Turn off flashlight' : 'Turn on flashlight'}
+            accessibilityState={{ selected: torch }}
+          >
+            <Ionicons name={torch ? 'flashlight' : 'flashlight-outline'} size={20} color={torch ? '#111827' : '#FFFFFF'} />
+          </TouchableOpacity>
+        </View>
+
+        <View className="flex-1 items-center justify-center" pointerEvents="none">
+          <ScanFrame active={!verifying} />
+          {verifying ? (
+            <View className="mt-8 bg-black/70 rounded-2xl px-6 py-4 items-center">
+              <ActivityIndicator color="white" />
+              <Text className="text-white font-body text-sm mt-2">Checking pass…</Text>
             </View>
+          ) : null}
+        </View>
 
-            {lookup.isPending && (
-              <View className="mt-6 bg-black/60 rounded-2xl px-6 py-3">
-                <ActivityIndicator color="white" />
-                <Text className="text-white text-sm mt-2 text-center">Verifying…</Text>
-              </View>
-            )}
-          </View>
-
-          <View className="pb-12 items-center">
-            <Text className="text-white/60 text-sm">Hold camera steady over the QR code</Text>
-          </View>
-        </SafeAreaView>
-      </CameraView>
+        <View className="pb-10 px-8" pointerEvents="none">
+          <Text className="text-white/70 font-body text-sm text-center">
+            Point the camera at the visitor&apos;s QR code
+          </Text>
+          {!nativeScannerAvailable ? null : (
+            <Text className="text-white/35 font-body text-[11px] text-center mt-1">
+              Fast scan enabled
+            </Text>
+          )}
+        </View>
+      </SafeAreaView>
     </View>
+  );
+}
+
+/* ────────────────────────────── pieces ────────────────────────────────── */
+
+/** Four corner brackets — the standard "aim here" affordance. */
+function ScanFrame({ active }: { active: boolean }) {
+  const color = active ? '#FFFFFF' : 'rgba(255,255,255,0.35)';
+  return (
+    <View style={{ width: 250, height: 250 }}>
+      {[
+        { top: 0, left: 0, borderTopWidth: 4, borderLeftWidth: 4, borderTopLeftRadius: 16 },
+        { top: 0, right: 0, borderTopWidth: 4, borderRightWidth: 4, borderTopRightRadius: 16 },
+        { bottom: 0, left: 0, borderBottomWidth: 4, borderLeftWidth: 4, borderBottomLeftRadius: 16 },
+        {
+          bottom: 0,
+          right: 0,
+          borderBottomWidth: 4,
+          borderRightWidth: 4,
+          borderBottomRightRadius: 16,
+        },
+      ].map((corner, i) => (
+        <View
+          key={i}
+          style={[
+            { position: 'absolute', width: 44, height: 44, borderColor: color },
+            corner as any,
+          ]}
+        />
+      ))}
+    </View>
+  );
+}
+
+function VisitorDecision({
+  visitor,
+  busy,
+  approving,
+  rejecting,
+  deciding,
+  onApprove,
+  onReject,
+  onAllow,
+  onDeny,
+  onRescan,
+}: {
+  visitor: Visitor;
+  busy: boolean;
+  approving: boolean;
+  rejecting: boolean;
+  deciding: boolean;
+  onApprove: () => void;
+  onReject: () => void;
+  onAllow: () => void;
+  onDeny: () => void;
+  onRescan: () => void;
+}) {
+  const pendingApproval = visitor.approvalStatus === 'PENDING';
+  const rejected = visitor.approvalStatus === 'REJECTED';
+
+  return (
+    <>
+      <Card padding="lg">
+        <Text className="font-body text-xs text-gray-400 dark:text-gray-500 uppercase">Visitor</Text>
+        <Text className="font-heading text-2xl text-gray-900 dark:text-gray-100 mt-1 mb-4">
+          {visitor.name}
+        </Text>
+        <DetailRow label="Flat" value={flatLabel(visitor)} />
+        {visitor.purpose ? <DetailRow label="Purpose" value={visitor.purpose} /> : null}
+        {visitor.validUntil ? (
+          <DetailRow label="Expires" value={new Date(visitor.validUntil).toLocaleString('en-IN')} />
+        ) : null}
+        {visitor.status ? <DetailRow label="Visit status" value={visitor.status} /> : null}
+        {visitor.approvalStatus ? (
+          <DetailRow label="Approval" value={visitor.approvalStatus} />
+        ) : null}
+      </Card>
+
+      {rejected ? (
+        <View className="mt-6 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-2xl p-4 flex-row items-center">
+          <Ionicons name="close-circle" size={20} color="#DC2626" />
+          <Text className="text-red-700 dark:text-red-200 font-body text-sm ml-3 flex-1">
+            This visitor was rejected and cannot enter.
+          </Text>
+        </View>
+      ) : (
+        <View className="flex-row gap-3 mt-6">
+          <ActionButton
+            tone="danger"
+            label={pendingApproval ? 'Reject' : 'Deny entry'}
+            icon="close"
+            loading={pendingApproval ? rejecting : deciding}
+            disabled={busy}
+            onPress={pendingApproval ? onReject : onDeny}
+          />
+          <ActionButton
+            tone="success"
+            label={pendingApproval ? 'Approve' : 'Allow entry'}
+            icon="checkmark"
+            loading={pendingApproval ? approving : deciding}
+            disabled={busy}
+            onPress={pendingApproval ? onApprove : onAllow}
+          />
+        </View>
+      )}
+
+      <TouchableOpacity className="mt-6 self-center py-2" onPress={onRescan} accessibilityRole="button">
+        <Text className="text-gray-500 dark:text-gray-400 font-body text-sm">Scan another pass</Text>
+      </TouchableOpacity>
+    </>
+  );
+}
+
+function ActionButton({
+  tone,
+  label,
+  icon,
+  loading,
+  disabled,
+  onPress,
+}: {
+  tone: 'danger' | 'success';
+  label: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  loading: boolean;
+  disabled: boolean;
+  onPress: () => void;
+}) {
+  const bg = tone === 'danger' ? 'bg-red-500' : 'bg-green-600';
+  return (
+    <TouchableOpacity
+      className={`flex-1 ${bg} rounded-2xl py-4 items-center justify-center flex-row ${
+        disabled ? 'opacity-60' : ''
+      }`}
+      style={{ minHeight: 56 }}
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+    >
+      {loading ? (
+        <ActivityIndicator color="#fff" />
+      ) : (
+        <>
+          <Ionicons name={icon} size={18} color="#FFFFFF" />
+          <Text className="text-white font-heading ml-2">{label}</Text>
+        </>
+      )}
+    </TouchableOpacity>
+  );
+}
+
+/**
+ * Full-screen outcome. Replaces the old `Alert.alert(...)` confirmations: at a
+ * gate, in daylight, a colour-filled screen readable at arm's length is far
+ * better feedback than a small modal, and it keeps the "scan next" action
+ * under the guard's thumb.
+ */
+function ResultScreen({
+  allowed,
+  name,
+  onNext,
+}: {
+  allowed: boolean;
+  name: string;
+  onNext: () => void;
+}) {
+  return (
+    <SafeAreaView className={`flex-1 ${allowed ? 'bg-green-600' : 'bg-red-600'}`}>
+      <View className="flex-1 items-center justify-center px-8">
+        <View className="w-24 h-24 rounded-full bg-white/20 items-center justify-center mb-6">
+          <Ionicons name={allowed ? 'checkmark' : 'close'} size={52} color="#FFFFFF" />
+        </View>
+        <Text className="font-heading text-3xl text-white text-center">
+          {allowed ? 'Entry allowed' : 'Entry denied'}
+        </Text>
+        <Text className="font-body text-base text-white/85 text-center mt-2">{name}</Text>
+      </View>
+      <View className="px-6 pb-10 gap-3">
+        <TouchableOpacity
+          className="bg-white rounded-2xl py-4 items-center"
+          onPress={onNext}
+          accessibilityRole="button"
+        >
+          <Text className={`font-heading ${allowed ? 'text-green-700' : 'text-red-700'}`}>
+            Scan next visitor
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity className="py-3 items-center" onPress={() => router.back()} accessibilityRole="button">
+          <Text className="text-white/90 font-body">Done</Text>
+        </TouchableOpacity>
+      </View>
+    </SafeAreaView>
   );
 }
 
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
-    <View className="flex-row justify-between py-2 border-t border-gray-100 dark:border-gray-800">
-      <Text className="text-xs text-gray-500 dark:text-gray-400">{label}</Text>
-      <Text className="text-sm font-semibold text-gray-900 dark:text-gray-100">{value}</Text>
+    <View className="flex-row justify-between items-center py-2.5 border-t border-gray-100 dark:border-gray-800">
+      <Text className="font-body text-xs text-gray-500 dark:text-gray-400">{label}</Text>
+      <Text className="font-heading text-sm text-gray-900 dark:text-gray-100 flex-1 text-right ml-4">
+        {value}
+      </Text>
     </View>
   );
 }

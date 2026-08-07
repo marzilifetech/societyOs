@@ -1,20 +1,9 @@
-import { View } from 'react-native';
-
-export function SkeletonCard({ height = 80 }: { height?: number }) {
-  return (
-    <View
-      className="bg-gray-100 dark:bg-gray-800 rounded-2xl animate-pulse"
-      style={{ height }}
-    />
-  );
-}
-
-export function SkeletonRow() {
-  return (
-    <View className="flex-row gap-3">
-      <View className="flex-1 bg-gray-100 dark:bg-gray-800 rounded-xl h-16 animate-pulse" />
-      <View className="flex-1 bg-gray-100 dark:bg-gray-800 rounded-xl h-16 animate-pulse" />
-      <View className="flex-1 bg-gray-100 dark:bg-gray-800 rounded-xl h-16 animate-pulse" />
-    </View>
-  );
-}
+/**
+ * Attendance skeletons.
+ *
+ * These previously used `className="animate-pulse"`, which crashed every
+ * screen that rendered them — see src/components/ui/Skeleton.tsx for the full
+ * explanation. They are re-exported from the shared implementation so the two
+ * cannot drift apart again.
+ */
+export { SkeletonCard, SkeletonRow } from '../ui/Skeleton';

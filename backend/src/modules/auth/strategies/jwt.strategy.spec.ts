@@ -34,6 +34,42 @@ describe('JwtStrategy.validate', () => {
     ).resolves.toMatchObject({ sub: 'u1' });
   });
 
+  // Regression: role must come from the DATABASE, not the token claim.
+  //
+  // validate() used to `return payload`, so RolesGuard authorised against the
+  // role minted at login. Promoting a RESIDENT to STAFF had no effect until
+  // their token happened to rotate — every /staff/* route kept 403ing while
+  // the database said STAFF. Demotions were worse: the old, higher role stayed
+  // valid until expiry.
+  it('returns the CURRENT database role, overriding a stale token claim', async () => {
+    mockPrisma.user.findUnique.mockResolvedValue({
+      id: 'u1',
+      status: UserStatus.ACTIVE,
+      role: UserRole.STAFF, // promoted in the DB after the token was issued
+      societyId: 'soc-1',
+      society: { id: 'soc-1', status: 'ACTIVE' },
+    });
+
+    await expect(
+      // Token still asserts the pre-promotion role.
+      strategy.validate({ sub: 'u1', phone: '9', role: UserRole.RESIDENT, societyId: 'soc-1' } as any),
+    ).resolves.toMatchObject({ sub: 'u1', role: UserRole.STAFF });
+  });
+
+  it('downgrades a stale elevated token claim to the current database role', async () => {
+    mockPrisma.user.findUnique.mockResolvedValue({
+      id: 'u1',
+      status: UserStatus.ACTIVE,
+      role: UserRole.RESIDENT, // demoted in the DB
+      societyId: 'soc-1',
+      society: { id: 'soc-1', status: 'ACTIVE' },
+    });
+
+    await expect(
+      strategy.validate({ sub: 'u1', phone: '9', role: UserRole.ADMIN, societyId: 'soc-1' } as any),
+    ).resolves.toMatchObject({ role: UserRole.RESIDENT });
+  });
+
   it('rejects when home society is SUSPENDED', async () => {
     mockPrisma.user.findUnique.mockResolvedValue({
       id: 'u1',

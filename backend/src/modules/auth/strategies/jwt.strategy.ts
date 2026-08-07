@@ -61,6 +61,26 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       const code = user.society.status === SocietyStatus.SUSPENDED ? 'SOCIETY_SUSPENDED' : 'SOCIETY_ARCHIVED';
       throw new UnauthorizedException({ code });
     }
-    return payload;
+    // Authorise against the CURRENT database role, not the one minted into the
+    // token at login.
+    //
+    // This previously returned `payload` unchanged, so `RolesGuard` compared
+    // required roles against a claim that could be arbitrarily stale. Promoting
+    // a user (e.g. RESIDENT → STAFF when someone becomes a security guard) had
+    // NO effect until their access token happened to rotate: every /staff/*
+    // route kept returning 403 "Forbidden resource" while the database clearly
+    // said STAFF. A valid token never triggers a refresh, so for the user this
+    // looked permanent — reproduced against +91******3339 on society-dev.
+    //
+    // The same staleness cuts the other way and is the more serious half:
+    // DEMOTING a user, or narrowing `managedBlocks`, left their existing token
+    // holding the elevated role until it expired. Reading the row we have
+    // already fetched closes both directions at zero extra cost.
+    return {
+      ...payload,
+      role: user.role,
+      societyId: user.societyId ?? payload.societyId,
+      managedBlocks: (user as any).managedBlocks ?? (payload as any).managedBlocks ?? [],
+    };
   }
 }

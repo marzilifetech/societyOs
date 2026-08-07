@@ -4,6 +4,7 @@ import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import { api } from './api';
+import { nativeChannelsReady } from './native-notifications';
 
 // Last registered FCM token cache. Module-scope was fragile (a logout couldn't
 // force a re-register); AsyncStorage means the comparison survives across cold
@@ -140,7 +141,14 @@ export async function setupNotificationHandler() {
  * file under apps/staff-app/assets/sounds/{name}.mp3, declare it under
  * app.json expo-notifications "sounds", then set `sound: '{name}'` below.
  */
-async function setupAndroidChannels() {
+export async function setupAndroidChannels() {
+  // Fast path: the Kotlin bridge (plugins/withNativeNotifications.js) already
+  // created every channel in Application.onCreate — before JS loaded, and
+  // before FCM could deliver the first push. Repeating the work here would be
+  // ~14 sequential async bridge round-trips on the login path for a guaranteed
+  // no-op (Android ignores importance/vibration changes to existing channels).
+  if (nativeChannelsReady) return;
+
   const PUBLIC = Notifications.AndroidNotificationVisibility.PUBLIC;
   const PRIVATE = Notifications.AndroidNotificationVisibility.PRIVATE;
 
@@ -419,20 +427,52 @@ function routeNotificationResponse(resp: Notifications.NotificationResponse) {
     } catch {}
 }
 
+/**
+ * Identifier of the last notification response already acted on.
+ *
+ * `getLastNotificationResponseAsync()` does NOT mean "this launch was caused by
+ * a notification tap" — it returns the last response RECORDED ON THE DEVICE,
+ * and that value survives app restarts. The `coldStartRouted` flag below is
+ * module scope, so it resets on every process start and cannot prevent the
+ * replay. Without a PERSISTED guard, every cold start deep-links to whatever
+ * push the user last tapped, including launches from the home-screen icon.
+ */
+const HANDLED_RESPONSE_KEY = 'last_handled_notification_response';
+
+/** Remember a response so neither this launch nor any later one re-routes on it. */
+async function markResponseHandled(resp: Notifications.NotificationResponse) {
+  try {
+    await AsyncStorage.setItem(HANDLED_RESPONSE_KEY, resp.notification.request.identifier);
+  } catch {
+    /* non-fatal — worst case we re-route once */
+  }
+}
+
 export function attachNotificationTapHandler() {
   if (responseSub) return responseSub;
   // Cold start: a tap that LAUNCHED the app from a killed state is NOT
   // delivered to the listener below — pull it explicitly so a guard tapping a
   // gate/visitor/SOS push to open the app still deep-links to the right screen.
+  // Only route responses we have NOT already handled (see above).
   if (!coldStartRouted) {
     coldStartRouted = true;
     Notifications.getLastNotificationResponseAsync()
-      .then((resp) => {
-        if (resp) routeNotificationResponse(resp);
+      .then(async (resp) => {
+        if (!resp) return;
+        const id = resp.notification.request.identifier;
+        const seen = await AsyncStorage.getItem(HANDLED_RESPONSE_KEY).catch(() => null);
+        if (seen === id) return; // stale replay of an old tap — ignore
+        await markResponseHandled(resp);
+        routeNotificationResponse(resp);
       })
       .catch(() => {});
   }
-  responseSub = Notifications.addNotificationResponseReceivedListener(routeNotificationResponse);
+  // Warm taps are recorded too, so the same tap isn't replayed as a "cold
+  // start" route on the next launch.
+  responseSub = Notifications.addNotificationResponseReceivedListener((resp) => {
+    void markResponseHandled(resp);
+    routeNotificationResponse(resp);
+  });
   return responseSub;
 }
 

@@ -10,10 +10,8 @@ import { useAuthStore } from '../../src/store/auth.store';
 import { useTheme } from '../../src/hooks/useTheme';
 import { api } from '../../src/lib/api';
 import { Display, RoundCard, IconCircle, PillButton, StatusPill, rd, type RdStatusTone } from '../../src/components/ui';
-import { NotificationPrimerModal } from '../../src/components/NotificationPrimerModal';
-import { useNotificationPermission } from '../../src/hooks/useNotificationPermission';
-import { registerDeviceToken } from '../../src/lib/push';
 import { HEALTH_ENABLED } from '../../src/lib/features';
+import { openCarePortal } from '../../src/lib/care-portal';
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
 
@@ -31,18 +29,25 @@ type Notice = { id: string; isRead: boolean };
 type PinnedNotice = { id: string; title: string; body: string; isPinned: boolean };
 
 const DISMISSED_PINNED_KEY = 'dismissed_pinned_notice_ids';
-/**
- * AsyncStorage flag — set after the NotificationPrimerModal has been shown
- * once (granted, denied, or dismissed). Prevents the modal from re-opening
- * on every Home mount. The persistent banner takes over the gentle nag if
- * the user dismissed or denied.
- */
-const NOTIF_PRIMER_SHOWN_KEY = 'notif_primer_shown_v1';
 
 // 9 quick actions in the Figma 3×3 grid (node-id=22-1418 Home frame).
-type QuickAction = { icon: IoniconName; label: string; route: string; bg: string; tint: string };
+// `soon` marks a destination that currently renders the Coming Soon screen.
+// Without the badge the grid promises twelve working features and quietly
+// dead-ends on two of them, which reads as the app being broken rather than
+// the feature being unreleased.
+type QuickAction = {
+  icon: IoniconName;
+  label: string;
+  route: string;
+  bg: string;
+  tint: string;
+  soon?: boolean;
+};
 const QUICK_ACTIONS: QuickAction[] = [
   { icon: 'people', label: 'Visitor', route: '/visitor/new', bg: '#FCEBD8', tint: '#B26B2E' },
+  // Opens the web Care portal (doctors, appointments & more) already signed-in
+  // via a one-time handoff — see openCarePortal(). Neutrally named on purpose.
+  { icon: 'add-circle', label: 'PLUS', route: 'care-portal', bg: '#F3E8FF', tint: '#7C3AED' },
   // 'Medical' is gated by HEALTH_ENABLED (Play health-policy) — see src/lib/features.ts.
   ...(HEALTH_ENABLED
     ? [{ icon: 'medkit', label: 'Medical', route: '/medical', bg: '#FCE4E6', tint: '#DC2626' } as QuickAction]
@@ -50,8 +55,8 @@ const QUICK_ACTIONS: QuickAction[] = [
   { icon: 'restaurant', label: 'Canteen', route: '/canteen', bg: '#E5EDFB', tint: '#1D4ED8' },
   { icon: 'card', label: 'Payments', route: '/maintenance', bg: '#E5EDFB', tint: '#2563EB' },
   { icon: 'chatbubble-ellipses', label: 'Complaints', route: '/complaints', bg: '#FBF1D9', tint: '#B45309' },
-  { icon: 'airplane', label: 'Travel', route: '/travel', bg: '#D9F2EA', tint: '#0F9D77' },
-  { icon: 'home', label: 'Property', route: '/property', bg: '#FCE4EC', tint: '#C2185B' },
+  { icon: 'airplane', label: 'Travel', route: '/travel', bg: '#D9F2EA', tint: '#0F9D77', soon: true },
+  { icon: 'home', label: 'Property', route: '/property', bg: '#FCE4EC', tint: '#C2185B', soon: true },
   { icon: 'help-circle', label: 'Concierge', route: '/help-requests', bg: '#E5EDFB', tint: '#2563EB' },
   { icon: 'construct', label: 'Services', route: '/(tabs)/services', bg: '#FDE7D3', tint: '#EA6E1B' },
   { icon: 'calendar', label: 'Events', route: '/(tabs)/events', bg: '#EDE7FB', tint: '#7C3AED' },
@@ -107,34 +112,9 @@ export default function HomeScreen() {
   });
   const unreadInbox = unread?.count ?? 0;
 
-  // ─── Post-document-upload notification primer ──────────────────────────
-  // Fires ONCE per install: the moment a freshly-onboarded user lands on
-  // Home with documents already uploaded AND notification permission not
-  // yet granted, we open the primer modal explaining the 3 alert types.
-  // The AsyncStorage flag is set immediately on first eligible mount so
-  // multiple `useEffect` ticks don't re-open it. See NotificationPrimerModal
-  // for the soft-prompt rationale.
-  const { status: notifPerm } = useNotificationPermission();
-  const { data: myDocs } = useQuery<{ status?: string } | null>({
-    queryKey: ['my-documents'],
-    queryFn: () => api.get<{ status?: string }>('/residents/documents/me').catch(() => null),
-  });
-  const [primerVisible, setPrimerVisible] = useState(false);
-  useEffect(() => {
-    if (primerVisible) return;
-    if (notifPerm !== 'undetermined' && notifPerm !== 'denied') return;
-    const docsReady = myDocs?.status === 'UPLOADED' || myDocs?.status === 'VERIFIED';
-    if (!docsReady) return;
-    let cancelled = false;
-    AsyncStorage.getItem(NOTIF_PRIMER_SHOWN_KEY).then((flag) => {
-      if (cancelled || flag) return;
-      AsyncStorage.setItem(NOTIF_PRIMER_SHOWN_KEY, '1').catch(() => {});
-      setPrimerVisible(true);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [notifPerm, myDocs?.status, primerVisible]);
+  // Notification permission is no longer requested from Home. It is asked once
+  // by NotificationOnboarding right after sign-in, using the OS dialog — see
+  // that component for why the custom primer modal was dropped.
 
   const [dismissedPinnedIds, setDismissedPinnedIds] = useState<string[]>([]);
   useEffect(() => {
@@ -168,15 +148,6 @@ export default function HomeScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
-      <NotificationPrimerModal
-        visible={primerVisible}
-        onClose={(outcome) => {
-          setPrimerVisible(false);
-          // The primer owns the one-shot OS prompt; register the device the
-          // moment the user grants so pushes start flowing immediately.
-          if (outcome === 'granted') registerDeviceToken().catch(() => {});
-        }}
-      />
       <LinearGradient
         colors={['#FCEAEF', '#FFF6F1', '#FFFFFF']}
         style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 280 }}
@@ -268,13 +239,30 @@ export default function HomeScreen() {
               {QUICK_ACTIONS.map((a) => (
                 <TouchableOpacity
                   key={a.label}
-                  onPress={() => router.push(a.route as any)}
+                  onPress={() =>
+                    a.route === 'care-portal' ? openCarePortal() : router.push(a.route as any)
+                  }
                   activeOpacity={0.85}
                   accessibilityRole="button"
-                  accessibilityLabel={a.label}
+                  accessibilityLabel={a.soon ? `${a.label}, coming soon` : a.label}
                   style={{ width: '31%', alignItems: 'stretch' }}
                 >
-                  <RoundCard tone="white" padding={14} style={{ alignItems: 'center', minHeight: 108, justifyContent: 'center' }}>
+                  <RoundCard tone="white" padding={14} style={{ alignItems: 'center', minHeight: 108, justifyContent: 'center', opacity: a.soon ? 0.6 : 1 }}>
+                    {a.soon ? (
+                      <View
+                        style={{
+                          position: 'absolute',
+                          top: 6,
+                          right: 6,
+                          backgroundColor: rd.inkSoft,
+                          paddingHorizontal: 6,
+                          paddingVertical: 2,
+                          borderRadius: rd.radiusPill,
+                        }}
+                      >
+                        <Text style={{ fontSize: 9, fontWeight: '700', color: '#6B7280' }}>SOON</Text>
+                      </View>
+                    ) : null}
                     <IconCircle icon={a.icon} size={48} bg={a.bg} color={a.tint} />
                     <Text style={{ marginTop: 10, fontSize: t.fontSm, fontWeight: '600', color: t.textPrimary, textAlign: 'center' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{a.label}</Text>
                   </RoundCard>

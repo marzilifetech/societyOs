@@ -222,6 +222,30 @@ export default function MaintenanceScreen() {
             </View>
           )}
 
+          {/* Nothing outstanding. Without this the screen rendered only the
+              Auto-Pay row above a screenful of blank space, which reads as a
+              failed load rather than good news — the most common state for a
+              resident who pays on time. */}
+          {pending.length === 0 && (
+            <View
+              className="bg-white border border-gray-100 rounded-2xl p-6 mb-6 items-center"
+              style={cardShadow}
+            >
+              <View
+                className="rounded-full items-center justify-center mb-3"
+                style={{ width: 56, height: 56, backgroundColor: '#E7F4EC' }}
+              >
+                <Ionicons name="checkmark-circle" size={30} color="#1F7A45" />
+              </View>
+              <Text className="text-gray-900 text-lg font-semibold mb-1">No dues right now</Text>
+              <Text className="text-gray-500 text-sm text-center leading-5">
+                {recentPaid.length > 0
+                  ? 'You are all paid up. New bills will show here as soon as they are raised.'
+                  : 'When your society raises a maintenance bill, it will appear here.'}
+              </Text>
+            </View>
+          )}
+
           {/* Recent payments */}
           {recentPaid.length > 0 && (
             <View className="mb-6">

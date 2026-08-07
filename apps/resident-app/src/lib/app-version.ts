@@ -20,3 +20,10 @@ export const APP_BUILD = build;
 
 /** e.g. "v1.0.4 (10)" — build omitted if unknown. */
 export const APP_VERSION_LABEL = build ? `v${version} (${build})` : `v${version}`;
+
+/**
+ * User-visible product name. Read from the Expo config so `app.json`'s
+ * `expo.name` stays the single source of truth — the app label, the Razorpay
+ * checkout sheet and every in-app mention move together on a rebrand.
+ */
+export const APP_NAME = Constants.expoConfig?.name ?? 'One Community';

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Tappable } from './ui/Tappable';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
@@ -90,11 +91,11 @@ export function RecentEntriesCard() {
 
   return (
     <>
-      <Pressable
+      <Tappable
         onPress={handleOpen}
         accessibilityRole="button"
         accessibilityLabel={`Recent entries — ${recent.length} in last 24 hours${newCount ? `, ${newCount} new` : ''}, tap to view all`}
-        style={({ pressed }) => [styles.card, pressed && { opacity: 0.92 }]}
+        style={styles.card} pressedStyle={{ opacity: 0.92 }}
       >
         <View style={styles.avatarWrap}>
           {latest.photoUrl ? (
@@ -133,7 +134,7 @@ export function RecentEntriesCard() {
         <View style={styles.chevWrap}>
           <Ionicons name="chevron-up" size={18} color="#9CA3AF" />
         </View>
-      </Pressable>
+      </Tappable>
 
       <RecentEntriesSheet
         visible={sheetOpen}

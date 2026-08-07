@@ -1,8 +1,14 @@
 import { Platform, Linking } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import { api } from './api';
+
+/** Package name, needed as an extra on the Android settings intents below. */
+const applicationId =
+  (Constants.expoConfig as { android?: { package?: string } } | null)?.android?.package ??
+  'com.marzi.resident';
 
 /**
  * iOS action categories. The id MUST match the backend's `data.actionGroup`
@@ -289,8 +295,8 @@ export async function ensurePermission(): Promise<boolean> {
   // requesting .criticalAlert on an unentitled build risks the whole
   // authorization request failing — registerDeviceToken() swallows errors,
   // so that would silently kill iOS push registration for fresh installs.
-  // Re-enable here AND in NotificationPrimerModal once the entitlement is
-  // granted and declared under ios.entitlements.
+  // Re-enable here once the entitlement is granted and declared under
+  // ios.entitlements.
   const { status } = await Notifications.requestPermissionsAsync({
     ios: {
       allowAlert: true,
@@ -302,9 +308,35 @@ export async function ensurePermission(): Promise<boolean> {
   return status === 'granted';
 }
 
-/** Open the OS app settings so the user can flip notifications back on. */
-export function openNotificationSettings() {
+/**
+ * Open the OS notification settings for THIS app.
+ *
+ * `Linking.openSettings()` only reaches the generic App info page, leaving the
+ * user to hunt for "Notifications" themselves — the single most common place
+ * this flow lost people. On Android we fire the real
+ * ACTION_APP_NOTIFICATION_SETTINGS intent so they land on the toggle itself,
+ * and fall back to App info if the OEM does not honour it.
+ */
+export function openNotificationSettings(): Promise<void> {
+  if (Platform.OS === 'android') {
+    return Linking.sendIntent('android.settings.APP_NOTIFICATION_SETTINGS', [
+      { key: 'android.provider.extra.APP_PACKAGE', value: applicationId },
+    ]).catch(() => Linking.openSettings());
+  }
   return Linking.openSettings();
+}
+
+/**
+ * Open the OS settings page for a SINGLE Android channel (e.g. "Emergency
+ * Alerts"), where per-channel sound, vibration and DND override live. Falls
+ * back to the app-level notification settings.
+ */
+export function openChannelSettings(channelId: string): Promise<void> {
+  if (Platform.OS !== 'android') return openNotificationSettings();
+  return Linking.sendIntent('android.settings.CHANNEL_NOTIFICATION_SETTINGS', [
+    { key: 'android.provider.extra.APP_PACKAGE', value: applicationId },
+    { key: 'android.provider.extra.CHANNEL_ID', value: channelId },
+  ]).catch(() => openNotificationSettings());
 }
 
 /**
@@ -316,10 +348,8 @@ export function openNotificationSettings() {
 export async function registerDeviceToken(): Promise<void> {
   try {
     // Do NOT request permission here — only register when it is ALREADY
-    // granted. The one-shot OS prompt is owned by NotificationPrimerModal (a
-    // primed soft-prompt that dramatically lifts opt-in). Firing the bare OS
-    // dialog here at login would pre-empt and silently defeat that primer.
-    // The primer calls registerDeviceToken() itself once permission is granted.
+    // granted. The one-shot OS prompt is owned by NotificationOnboarding,
+    // which asks right after sign-in and calls this once the user allows.
     const { status } = await Notifications.getPermissionsAsync();
     if (status !== 'granted') return;
 
@@ -489,11 +519,42 @@ async function handleAction(actionIdentifier: string, data: PushData): Promise<v
  * Wire tap-routing for warm taps + cold start, AND action-button handling.
  * Returns the listener subscription.
  */
+/**
+ * Identifier of the last notification response we already acted on.
+ *
+ * `getLastNotificationResponseAsync()` does NOT mean "this launch was caused by
+ * a notification tap" — it returns the last response RECORDED ON THE DEVICE,
+ * and that value survives app restarts. Without this guard every cold start
+ * re-navigates to whatever notification the user last tapped, including
+ * launches from the home-screen icon or the Play Store listing.
+ */
+const HANDLED_RESPONSE_KEY = 'last_handled_notification_response';
+
+/** Remember a response so neither this launch nor any later one re-routes on it. */
+async function markResponseHandled(response: Notifications.NotificationResponse) {
+  try {
+    await AsyncStorage.setItem(
+      HANDLED_RESPONSE_KEY,
+      response.notification.request.identifier,
+    );
+  } catch {
+    /* non-fatal — worst case we re-route once */
+  }
+}
+
 export function setupTapRouting(): Notifications.Subscription {
-  // Cold start: the app was launched by tapping a notification (or an action).
+  // Cold start: only route if this response is one we have NOT already acted on.
   Notifications.getLastNotificationResponseAsync()
-    .then((response) => {
+    .then(async (response) => {
       if (!response) return;
+
+      const id = response.notification.request.identifier;
+      const alreadyHandled = await AsyncStorage.getItem(HANDLED_RESPONSE_KEY).catch(
+        () => null,
+      );
+      if (alreadyHandled === id) return; // stale replay of an old tap — ignore
+      await markResponseHandled(response);
+
       const data = extractData(response);
       if (!data) return;
       const action = response.actionIdentifier;
@@ -506,8 +567,10 @@ export function setupTapRouting(): Notifications.Subscription {
       /* ignore */
     });
 
-  // Warm taps while the app is running/backgrounded.
+  // Warm taps while the app is running/backgrounded. Recorded too, so the same
+  // tap isn't replayed as a "cold start" route on the next launch.
   return Notifications.addNotificationResponseReceivedListener((response) => {
+    void markResponseHandled(response);
     const data = extractData(response);
     if (!data) return;
     const action = response.actionIdentifier;

@@ -6,6 +6,21 @@ import { PriorityBadge } from '../src/components/task/PriorityBadge';
 const hoursAgo = (h: number) => new Date(Date.now() - h * 36e5).toISOString();
 
 describe('PriorityBadge', () => {
+  // The at-risk rule is a STRICT inequality (ageHrs > slaHours * 0.75), so the
+  // exact-boundary case below is only meaningful if `Date.now()` returns the
+  // same value when the fixture is built and when the component reads it.
+  // Against a live clock the few milliseconds in between push 18h to
+  // 18.000004h, which is > 18 — the test failed roughly one run in five.
+  // Freezing time makes the boundary exact and the assertion deterministic.
+  beforeEach(() => {
+    jest.useFakeTimers({ doNotFake: ['performance'] });
+    jest.setSystemTime(new Date('2026-01-15T12:00:00.000Z'));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   // ─── Null cases ────────────────────────────────────────────────────────────
 
   it('renders nothing for COMPLETED task', () => {

@@ -21,16 +21,25 @@ import {
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
 
-const CATEGORIES: { icon: IoniconName; label: string; bg: string }[] = [
-  { icon: 'volume-high-outline', label: 'Noise', bg: rd.crimsonSoft },
-  { icon: 'car-outline', label: 'Parking', bg: rd.crimsonSoft },
-  { icon: 'sparkles-outline', label: 'Cleanliness', bg: rd.greenSoft },
-  { icon: 'water-outline', label: 'Water', bg: '#EAF4FB' },
-  { icon: 'construct-outline', label: 'Maintenance', bg: rd.inkSoft },
-  { icon: 'people-outline', label: 'Neighbour', bg: rd.greenSoft },
-  { icon: 'business-outline', label: 'Community', bg: '#EAF4FB' },
-  { icon: 'paw-outline', label: 'Pets', bg: rd.amberSoft },
-  { icon: 'help-circle-outline', label: 'Other', bg: '#EAF4FB' },
+// Each category carries its own icon tint. Previously every glyph rendered in
+// near-black on top of a tinted circle, so the colour coding did nothing and
+// the grid read as flatter and duller than the Quick Actions grid on Home,
+// which tints glyph and circle together.
+const BLUE_SOFT = '#EAF4FB';
+const BLUE_INK = '#0284C7';
+const VIOLET_SOFT = '#EDE9FE';
+const VIOLET_INK = '#7C3AED';
+
+const CATEGORIES: { icon: IoniconName; label: string; bg: string; tint: string }[] = [
+  { icon: 'volume-high-outline', label: 'Noise', bg: rd.crimsonSoft, tint: rd.crimson },
+  { icon: 'car-outline', label: 'Parking', bg: rd.crimsonSoft, tint: rd.crimson },
+  { icon: 'sparkles-outline', label: 'Cleanliness', bg: rd.greenSoft, tint: rd.green },
+  { icon: 'water-outline', label: 'Water', bg: BLUE_SOFT, tint: BLUE_INK },
+  { icon: 'construct-outline', label: 'Maintenance', bg: VIOLET_SOFT, tint: VIOLET_INK },
+  { icon: 'people-outline', label: 'Neighbour', bg: rd.greenSoft, tint: rd.green },
+  { icon: 'business-outline', label: 'Community', bg: BLUE_SOFT, tint: BLUE_INK },
+  { icon: 'paw-outline', label: 'Pets', bg: rd.amberSoft, tint: rd.amberInk },
+  { icon: 'help-circle-outline', label: 'Other', bg: BLUE_SOFT, tint: BLUE_INK },
 ];
 
 function mapStatus(raw?: string): { tone: RdStatusTone; label: string } {
@@ -99,7 +108,7 @@ export default function ComplaintsScreen() {
               style={{ width: '47%', alignItems: 'center', paddingVertical: 20 }}
             >
               <IconCircle size={56} bg={cat.bg}>
-                <Ionicons name={cat.icon} size={26} color={rd.ink} />
+                <Ionicons name={cat.icon} size={26} color={cat.tint} />
               </IconCircle>
               <Text
                 style={{

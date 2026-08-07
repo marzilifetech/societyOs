@@ -1,4 +1,5 @@
-import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Tappable } from './ui/Tappable';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '@societyos/theme';
@@ -46,14 +47,15 @@ function ImmediateBlocker({ url, message }: { url: string; message: string | nul
           {message ??
             'A newer version of SocietyOS Staff is needed to continue. Please update.'}
         </Text>
-        <Pressable
+        <Tappable
           onPress={onUpdate}
           accessibilityRole="button"
           accessibilityLabel="Update SocietyOS Staff now"
-          style={({ pressed }) => [styles.button, pressed && { opacity: 0.85 }]}
+          style={styles.button}
+          pressedStyle={{ opacity: 0.85 }}
         >
           <Text style={styles.buttonText}>Update Now</Text>
-        </Pressable>
+        </Tappable>
         <Text style={styles.footer}>The app is locked until you update.</Text>
       </ScrollView>
     </SafeAreaView>

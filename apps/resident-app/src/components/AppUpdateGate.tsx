@@ -1,8 +1,10 @@
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Tappable } from './ui/Tappable';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppUpdate } from '../hooks/useAppUpdate';
 import { AppUpdateBanner } from './AppUpdateBanner';
+import { APP_NAME } from '../lib/app-version';
 
 const BRAND = '#821A52';
 
@@ -59,16 +61,16 @@ function ImmediateBlocker({ url, message }: { url: string; message: string | nul
         <Text style={styles.title}>Update Required</Text>
         <Text style={styles.body}>
           {message ??
-            'A newer version of SocietyOS is needed to keep your account safe. Please update to continue.'}
+            `A newer version of ${APP_NAME} is needed to keep your account safe. Please update to continue.`}
         </Text>
-        <Pressable
+        <Tappable
           onPress={onUpdate}
           accessibilityRole="button"
-          accessibilityLabel="Update SocietyOS now"
-          style={({ pressed }) => [styles.button, pressed && { opacity: 0.85 }]}
+          accessibilityLabel={`Update ${APP_NAME} now`}
+          style={styles.button} pressedStyle={{ opacity: 0.85 }}
         >
           <Text style={styles.buttonText}>Update Now</Text>
-        </Pressable>
+        </Tappable>
         <Text style={styles.footer}>
           You won&apos;t be able to use the app until you update.
         </Text>
