@@ -2,16 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import {
-  Stethoscope,
-  HeartPulse,
-  Siren,
-  CalendarDays,
-  Pill,
-  FileText,
-  ChevronRight,
-  LogOut,
-} from 'lucide-react';
+import { Stethoscope, HeartPulse, CalendarDays, Pill, FileText, LogOut } from 'lucide-react';
 import { useCareAuth } from '@/store/care-auth.store';
 import { BottomNav, CareBody } from '@/components/care/chrome';
 
@@ -57,34 +48,26 @@ export default function CareHome() {
   const router = useRouter();
   const user = useCareAuth((s) => s.user);
   const clearAuth = useCareAuth((s) => s.clearAuth);
-  const firstName = (user?.name || 'there').split(' ')[0];
   const pending = user && user.status && user.status !== 'ACTIVE';
 
   return (
     <>
-      <header className="bg-gradient-to-b from-primary-700 to-primary-800 text-white px-5 pt-12 pb-6">
-        <div className="flex items-start justify-between">
-          <div>
-            <p className="text-[13px] text-white/70">Welcome back</p>
-            <h1 className="text-[22px] font-semibold tracking-tight mt-0.5">{firstName}</h1>
-            {user?.societyName && (
-              <p className="text-[13px] text-white/70 mt-0.5">{user.societyName}</p>
-            )}
-          </div>
-          <button
-            onClick={() => {
-              clearAuth();
-              router.replace('/care/login');
-            }}
-            aria-label="Sign out"
-            className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 transition-colors"
-          >
-            <LogOut className="w-4 h-4" />
-          </button>
-        </div>
+      {/* Slim, generic top bar — no personal name/society, just the wordmark. */}
+      <header className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b border-gray-100 h-14 px-5 flex items-center justify-between">
+        <span className="text-[16px] font-semibold tracking-tight text-primary-800">Marzi Care</span>
+        <button
+          onClick={() => {
+            clearAuth();
+            router.replace('/care/login');
+          }}
+          aria-label="Sign out"
+          className="w-9 h-9 -mr-1.5 rounded-full flex items-center justify-center text-gray-500 hover:bg-gray-100 transition-colors"
+        >
+          <LogOut className="w-4 h-4" />
+        </button>
       </header>
 
-      <CareBody className="-mt-4">
+      <CareBody>
         {pending && (
           <div className="mb-4 p-3 rounded-xl bg-amber-50 border border-amber-200">
             <p className="text-[13px] font-medium text-amber-900">Awaiting approval</p>
@@ -94,21 +77,6 @@ export default function CareHome() {
             </p>
           </div>
         )}
-
-        {/* Emergency call-out */}
-        <Link
-          href="/care/sos"
-          className="flex items-center gap-3 p-4 rounded-2xl bg-red-600 text-white shadow-sm active:bg-red-700 transition-colors mb-4"
-        >
-          <div className="w-11 h-11 rounded-xl bg-white/15 flex items-center justify-center">
-            <Siren className="w-6 h-6" />
-          </div>
-          <div className="flex-1">
-            <p className="text-[15px] font-semibold">Emergency SOS</p>
-            <p className="text-[12px] text-white/80">Alert security & responders instantly</p>
-          </div>
-          <ChevronRight className="w-5 h-5 text-white/70" />
-        </Link>
 
         <div className="grid grid-cols-2 gap-3">
           {QUICK.map((q) => (
