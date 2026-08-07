@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
-import { ArrowLeft, Home, Stethoscope, HeartPulse } from 'lucide-react';
+import { ChevronLeft, Home, Stethoscope, HeartPulse } from 'lucide-react';
 import { cn } from '@/components/primitives';
 
 /**
@@ -29,9 +29,11 @@ export function CareHeader({
           <button
             onClick={() => router.back()}
             aria-label="Back"
-            className="-ml-1.5 w-9 h-9 rounded-full flex items-center justify-center text-gray-700 hover:bg-gray-100 active:bg-gray-200 transition-colors"
+            // Circular bordered chevron — mirrors the native app's back button
+            // (40px white circle, hairline border) so the portal feels identical.
+            className="-ml-1 w-10 h-10 shrink-0 rounded-full bg-white border border-black/[0.07] shadow-sm flex items-center justify-center text-gray-900 active:bg-gray-50 transition-colors"
           >
-            <ArrowLeft className="w-5 h-5" />
+            <ChevronLeft className="w-5 h-5" />
           </button>
         )}
         <div className="min-w-0 flex-1">
