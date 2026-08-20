@@ -416,6 +416,8 @@ model Society {
   updatedAt DateTime @updatedAt
 
   users                  User[]
+  adminRoles             AdminRole[]
+  societyAdmins          SocietyAdmin[]
   flats                  Flat[]
   staff                  StaffMember[]
   serviceRequests        ServiceRequest[]
@@ -494,7 +496,8 @@ model User {
   createdAt         DateTime   @default(now())
   updatedAt         DateTime   @updatedAt
 
-  society     Society      @relation(fields: [societyId], references: [id])
+  society     Society        @relation(fields: [societyId], references: [id])
+  adminGrants SocietyAdmin[] @relation("SocietyAdminUser")
   resident    Resident?
   staffMember StaffMember?
   sosAlerts   SosAlert[]
@@ -2217,4 +2220,73 @@ model RecurringNotification {
 
   @@index([societyId])
   @@map("recurring_notifications")
+}
+
+/// A named bundle of permissions.
+///
+/// Roles are DATA (unlike permissions, which are code — see
+/// src/common/permissions/permissions.ts): societies genuinely need their own
+/// combinations, and those must change without a deploy.
+///
+/// `societyId == null` marks a SYSTEM preset shared by every society. Presets
+/// are seeded and immutable; a society that wants a variant creates its own row
+/// rather than editing the shared one.
+model AdminRole {
+  id          String   @id @default(uuid())
+  /// null = system preset, available to all societies
+  societyId   String?
+  /// Stable identifier used by the API ('owner', 'manager', …). Display name
+  /// can change freely; this cannot.
+  key         String
+  name        String
+  description String?
+  /// Permission strings from PERMISSIONS. Validated in the service against the
+  /// code catalogue, so a role can never grant something no route enforces.
+  permissions String[] @default([])
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  society     Society?       @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  assignments SocietyAdmin[]
+
+  @@unique([societyId, key])
+  @@index([societyId])
+  @@map("admin_roles")
+}
+
+/// Grants ONE user admin access to ONE society, with a role and an optional
+/// block scope. This table is what makes a society support MULTIPLE admins:
+/// previously the only expression of "who administers this society" was
+/// `User.role`, which is a single coarse value per user.
+///
+/// Kept separate from User on purpose — the grant has its own lifecycle
+/// (who granted it, when, is it currently active) and deleting it must not
+/// delete the person.
+model SocietyAdmin {
+  id          String   @id @default(uuid())
+  userId      String
+  societyId   String
+  roleId      String
+  /// Empty = the whole society. Non-empty = only these blocks, enforced by
+  /// blockFilter()/getBlockList(). Mirrored onto User.managedBlocks so the 300+
+  /// existing @Roles routes keep scoping correctly without being rewritten.
+  blocks      String[] @default([])
+  /// Soft disable: revoke access without losing the audit trail of who had it.
+  isActive    Boolean  @default(true)
+  /// Audit: which user created this grant. Null for seeded/backfilled rows.
+  grantedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user    User      @relation("SocietyAdminUser", fields: [userId], references: [id], onDelete: Cascade)
+  society Society   @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  role    AdminRole @relation(fields: [roleId], references: [id])
+
+  /// One grant per user per society — a user has exactly one role here, and
+  /// re-granting updates rather than stacking.
+  @@unique([userId, societyId])
+  @@index([societyId])
+  @@index([userId])
+  @@map("society_admins")
 }

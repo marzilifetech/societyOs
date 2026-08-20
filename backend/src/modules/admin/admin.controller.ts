@@ -17,14 +17,17 @@ import {
 } from './dto/admin.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { RequirePermission } from '../../common/decorators/require-permission.decorator';
+import { PERMISSIONS } from '../../common/permissions/permissions';
 import { SocietyId } from '../../common/decorators/society.decorator';
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
 import { UserRole } from '@prisma/client';
 
 @ApiTags('admin')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
 @Controller('admin')
 export class AdminController {
@@ -34,16 +37,19 @@ export class AdminController {
   ) {}
 
   @Get('dashboard/stats')
+  @RequirePermission(PERMISSIONS.REPORTS_READ)
   getDashboardStats(@SocietyId() societyId: string) {
     return this.adminService.getDashboardStats(societyId);
   }
 
   @Get('dashboard/financial')
+  @RequirePermission(PERMISSIONS.BILLING_READ)
   getFinancialSnapshot(@SocietyId() societyId: string) {
     return this.adminService.getFinancialSnapshot(societyId);
   }
 
   @Get('activity')
+  @RequirePermission(PERMISSIONS.REPORTS_READ)
   getActivityFeed(@SocietyId() societyId: string) {
     return this.adminService.getActivityFeed(societyId);
   }
@@ -54,16 +60,19 @@ export class AdminController {
   }
 
   @Patch('society')
+  @RequirePermission(PERMISSIONS.SETTINGS_WRITE)
   updateSociety(@SocietyId() societyId: string, @Body() dto: UpdateSocietyDto) {
     return this.adminService.updateSociety(societyId, dto);
   }
 
   @Get('dashboard/complaints-by-category')
+  @RequirePermission(PERMISSIONS.COMPLAINTS_READ)
   getComplaintsByCategory(@SocietyId() societyId: string) {
     return this.adminService.getComplaintsByCategory(societyId);
   }
 
   @Get('dashboard/sr-trend')
+  @RequirePermission(PERMISSIONS.SERVICE_REQUESTS_READ)
   getServiceRequestTrend(
     @SocietyId() societyId: string,
     @Query('days') days?: string,
@@ -78,6 +87,7 @@ export class AdminController {
   // wired today; the param exists so we can extend to ?on=YYYY-MM-DD later
   // without breaking the contract.
   @Get('dashboard/birthdays')
+  @RequirePermission(PERMISSIONS.RESIDENTS_READ)
   getBirthdays(
     @SocietyId() societyId: string,
     @Query('on') on?: string,
@@ -86,21 +96,25 @@ export class AdminController {
   }
 
   @Get('residents/pending')
+  @RequirePermission(PERMISSIONS.RESIDENTS_READ)
   getPendingResidents(@SocietyId() societyId: string, @CurrentUser() user: JwtPayload) {
     return this.adminService.getPendingResidents(societyId, user.managedBlocks);
   }
 
   @Get('residents')
+  @RequirePermission(PERMISSIONS.RESIDENTS_READ)
   getResidents(@SocietyId() societyId: string, @CurrentUser() user: JwtPayload) {
     return this.adminService.getResidents(societyId, user.managedBlocks);
   }
 
   @Patch('residents/:id/approve')
+  @RequirePermission(PERMISSIONS.RESIDENTS_APPROVE)
   approveResident(@SocietyId() societyId: string, @Param('id') id: string) {
     return this.adminService.approveResident(societyId, id);
   }
 
   @Patch('residents/:id/reject')
+  @RequirePermission(PERMISSIONS.RESIDENTS_APPROVE)
   rejectResident(
     @SocietyId() societyId: string,
     @Param('id') id: string,
@@ -110,6 +124,7 @@ export class AdminController {
   }
 
   @Post('residents/:id/data-export')
+  @RequirePermission(PERMISSIONS.RESIDENTS_EXPORT)
   exportResidentData(
     @SocietyId() societyId: string,
     @Param('id') id: string,
@@ -127,28 +142,33 @@ export class AdminController {
   }
 
   @Get('staff')
+  @RequirePermission(PERMISSIONS.STAFF_READ)
   getStaff(@SocietyId() societyId: string) {
     return this.adminService.getStaff(societyId);
   }
 
   @Get('leaves')
+  @RequirePermission(PERMISSIONS.STAFF_READ)
   getLeaves(@SocietyId() societyId: string, @Query('status') status?: string) {
     return this.adminService.getLeaves(societyId, status);
   }
 
-@Patch('leaves/:id/approve')
+  @Patch('leaves/:id/approve')
+  @RequirePermission(PERMISSIONS.STAFF_LEAVES_APPROVE)
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   approveLeave(@Param('id') id: string, @SocietyId() societyId: string, @Body('adminNote') adminNote?: string) {
     return this.adminService.approveLeave(id, societyId, adminNote);
   }
 
   @Post('staff')
+  @RequirePermission(PERMISSIONS.STAFF_WRITE)
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   createStaff(@SocietyId() societyId: string, @Body() dto: CreateStaffDto) {
     return this.adminService.createStaff(societyId, dto);
   }
 
   @Get('staff/import/template')
+  @RequirePermission(PERMISSIONS.STAFF_WRITE)
   @Header('Content-Type', 'text/csv')
   @Header('Content-Disposition', 'attachment; filename="staff-import-template.csv"')
   staffImportTemplate(): StreamableFile {
@@ -157,6 +177,7 @@ export class AdminController {
   }
 
   @Post('staff/import/preview')
+  @RequirePermission(PERMISSIONS.STAFF_WRITE)
   previewStaffImport(
     @SocietyId() societyId: string,
     @Body('csv') csv: string,
@@ -165,6 +186,7 @@ export class AdminController {
   }
 
   @Post('staff/import')
+  @RequirePermission(PERMISSIONS.STAFF_WRITE)
   importStaff(
     @SocietyId() societyId: string,
     @Body('csv') csv: string,
@@ -192,18 +214,21 @@ export class AdminController {
   }
 
   @Patch('staff/:id/deactivate')
+  @RequirePermission(PERMISSIONS.STAFF_DEACTIVATE)
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   deactivateStaff(@Param('id') id: string, @SocietyId() societyId: string) {
     return this.adminService.deactivateStaff(id, societyId);
   }
 
   @Get('staff/:id')
+  @RequirePermission(PERMISSIONS.STAFF_READ)
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   getStaffDetail(@Param('id') id: string, @SocietyId() societyId: string) {
     return this.adminService.getStaffDetail(id, societyId);
   }
 
   @Get('staff/:id/attendance')
+  @RequirePermission(PERMISSIONS.STAFF_ATTENDANCE_READ)
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   getStaffAttendance(
     @SocietyId() societyId: string,
@@ -214,6 +239,7 @@ export class AdminController {
   }
 
   @Get('staff/:id/attendance/export')
+  @RequirePermission(PERMISSIONS.STAFF_ATTENDANCE_READ)
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @Header('Content-Type', 'text/csv')
   @Header('Content-Disposition', 'attachment; filename="attendance.csv"')
@@ -227,6 +253,7 @@ export class AdminController {
   }
 
   @Get('staff/:id/attendance/summary')
+  @RequirePermission(PERMISSIONS.STAFF_ATTENDANCE_READ)
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   getStaffAttendanceSummary(
     @SocietyId() societyId: string,
@@ -237,6 +264,7 @@ export class AdminController {
   }
 
   @Patch('staff/:id')
+  @RequirePermission(PERMISSIONS.STAFF_WRITE)
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   updateStaff(
     @SocietyId() societyId: string,
@@ -257,12 +285,14 @@ export class AdminController {
   }
 
   @Get('staff/:id/documents')
+  @RequirePermission(PERMISSIONS.STAFF_READ)
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   getStaffDocuments(@SocietyId() societyId: string, @Param('id') id: string) {
     return this.adminService.getStaffDocuments(societyId, id);
   }
 
   @Post('staff/:id/documents')
+  @RequirePermission(PERMISSIONS.STAFF_WRITE)
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   addStaffDocument(
     @SocietyId() societyId: string,
@@ -273,6 +303,7 @@ export class AdminController {
   }
 
   @Delete('staff/:id/documents/:docId')
+  @RequirePermission(PERMISSIONS.STAFF_WRITE)
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   deleteStaffDocument(
     @SocietyId() societyId: string,
@@ -283,6 +314,7 @@ export class AdminController {
   }
 
   @Patch('staff/:id/documents/:docId/verify')
+  @RequirePermission(PERMISSIONS.STAFF_WRITE)
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   verifyStaffDocument(
     @SocietyId() societyId: string,
@@ -302,6 +334,7 @@ export class AdminController {
   // filter lists. Admin-web should call /review; /verify is retained until
   // the next breaking-change window.
   @Patch('staff/:id/documents/:docId/review')
+  @RequirePermission(PERMISSIONS.STAFF_WRITE)
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   reviewStaffDocument(
     @SocietyId() societyId: string,
@@ -313,24 +346,28 @@ export class AdminController {
   }
 
   @Patch('staff/:id/dismiss')
+  @RequirePermission(PERMISSIONS.STAFF_DEACTIVATE)
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   dismissStaff(@SocietyId() societyId: string, @Param('id') id: string) {
     return this.adminService.dismissStaff(societyId, id);
   }
 
   @Get('staff/:id/salary-slips')
+  @RequirePermission(PERMISSIONS.STAFF_READ, PERMISSIONS.BILLING_READ)
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   getStaffSalarySlips(@SocietyId() societyId: string, @Param('id') id: string) {
     return this.adminService.getStaffSalarySlips(societyId, id);
   }
 
   @Get('staff/:id/loans')
+  @RequirePermission(PERMISSIONS.STAFF_READ, PERMISSIONS.BILLING_READ)
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   getStaffLoans(@SocietyId() societyId: string, @Param('id') id: string) {
     return this.adminService.getStaffLoans(societyId, id);
   }
 
   @Post('staff/:id/loans')
+  @RequirePermission(PERMISSIONS.STAFF_WRITE, PERMISSIONS.BILLING_WRITE)
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   createStaffLoan(
     @SocietyId() societyId: string,
@@ -341,6 +378,7 @@ export class AdminController {
   }
 
   @Get('residents/:id/documents')
+  @RequirePermission(PERMISSIONS.RESIDENTS_READ)
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   getResidentDocuments(@SocietyId() societyId: string, @Param('id') id: string) {
     return this.adminService.getResidentDocuments(societyId, id);
@@ -350,6 +388,7 @@ export class AdminController {
   // the ad-blocker rationale. Both routes are wired to the same service
   // method; admin-web targets /review going forward.
   @Patch('residents/:id/documents/review')
+  @RequirePermission(PERMISSIONS.RESIDENTS_APPROVE)
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   reviewResidentDocuments(
     @SocietyId() societyId: string,
@@ -360,6 +399,7 @@ export class AdminController {
   }
 
   @Patch('residents/:id/documents/verify')
+  @RequirePermission(PERMISSIONS.RESIDENTS_APPROVE)
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   verifyResidentDocuments(
     @SocietyId() societyId: string,
@@ -370,11 +410,13 @@ export class AdminController {
   }
 
   @Patch('leaves/:id/reject')
+  @RequirePermission(PERMISSIONS.STAFF_LEAVES_APPROVE)
   rejectLeave(@Param('id') id: string, @SocietyId() societyId: string, @Body('adminNote') adminNote?: string) {
     return this.adminService.rejectLeave(id, societyId, adminNote);
   }
 
   @Get('visitors')
+  @RequirePermission(PERMISSIONS.VISITORS_READ)
   getVisitors(
     @SocietyId() societyId: string,
     @Query('status') status?: string,
@@ -384,6 +426,7 @@ export class AdminController {
   }
 
   @Patch('visitors/:id/approve')
+  @RequirePermission(PERMISSIONS.VISITORS_WRITE)
   approveVisitor(
     @Param('id') id: string,
     @SocietyId() societyId: string,
@@ -393,6 +436,7 @@ export class AdminController {
   }
 
   @Patch('visitors/:id/reject')
+  @RequirePermission(PERMISSIONS.VISITORS_WRITE)
   rejectVisitor(
     @Param('id') id: string,
     @SocietyId() societyId: string,
@@ -401,11 +445,13 @@ export class AdminController {
   }
 
   @Get('complaints')
+  @RequirePermission(PERMISSIONS.COMPLAINTS_READ)
   getComplaints(@SocietyId() societyId: string, @Query('status') status?: string) {
     return this.adminService.getComplaints(societyId, status);
   }
 
   @Patch('complaints/:id/status')
+  @RequirePermission(PERMISSIONS.COMPLAINTS_ASSIGN)
   updateComplaintStatus(
     @SocietyId() societyId: string,
     @Param('id') id: string,
@@ -416,6 +462,7 @@ export class AdminController {
   }
 
   @Patch('complaints/:id/assign')
+  @RequirePermission(PERMISSIONS.COMPLAINTS_ASSIGN)
   assignComplaint(
     @SocietyId() societyId: string,
     @Param('id') id: string,
@@ -426,6 +473,7 @@ export class AdminController {
   }
 
   @Get('maintenance/bills')
+  @RequirePermission(PERMISSIONS.BILLING_READ)
   getMaintenanceBills(
     @SocietyId() societyId: string,
     @Query('year') year?: string,
@@ -439,6 +487,7 @@ export class AdminController {
   }
 
   @Get('maintenance/reports')
+  @RequirePermission(PERMISSIONS.BILLING_READ)
   getMaintenanceReport(
     @SocietyId() societyId: string,
     @Query('year') year?: string,
@@ -447,6 +496,7 @@ export class AdminController {
   }
 
   @Get('maintenance/reports/export')
+  @RequirePermission(PERMISSIONS.BILLING_READ)
   @Header('Content-Type', 'text/csv')
   @Header('Content-Disposition', 'attachment; filename="financial-report.csv"')
   async exportMaintenanceReport(
@@ -463,16 +513,19 @@ export class AdminController {
   }
 
   @Post('maintenance/bills/:id/remind')
+  @RequirePermission(PERMISSIONS.BILLING_WRITE)
   sendPaymentReminder(@Param('id') id: string, @SocietyId() societyId: string) {
     return this.adminService.sendPaymentReminder(id, societyId);
   }
 
   @Patch('maintenance/bills/:id/mark-failed')
+  @RequirePermission(PERMISSIONS.BILLING_WRITE)
   markBillFailed(@Param('id') id: string) {
     return this.adminService.markBillFailed(id);
   }
 
   @Post('maintenance/bills/generate')
+  @RequirePermission(PERMISSIONS.BILLING_WRITE)
   generateBills(
     @SocietyId() societyId: string,
     @Body('year') year: number,
@@ -482,21 +535,25 @@ export class AdminController {
   }
 
   @Get('events')
+  @RequirePermission(PERMISSIONS.EVENTS_MANAGE)
   getAdminEvents(@SocietyId() societyId: string) {
     return this.adminService.getAdminEvents(societyId);
   }
 
   @Post('events')
+  @RequirePermission(PERMISSIONS.EVENTS_MANAGE)
   createEvent(@SocietyId() societyId: string, @Body() dto: any) {
     return this.adminService.createEvent(societyId, dto);
   }
 
   @Patch('events/:id/cancel')
+  @RequirePermission(PERMISSIONS.EVENTS_MANAGE)
   cancelEventAdmin(@SocietyId() societyId: string, @Param('id') id: string) {
     return this.adminService.cancelEventAdmin(societyId, id);
   }
 
   @Patch('events/:id')
+  @RequirePermission(PERMISSIONS.EVENTS_MANAGE)
   updateEventAdmin(
     @SocietyId() societyId: string,
     @Param('id') id: string,
@@ -506,16 +563,19 @@ export class AdminController {
   }
 
   @Delete('events/:id')
+  @RequirePermission(PERMISSIONS.EVENTS_MANAGE)
   deleteEventAdmin(@SocietyId() societyId: string, @Param('id') id: string) {
     return this.adminService.deleteEventAdmin(societyId, id);
   }
 
   @Get('events/:id/attendees')
+  @RequirePermission(PERMISSIONS.EVENTS_MANAGE)
   getEventAttendees(@Param('id') id: string) {
     return this.adminService.getEventAttendees(id);
   }
 
   @Post('events/:id/notify')
+  @RequirePermission(PERMISSIONS.EVENTS_MANAGE)
   notifyEventRegistrants(
     @SocietyId() societyId: string,
     @Param('id') id: string,
@@ -525,11 +585,13 @@ export class AdminController {
   }
 
   @Get('events/:id/feedback')
+  @RequirePermission(PERMISSIONS.EVENTS_MANAGE)
   getEventFeedback(@SocietyId() societyId: string, @Param('id') id: string) {
     return this.adminService.getEventFeedback(societyId, id);
   }
 
   @Post('holidays')
+  @RequirePermission(PERMISSIONS.SETTINGS_WRITE)
   createHoliday(
     @SocietyId() societyId: string,
     @Body() dto: { date: string; name: string; isOptional?: boolean },
@@ -545,6 +607,7 @@ export class AdminController {
   // ─── M6: Push Notifications ────────────────────────────────────────────────
 
   @Post('notifications/push')
+  @RequirePermission(PERMISSIONS.NOTICES_PUBLISH)
   sendPushNotification(
     @SocietyId() societyId: string,
     @Body() dto: SendPushNotificationDto,
@@ -555,16 +618,19 @@ export class AdminController {
   // ─── M12: SOS Recipients ──────────────────────────────────────────────────
 
   @Get('sos/recipients')
+  @RequirePermission(PERMISSIONS.SOS_READ)
   getSosRecipients(@SocietyId() societyId: string) {
     return this.adminService.getSosRecipients(societyId);
   }
 
   @Post('sos/recipients')
+  @RequirePermission(PERMISSIONS.SOS_RESPOND)
   addSosRecipient(@SocietyId() societyId: string, @Body() dto: AddSosRecipientDto) {
     return this.adminService.addSosRecipient(societyId, dto);
   }
 
   @Delete('sos/recipients/:id')
+  @RequirePermission(PERMISSIONS.SOS_RESPOND)
   removeSosRecipient(@SocietyId() societyId: string, @Param('id') id: string) {
     return this.adminService.removeSosRecipient(societyId, id);
   }
@@ -572,6 +638,7 @@ export class AdminController {
   // ─── M13: Residents Export + Bulk Message ─────────────────────────────────
 
   @Get('residents/export')
+  @RequirePermission(PERMISSIONS.RESIDENTS_EXPORT)
   @Header('Content-Type', 'text/csv')
   @Header('Content-Disposition', 'attachment; filename="residents.csv"')
   async exportResidents(@SocietyId() societyId: string): Promise<StreamableFile> {
@@ -580,6 +647,7 @@ export class AdminController {
   }
 
   @Post('residents/bulk-message')
+  @RequirePermission(PERMISSIONS.NOTICES_PUBLISH)
   bulkMessageResidents(
     @SocietyId() societyId: string,
     @Body() dto: { residentIds: string[]; message: string; channel: 'PUSH' | 'SMS' },
@@ -588,6 +656,7 @@ export class AdminController {
   }
 
   @Post('residents')
+  @RequirePermission(PERMISSIONS.RESIDENTS_WRITE)
   createResident(
     @SocietyId() societyId: string,
     @Body() dto: { name: string; email?: string; phone: string; flatId: string; type: 'OWNER' | 'TENANT' },
@@ -596,6 +665,7 @@ export class AdminController {
   }
 
   @Post('residents/import')
+  @RequirePermission(PERMISSIONS.RESIDENTS_WRITE)
   importResidents(
     @SocietyId() societyId: string,
     @Body('csv') csv: string,
@@ -605,6 +675,7 @@ export class AdminController {
 
 
   @Post('residents/import/preview')
+  @RequirePermission(PERMISSIONS.RESIDENTS_WRITE)
   previewResidentsImport(
     @SocietyId() societyId: string,
     @Body('csv') csv: string,
@@ -613,6 +684,7 @@ export class AdminController {
   }
 
   @Get('residents/import/template')
+  @RequirePermission(PERMISSIONS.RESIDENTS_WRITE)
   @Header('Content-Type', 'text/csv')
   @Header('Content-Disposition', 'attachment; filename="residents-import-template.csv"')
   residentsImportTemplate(): StreamableFile {
@@ -622,16 +694,19 @@ export class AdminController {
 
 
   @Get('residents/:id')
+  @RequirePermission(PERMISSIONS.RESIDENTS_READ)
   getResidentDetail(@SocietyId() societyId: string, @Param('id') id: string) {
     return this.adminService.getResidentDetail(societyId, id);
   }
 
   @Patch('residents/:id/dismiss')
+  @RequirePermission(PERMISSIONS.RESIDENTS_WRITE)
   dismissResident(@SocietyId() societyId: string, @Param('id') id: string) {
     return this.adminService.dismissResident(id, societyId);
   }
 
   @Patch('residents/:id')
+  @RequirePermission(PERMISSIONS.RESIDENTS_WRITE)
   updateResident(
     @SocietyId() societyId: string,
     @Param('id') id: string,
@@ -645,6 +720,7 @@ export class AdminController {
   }
 
   @Delete('residents/:id')
+  @RequirePermission(PERMISSIONS.RESIDENTS_WRITE)
   deleteResident(
     @SocietyId() societyId: string,
     @Param('id') id: string,
@@ -654,6 +730,7 @@ export class AdminController {
   }
 
   @Patch('maintenance/bills/:id/status')
+  @RequirePermission(PERMISSIONS.BILLING_WRITE)
   updateBillStatus(
     @SocietyId() societyId: string,
     @Param('id') id: string,
@@ -774,6 +851,7 @@ export class AdminController {
   }
 
   @Get('flats/export')
+  @RequirePermission(PERMISSIONS.SETTINGS_WRITE)
   @Header('Content-Type', 'text/csv')
   @Header('Content-Disposition', 'attachment; filename="flats.csv"')
   async exportFlats(@SocietyId() societyId: string): Promise<StreamableFile> {
@@ -782,6 +860,7 @@ export class AdminController {
   }
 
   @Get('flats/import/template')
+  @RequirePermission(PERMISSIONS.SETTINGS_WRITE)
   @Header('Content-Type', 'text/csv')
   @Header('Content-Disposition', 'attachment; filename="flats-import-template.csv"')
   flatsImportTemplate(): StreamableFile {
@@ -790,6 +869,7 @@ export class AdminController {
   }
 
   @Post('flats/import/preview')
+  @RequirePermission(PERMISSIONS.SETTINGS_WRITE)
   previewFlatsImport(
     @SocietyId() societyId: string,
     @Body('csv') csv: string,
@@ -798,6 +878,7 @@ export class AdminController {
   }
 
   @Post('flats/import')
+  @RequirePermission(PERMISSIONS.SETTINGS_WRITE)
   importFlats(
     @SocietyId() societyId: string,
     @Body('csv') csv: string,
@@ -811,6 +892,7 @@ export class AdminController {
   }
 
   @Post('flats')
+  @RequirePermission(PERMISSIONS.SETTINGS_WRITE)
   createFlat(
     @SocietyId() societyId: string,
     @Body() dto: { block: string; floor: number; number: string; areaSqft?: number },
@@ -819,6 +901,7 @@ export class AdminController {
   }
 
   @Patch('flats/:id')
+  @RequirePermission(PERMISSIONS.SETTINGS_WRITE)
   updateFlat(
     @SocietyId() societyId: string,
     @Param('id') id: string,
@@ -828,6 +911,7 @@ export class AdminController {
   }
 
   @Delete('flats/:id')
+  @RequirePermission(PERMISSIONS.SETTINGS_WRITE)
   deleteFlat(@SocietyId() societyId: string, @Param('id') id: string) {
     return this.adminService.deleteFlat(societyId, id);
   }
@@ -865,6 +949,7 @@ export class AdminController {
   // ─── Service Requests (admin) ─────────────────────────────────────────────
 
   @Post('service-requests')
+  @RequirePermission(PERMISSIONS.SERVICE_REQUESTS_ASSIGN)
   adminCreateServiceRequest(
     @SocietyId() societyId: string,
     @Body() dto: AdminCreateServiceRequestDto,
@@ -873,6 +958,7 @@ export class AdminController {
   }
 
   @Patch('service-requests/:id')
+  @RequirePermission(PERMISSIONS.SERVICE_REQUESTS_ASSIGN)
   adminUpdateServiceRequest(
     @Param('id') id: string,
     @SocietyId() societyId: string,
@@ -885,6 +971,7 @@ export class AdminController {
   }
 
   @Delete('service-requests/:id')
+  @RequirePermission(PERMISSIONS.SERVICE_REQUESTS_ASSIGN)
   adminDeleteServiceRequest(
     @Param('id') id: string,
     @SocietyId() societyId: string,
@@ -909,6 +996,7 @@ export class AdminController {
   // ─── Infrastructure (CRUD + bulk import) ─────────────────────────────────
 
   @Post('infrastructure')
+  @RequirePermission(PERMISSIONS.SETTINGS_WRITE)
   createInfrastructureItem(
     @SocietyId() societyId: string,
     @Body() dto: { name: string; type: string; status?: string },
@@ -917,6 +1005,7 @@ export class AdminController {
   }
 
   @Get('infrastructure/export')
+  @RequirePermission(PERMISSIONS.SETTINGS_WRITE)
   @Header('Content-Type', 'text/csv')
   @Header('Content-Disposition', 'attachment; filename="infrastructure.csv"')
   async exportInfrastructure(@SocietyId() societyId: string): Promise<StreamableFile> {
@@ -925,6 +1014,7 @@ export class AdminController {
   }
 
   @Get('infrastructure/import/template')
+  @RequirePermission(PERMISSIONS.SETTINGS_WRITE)
   @Header('Content-Type', 'text/csv')
   @Header('Content-Disposition', 'attachment; filename="infrastructure-import-template.csv"')
   infrastructureImportTemplate(): StreamableFile {
@@ -933,6 +1023,7 @@ export class AdminController {
   }
 
   @Post('infrastructure/import/preview')
+  @RequirePermission(PERMISSIONS.SETTINGS_WRITE)
   previewInfrastructureImport(
     @SocietyId() societyId: string,
     @Body('csv') csv: string,
@@ -941,6 +1032,7 @@ export class AdminController {
   }
 
   @Post('infrastructure/import')
+  @RequirePermission(PERMISSIONS.SETTINGS_WRITE)
   importInfrastructure(
     @SocietyId() societyId: string,
     @Body('csv') csv: string,

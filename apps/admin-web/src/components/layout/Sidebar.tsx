@@ -17,25 +17,34 @@ import { SocietySwitcher } from '@/components/layout/SocietySwitcher';
 import { useAuthStore } from '@/store/auth.store';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/cn';
+import { useAccess } from '@/lib/useAccess';
+import { PERMISSIONS, type Permission } from '@/lib/permissions';
 
-type Item = { href: string; icon: LucideIcon; label: string };
+/**
+ * `permission` gates visibility. An item WITHOUT one is considered universally
+ * visible to any admin — used for the dashboard landing page and for screens
+ * that have not been mapped to a permission yet. That default is deliberate:
+ * a missing mapping should degrade to "visible but server-enforced", never to
+ * "invisible", or rolling this out would silently hide half the product.
+ */
+type Item = { href: string; icon: LucideIcon; label: string; permission?: Permission };
 
 const NAV_ITEMS: Item[] = [
   { href: '/dashboard',         icon: LayoutDashboard,      label: 'Dashboard' },
-  { href: '/residents',         icon: Users,                label: 'Residents' },
+  { href: '/residents',         icon: Users,                label: 'Residents', permission: PERMISSIONS.RESIDENTS_READ  },
   { href: '/flats',             icon: Building2,            label: 'Flats & Blocks' },
-  { href: '/staff',                icon: UserCircle,        label: 'Staff' },
-  { href: '/staff/leaderboard',    icon: Trophy,            label: 'Leaderboard' },
-  { href: '/staff/leaves',         icon: CalendarOff,       label: 'Staff Leaves' },
-  { href: '/staff/shift-timings',  icon: Clock,             label: 'Shift Timings' },
-  { href: '/visitors',          icon: UserCheck,            label: 'Visitors' },
-  { href: '/service-requests',  icon: Wrench,               label: 'Service Requests' },
+  { href: '/staff',                icon: UserCircle,        label: 'Staff', permission: PERMISSIONS.STAFF_READ  },
+  { href: '/staff/leaderboard',    icon: Trophy,            label: 'Leaderboard', permission: PERMISSIONS.STAFF_READ  },
+  { href: '/staff/leaves',         icon: CalendarOff,       label: 'Staff Leaves', permission: PERMISSIONS.STAFF_LEAVES_APPROVE  },
+  { href: '/staff/shift-timings',  icon: Clock,             label: 'Shift Timings', permission: PERMISSIONS.STAFF_WRITE  },
+  { href: '/visitors',          icon: UserCheck,            label: 'Visitors', permission: PERMISSIONS.VISITORS_READ  },
+  { href: '/service-requests',  icon: Wrench,               label: 'Service Requests', permission: PERMISSIONS.SERVICE_REQUESTS_READ  },
   { href: '/document-requests', icon: FileText,             label: 'Document Requests' },
-  { href: '/complaints',        icon: MessageSquareWarning, label: 'Complaints' },
-  { href: '/maintenance',       icon: Receipt,              label: 'Maintenance' },
-  { href: '/notices',           icon: Megaphone,            label: 'Notices' },
-  { href: '/events',            icon: CalendarDays,         label: 'Events' },
-  { href: '/sos',               icon: Siren,                label: 'SOS Alerts' },
+  { href: '/complaints',        icon: MessageSquareWarning, label: 'Complaints', permission: PERMISSIONS.COMPLAINTS_READ  },
+  { href: '/maintenance',       icon: Receipt,              label: 'Maintenance', permission: PERMISSIONS.BILLING_READ  },
+  { href: '/notices',           icon: Megaphone,            label: 'Notices', permission: PERMISSIONS.NOTICES_PUBLISH  },
+  { href: '/events',            icon: CalendarDays,         label: 'Events', permission: PERMISSIONS.EVENTS_MANAGE  },
+  { href: '/sos',               icon: Siren,                label: 'SOS Alerts', permission: PERMISSIONS.SOS_READ  },
 ];
 
 const NAV_SECTIONS: { label: string; items: Item[] }[] = [
@@ -81,6 +90,7 @@ const NAV_SECTIONS: { label: string; items: Item[] }[] = [
       { href: '/societies',       icon: Building2,        label: 'Societies' },
       { href: '/building-admins', icon: UserCog,          label: 'Admins' },
       { href: '/audit',           icon: ScrollText,       label: 'Audit Log' },
+      { href: '/settings/admins', icon: UserCog, label: 'Admins & Roles', permission: PERMISSIONS.ADMINS_MANAGE },
       { href: '/settings',        icon: Settings,         label: 'Settings' },
     ],
   },
@@ -119,6 +129,7 @@ function NavItem({ href, icon: Icon, label, badge }: Item & { badge?: number }) 
 
 export function Sidebar() {
   const { user, clearAuth } = useAuthStore();
+  const { can, isBlockScoped, blocks, access } = useAccess();
   const initials = user?.name?.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase() ?? 'A';
 
   // SUPER_ADMIN sits in the Platform society which has no residents; polling
@@ -148,9 +159,29 @@ export function Sidebar() {
 
       <SocietySwitcher />
 
+      {/* Standing reminder that this account does not see the whole society.
+          Without it, a block-scoped admin reads partial lists as missing data
+          and reports it as a bug. */}
+      {isBlockScoped && (
+        <div className="mx-3 mt-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+            Limited to
+          </p>
+          <p className="text-xs text-amber-900 mt-0.5">
+            {blocks.length === 1 ? 'Block ' : 'Blocks '}
+            {blocks.join(', ')}
+          </p>
+        </div>
+      )}
+      {access?.roleName && !access.isSuperAdmin && (
+        <p className="px-5 pt-2 text-[10px] uppercase tracking-widest text-gray-400">
+          {access.roleName}
+        </p>
+      )}
+
       {/* Nav */}
       <nav className="flex-1 px-3 py-3 overflow-y-auto space-y-0.5">
-        {NAV_ITEMS.map((item) => (
+        {NAV_ITEMS.filter((item) => !item.permission || can(item.permission)).map((item) => (
           <NavItem
             key={item.href}
             {...item}
@@ -160,7 +191,9 @@ export function Sidebar() {
 
         {NAV_SECTIONS.map((section) => {
           const items = section.items.filter(
-            (item) => !SUPER_ADMIN_ONLY.has(item.href) || user?.role === 'SUPER_ADMIN',
+            (item) =>
+              (!SUPER_ADMIN_ONLY.has(item.href) || user?.role === 'SUPER_ADMIN') &&
+              (!item.permission || can(item.permission)),
           );
           if (items.length === 0) return null;
           return (
