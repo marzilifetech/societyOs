@@ -27,6 +27,7 @@ import { NotificationModule } from './modules/notification/notification.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { DevModule } from './modules/dev/dev.module';
 import { AdminModule } from './modules/admin/admin.module';
+import { AdminAccessModule } from './modules/admin-access/admin-access.module';
 import { StaffCommunityModule } from './modules/staff-community/staff-community.module';
 import { HelpRequestModule } from './modules/help-request/help-request.module';
 import { TravelPauseModule } from './modules/travel-request/travel-pause.module';
@@ -133,6 +134,7 @@ tryAdd('./modules/compliance/compliance.module', 'ComplianceModule');
     NotificationsModule,
     DevModule,
     AdminModule,
+    AdminAccessModule,
     StaffCommunityModule,
     HelpRequestModule,
     TravelPauseModule,

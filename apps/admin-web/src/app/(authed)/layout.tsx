@@ -1,4 +1,5 @@
 import { Sidebar } from '@/components/layout/Sidebar';
+import { AccessProvider } from '@/lib/useAccess';
 import { TopBar } from '@/components/layout/TopBar';
 import { OfflineBanner } from '@/components/ui/OfflineBanner';
 import { CrossTabSocietySync } from '@/components/layout/CrossTabSocietySync';
@@ -19,6 +20,10 @@ export const dynamic = 'force-dynamic';
 export default function AuthedLayout({ children }: { children: React.ReactNode }) {
   return (
     <AuthGuard>
+      {/* INSIDE AuthGuard on purpose: the access query needs a session, and
+          mounting it above the guard fires a 401 on every unauthenticated
+          paint. */}
+      <AccessProvider>
       <div className="flex min-h-screen bg-gray-50">
         {/* OfflineBanner renders nothing when online; absolutely-positioned at
             top when offline so users get honest network feedback instead of
@@ -34,6 +39,7 @@ export default function AuthedLayout({ children }: { children: React.ReactNode }
           {children}
         </main>
       </div>
+      </AccessProvider>
     </AuthGuard>
   );
 }

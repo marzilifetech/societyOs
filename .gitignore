@@ -79,3 +79,7 @@ mock-data/
 
 # Local secrets — never commit (DigitalOcean token etc.)
 tokens.json
+
+# Redis local snapshot (created by a locally-running redis-server)
+dump.rdb
+*.rdb
