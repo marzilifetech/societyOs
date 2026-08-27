@@ -5,7 +5,9 @@ interface AdminUser {
   id: string;
   name: string;
   phone: string;
-  role: 'ADMIN' | 'SUPER_ADMIN';
+  // BUILDING_ADMIN is a block-scoped society admin and belongs in the console
+  // like any other — see CONSOLE_ROLES in app/login/page.tsx.
+  role: 'ADMIN' | 'BUILDING_ADMIN' | 'SUPER_ADMIN';
   societyId: string;
 }
 

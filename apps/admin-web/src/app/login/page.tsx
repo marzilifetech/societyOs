@@ -23,6 +23,17 @@ type Step = 'phone' | 'otp' | '2fa';
 
 const SOCIETY_ID = process.env.NEXT_PUBLIC_SOCIETY_ID ?? '';
 
+/**
+ * Roles allowed into the admin console.
+ *
+ * BUILDING_ADMIN belongs here and was missing: granting an admin any block
+ * scope sets User.role to BUILDING_ADMIN (see AdminAccessService.upsertAdmin),
+ * so every block-scoped admin verified their OTP successfully and was then
+ * thrown straight back out with "Access denied" — a real admin, told the
+ * console was not for them, with no way to self-diagnose.
+ */
+const CONSOLE_ROLES = new Set(['ADMIN', 'BUILDING_ADMIN', 'SUPER_ADMIN']);
+
 type PendingAdminTotp = {
   phoneE164: string;
   otp: string;
@@ -142,7 +153,7 @@ function LoginPageInner() {
         return;
       }
 
-      if (res.user.role !== 'ADMIN' && res.user.role !== 'SUPER_ADMIN') {
+      if (!CONSOLE_ROLES.has(res.user.role)) {
         throw new Error('Access denied — this console is for society admins only.');
       }
 
@@ -183,7 +194,7 @@ function LoginPageInner() {
         setError('Invalid authenticator code. Try again.');
         return;
       }
-      if (res.user.role !== 'ADMIN' && res.user.role !== 'SUPER_ADMIN') {
+      if (!CONSOLE_ROLES.has(res.user.role)) {
         throw new Error('Access denied — this console is for society admins only.');
       }
       setAuth(

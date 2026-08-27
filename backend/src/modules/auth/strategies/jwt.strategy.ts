@@ -36,7 +36,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     }
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
-      include: { society: { select: { id: true, status: true } } },
+      include: {
+        society: { select: { id: true, status: true } },
+        // Whether they occupy a flat, independent of User.role. See the
+        // `isResident` note below.
+        resident: { select: { id: true, deletedAt: true } },
+      },
     });
     if (!user) {
       // TODO (Phase 2): when payload has external claims (tid/tenant_name),
@@ -76,9 +81,26 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     // DEMOTING a user, or narrowing `managedBlocks`, left their existing token
     // holding the elevated role until it expired. Reading the row we have
     // already fetched closes both directions at zero extra cost.
+    // Living in a flat is a FACT, not a slot in a single-valued enum.
+    //
+    // User.role holds exactly one value, so promoting a resident to admin
+    // overwrote RESIDENT with ADMIN and silently revoked their access to all
+    // 117 @Roles(UserRole.RESIDENT) routes — they could no longer open their
+    // own home screen, raise a complaint, or pre-approve a visitor. Committee
+    // members are almost always residents too, so this hit precisely the
+    // people most likely to be made admins.
+    //
+    // Deriving it from the Resident row instead means the two capabilities
+    // stop competing for one field. This is a narrow widening: it admits ONLY
+    // users who genuinely occupy a flat, so an admin who is not a resident is
+    // still refused, exactly as before. Excludes soft-deleted rows — a
+    // moved-out resident is not a current one.
+    const isResident = !!user.resident && !user.resident.deletedAt;
+
     return {
       ...payload,
       role: user.role,
+      isResident,
       societyId: user.societyId ?? payload.societyId,
       managedBlocks: (user as any).managedBlocks ?? (payload as any).managedBlocks ?? [],
     };
