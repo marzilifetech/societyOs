@@ -202,22 +202,27 @@ export class ApiClient {
     // "your OTP is wrong" or "your account is suspended" — surface the
     // server message inline; do NOT fire onUnauthorized (which would
     // hard-reload /login and lose the entered phone/OTP).
-    // A 403 is normally terminal — but NOT on this backend, because the role
-    // used for authorisation comes from the JWT CLAIM, not the database.
-    // `JwtStrategy.validate()` loads the user (to check status/society) and
-    // then returns `payload`, so `RolesGuard` compares against whatever role
-    // was baked in at login. When an account's role is changed server-side
-    // (e.g. RESIDENT → STAFF when someone is made a security guard) every
-    // existing token keeps asserting the OLD role and every role-gated route
-    // 403s — indefinitely, because a valid token never triggers a refresh.
+    // A 403 is TERMINAL and must never touch the session.
     //
-    // `/auth/refresh` DOES re-read `user.role` from the database, so one
-    // silent rotation adopts the new role and the retry succeeds. A genuinely
-    // forbidden request just costs one extra round-trip before surfacing.
-    if (res.status === 403 && !_retried && !isAuthRoute && this.config.getRefreshToken && this.config.setTokens) {
-      const newAccess = await this.tryRefresh();
-      if (newAccess) return this.request<T>(method, path, body, true);
-    }
+    // This used to silently refresh + retry, to work around authorisation
+    // reading the role from the JWT claim rather than the database: a
+    // server-side role change left every existing token asserting the OLD
+    // role, 403ing forever because a valid token never refreshes.
+    //
+    // That root cause is fixed — JwtStrategy.validate() now overrides role,
+    // societyId and managedBlocks from the row it loads on every request, and
+    // permissions resolve live in PermissionsGuard. No claim can go stale, so
+    // the workaround has nothing left to repair.
+    //
+    // Keeping it was actively harmful, and got worse the moment permissions
+    // shipped. A 403 is now the ROUTINE answer for a correctly-scoped admin —
+    // an accountant opening a staff page, a block admin opening billing — not
+    // a rare error. Every one of those spent a refresh round-trip, and if the
+    // refresh itself was rejected, tryRefresh() cleared the tokens as a
+    // "terminal server decision". The next call then had no token, returned
+    // 401, and fired onUnauthorized() — bouncing a perfectly valid session to
+    // /login?reason=session-expired. Being told you cannot see billing must
+    // not log you out of the dashboard.
 
     if (res.status === 401 || res.status === 400) {
       let code: string | undefined;
