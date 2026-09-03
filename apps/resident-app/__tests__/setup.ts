@@ -1,3 +1,14 @@
+/**
+ * `process` is not defined in this preset's sandbox, but Expo's virtual env
+ * module and several app modules read `process.env`. Define a minimal shim
+ * before anything imports them.
+ */
+if (typeof (globalThis as any).process === 'undefined') {
+  (globalThis as any).process = { env: {} };
+} else if (!(globalThis as any).process.env) {
+  (globalThis as any).process.env = {};
+}
+
 jest.mock('expo-router', () => ({
   useRouter: () => ({ push: jest.fn(), replace: jest.fn(), back: jest.fn() }),
   useLocalSearchParams: () => ({}),

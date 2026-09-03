@@ -11,91 +11,140 @@ exports[`ErrorCard snapshot with retry button 1`] = `
     }
   }
 >
-  <Text
-    style={
-      {
-        "fontSize": 40,
-        "marginBottom": 16,
-      }
-    }
-  >
-    ⚠️
-  </Text>
-  <Text
-    style={
-      {
-        "color": "#F5F5F7",
-        "fontSize": 16,
-        "lineHeight": 24,
-        "marginBottom": 20,
-        "textAlign": "center",
-      }
-    }
-  >
-    Oops
-  </Text>
   <View
-    accessibilityState={
-      {
-        "busy": undefined,
-        "checked": undefined,
-        "disabled": undefined,
-        "expanded": undefined,
-        "selected": undefined,
-      }
-    }
-    accessibilityValue={
-      {
-        "max": undefined,
-        "min": undefined,
-        "now": undefined,
-        "text": undefined,
-      }
-    }
-    accessible={true}
-    collapsable={false}
-    focusable={true}
-    onClick={[Function]}
-    onResponderGrant={[Function]}
-    onResponderMove={[Function]}
-    onResponderRelease={[Function]}
-    onResponderTerminate={[Function]}
-    onResponderTerminationRequest={[Function]}
-    onStartShouldSetResponder={[Function]}
     style={
-      {
-        "backgroundColor": "#821A52",
-        "borderRadius": 12,
-        "marginBottom": 16,
-        "opacity": 1,
-        "paddingHorizontal": 32,
-        "paddingVertical": 14,
-      }
+      [
+        {
+          "backgroundColor": "#FFFFFF",
+          "borderColor": "rgba(0,0,0,0.07)",
+          "borderRadius": 16,
+          "borderWidth": 1,
+          "elevation": 2,
+          "padding": 20,
+          "shadowColor": "#000",
+          "shadowOffset": {
+            "height": 6,
+            "width": 0,
+          },
+          "shadowOpacity": 0.06,
+          "shadowRadius": 14,
+        },
+        {
+          "alignItems": "center",
+          "width": "100%",
+        },
+      ]
     }
   >
+    <View
+      style={
+        [
+          {
+            "alignItems": "center",
+            "backgroundColor": "#FCE9EE",
+            "borderRadius": 28,
+            "height": 56,
+            "justifyContent": "center",
+            "width": 56,
+          },
+          undefined,
+        ]
+      }
+    >
+      <Icon
+        color="#C42847"
+        name="alert-circle"
+        size={23.52}
+      />
+    </View>
     <Text
       style={
         {
-          "color": "#fff",
+          "color": "#000000",
           "fontSize": 16,
-          "fontWeight": "600",
+          "lineHeight": 25.6,
+          "marginTop": 16,
+          "textAlign": "center",
         }
       }
     >
-      Retry
+      Oops
+    </Text>
+    <View
+      accessibilityLabel="Retry"
+      accessibilityRole="button"
+      accessibilityState={
+        {
+          "busy": undefined,
+          "checked": undefined,
+          "disabled": undefined,
+          "expanded": undefined,
+          "selected": undefined,
+        }
+      }
+      accessibilityValue={
+        {
+          "max": undefined,
+          "min": undefined,
+          "now": undefined,
+          "text": undefined,
+        }
+      }
+      accessible={true}
+      collapsable={false}
+      focusable={true}
+      onClick={[Function]}
+      onResponderGrant={[Function]}
+      onResponderMove={[Function]}
+      onResponderRelease={[Function]}
+      onResponderTerminate={[Function]}
+      onResponderTerminationRequest={[Function]}
+      onStartShouldSetResponder={[Function]}
+      style={
+        {
+          "alignItems": "center",
+          "backgroundColor": "#141414",
+          "borderColor": "transparent",
+          "borderRadius": 999,
+          "borderWidth": 0,
+          "flexDirection": "row",
+          "gap": 8,
+          "justifyContent": "center",
+          "marginTop": 20,
+          "minHeight": 48,
+          "opacity": 1,
+          "paddingHorizontal": 20,
+          "width": "100%",
+        }
+      }
+    >
+      <Text
+        style={
+          {
+            "color": "#FFFFFF",
+            "fontFamily": "Lato_700Bold",
+            "fontSize": 14,
+            "fontWeight": "700",
+            "letterSpacing": 0.2,
+          }
+        }
+      >
+        Retry
+      </Text>
+    </View>
+    <Text
+      style={
+        {
+          "color": "rgba(0,0,0,0.45)",
+          "fontSize": 14,
+          "marginTop": 16,
+          "textAlign": "center",
+        }
+      }
+    >
+      If this keeps happening, please contact the society office.
     </Text>
   </View>
-  <Text
-    style={
-      {
-        "color": "#8E8E93",
-        "fontSize": 13,
-        "textAlign": "center",
-      }
-    }
-  >
-    If this keeps happening, please contact the society office.
-  </Text>
 </View>
 `;
 
@@ -110,39 +159,77 @@ exports[`ErrorCard snapshot without retry button 1`] = `
     }
   }
 >
-  <Text
+  <View
     style={
-      {
-        "fontSize": 40,
-        "marginBottom": 16,
-      }
+      [
+        {
+          "backgroundColor": "#FFFFFF",
+          "borderColor": "rgba(0,0,0,0.07)",
+          "borderRadius": 16,
+          "borderWidth": 1,
+          "elevation": 2,
+          "padding": 20,
+          "shadowColor": "#000",
+          "shadowOffset": {
+            "height": 6,
+            "width": 0,
+          },
+          "shadowOpacity": 0.06,
+          "shadowRadius": 14,
+        },
+        {
+          "alignItems": "center",
+          "width": "100%",
+        },
+      ]
     }
   >
-    ⚠️
-  </Text>
-  <Text
-    style={
-      {
-        "color": "#F5F5F7",
-        "fontSize": 16,
-        "lineHeight": 24,
-        "marginBottom": 20,
-        "textAlign": "center",
+    <View
+      style={
+        [
+          {
+            "alignItems": "center",
+            "backgroundColor": "#FCE9EE",
+            "borderRadius": 28,
+            "height": 56,
+            "justifyContent": "center",
+            "width": 56,
+          },
+          undefined,
+        ]
       }
-    }
-  >
-    Oops
-  </Text>
-  <Text
-    style={
-      {
-        "color": "#8E8E93",
-        "fontSize": 13,
-        "textAlign": "center",
+    >
+      <Icon
+        color="#C42847"
+        name="alert-circle"
+        size={23.52}
+      />
+    </View>
+    <Text
+      style={
+        {
+          "color": "#000000",
+          "fontSize": 16,
+          "lineHeight": 25.6,
+          "marginTop": 16,
+          "textAlign": "center",
+        }
       }
-    }
-  >
-    If this keeps happening, please contact the society office.
-  </Text>
+    >
+      Oops
+    </Text>
+    <Text
+      style={
+        {
+          "color": "rgba(0,0,0,0.45)",
+          "fontSize": 14,
+          "marginTop": 16,
+          "textAlign": "center",
+        }
+      }
+    >
+      If this keeps happening, please contact the society office.
+    </Text>
+  </View>
 </View>
 `;

@@ -34,12 +34,12 @@ exports[`ThemedButton danger variant snapshot 1`] = `
   style={
     {
       "alignItems": "center",
-      "backgroundColor": "#dc2626",
+      "backgroundColor": "#C42847",
       "borderColor": "transparent",
-      "borderRadius": 16,
+      "borderRadius": 999,
       "borderWidth": 0,
       "justifyContent": "center",
-      "minHeight": 52,
+      "minHeight": 48,
       "opacity": 1,
       "paddingHorizontal": 16,
       "width": "100%",
@@ -52,7 +52,7 @@ exports[`ThemedButton danger variant snapshot 1`] = `
         {
           "color": "#FFFFFF",
           "fontSize": 16,
-          "fontWeight": "600",
+          "fontWeight": "700",
           "letterSpacing": 0.3,
         },
         undefined,
@@ -98,12 +98,12 @@ exports[`ThemedButton disabled danger renders with dimmed background 1`] = `
   style={
     {
       "alignItems": "center",
-      "backgroundColor": "rgba(255,59,48,0.35)",
+      "backgroundColor": "rgba(196,40,71,0.35)",
       "borderColor": "transparent",
-      "borderRadius": 16,
+      "borderRadius": 999,
       "borderWidth": 0,
       "justifyContent": "center",
-      "minHeight": 52,
+      "minHeight": 48,
       "opacity": 0.5,
       "paddingHorizontal": 16,
       "width": "100%",
@@ -116,7 +116,7 @@ exports[`ThemedButton disabled danger renders with dimmed background 1`] = `
         {
           "color": "#FFFFFF",
           "fontSize": 16,
-          "fontWeight": "600",
+          "fontWeight": "700",
           "letterSpacing": 0.3,
         },
         undefined,
@@ -162,12 +162,12 @@ exports[`ThemedButton disabled primary renders with dimmed background 1`] = `
   style={
     {
       "alignItems": "center",
-      "backgroundColor": "rgba(130,26,82,0.35)",
+      "backgroundColor": "rgba(20,20,20,0.35)",
       "borderColor": "transparent",
-      "borderRadius": 16,
+      "borderRadius": 999,
       "borderWidth": 0,
       "justifyContent": "center",
-      "minHeight": 52,
+      "minHeight": 48,
       "opacity": 0.5,
       "paddingHorizontal": 16,
       "width": "100%",
@@ -180,7 +180,7 @@ exports[`ThemedButton disabled primary renders with dimmed background 1`] = `
         {
           "color": "#FFFFFF",
           "fontSize": 16,
-          "fontWeight": "600",
+          "fontWeight": "700",
           "letterSpacing": 0.3,
         },
         undefined,
@@ -226,12 +226,12 @@ exports[`ThemedButton ghost variant snapshot 1`] = `
   style={
     {
       "alignItems": "center",
-      "backgroundColor": "transparent",
-      "borderColor": "#821A52",
-      "borderRadius": 16,
+      "backgroundColor": "#FFFFFF",
+      "borderColor": "rgba(0,0,0,0.12)",
+      "borderRadius": 999,
       "borderWidth": 1,
       "justifyContent": "center",
-      "minHeight": 52,
+      "minHeight": 48,
       "opacity": 1,
       "paddingHorizontal": 16,
       "width": "100%",
@@ -244,7 +244,7 @@ exports[`ThemedButton ghost variant snapshot 1`] = `
         {
           "color": "#821A52",
           "fontSize": 16,
-          "fontWeight": "600",
+          "fontWeight": "700",
           "letterSpacing": 0.3,
         },
         undefined,
@@ -290,12 +290,12 @@ exports[`ThemedButton lg size snapshot 1`] = `
   style={
     {
       "alignItems": "center",
-      "backgroundColor": "#821A52",
+      "backgroundColor": "#141414",
       "borderColor": "transparent",
-      "borderRadius": 16,
+      "borderRadius": 999,
       "borderWidth": 0,
       "justifyContent": "center",
-      "minHeight": 60,
+      "minHeight": 56,
       "opacity": 1,
       "paddingHorizontal": 16,
       "width": "100%",
@@ -308,7 +308,7 @@ exports[`ThemedButton lg size snapshot 1`] = `
         {
           "color": "#FFFFFF",
           "fontSize": 18,
-          "fontWeight": "600",
+          "fontWeight": "700",
           "letterSpacing": 0.3,
         },
         undefined,
@@ -354,12 +354,12 @@ exports[`ThemedButton primary variant (default) snapshot 1`] = `
   style={
     {
       "alignItems": "center",
-      "backgroundColor": "#821A52",
+      "backgroundColor": "#141414",
       "borderColor": "transparent",
-      "borderRadius": 16,
+      "borderRadius": 999,
       "borderWidth": 0,
       "justifyContent": "center",
-      "minHeight": 52,
+      "minHeight": 48,
       "opacity": 1,
       "paddingHorizontal": 16,
       "width": "100%",
@@ -372,7 +372,7 @@ exports[`ThemedButton primary variant (default) snapshot 1`] = `
         {
           "color": "#FFFFFF",
           "fontSize": 16,
-          "fontWeight": "600",
+          "fontWeight": "700",
           "letterSpacing": 0.3,
         },
         undefined,
@@ -418,12 +418,12 @@ exports[`ThemedButton secondary variant snapshot 1`] = `
   style={
     {
       "alignItems": "center",
-      "backgroundColor": "#E8E8EC",
+      "backgroundColor": "#FFFFFF",
       "borderColor": "rgba(0,0,0,0.12)",
-      "borderRadius": 16,
+      "borderRadius": 999,
       "borderWidth": 1,
       "justifyContent": "center",
-      "minHeight": 52,
+      "minHeight": 48,
       "opacity": 1,
       "paddingHorizontal": 16,
       "width": "100%",
@@ -436,7 +436,7 @@ exports[`ThemedButton secondary variant snapshot 1`] = `
         {
           "color": "#000000",
           "fontSize": 16,
-          "fontWeight": "600",
+          "fontWeight": "700",
           "letterSpacing": 0.3,
         },
         undefined,
@@ -482,12 +482,12 @@ exports[`ThemedButton sm size snapshot 1`] = `
   style={
     {
       "alignItems": "center",
-      "backgroundColor": "#821A52",
+      "backgroundColor": "#141414",
       "borderColor": "transparent",
-      "borderRadius": 16,
+      "borderRadius": 999,
       "borderWidth": 0,
       "justifyContent": "center",
-      "minHeight": 44,
+      "minHeight": 40,
       "opacity": 1,
       "paddingHorizontal": 16,
       "width": "100%",
@@ -500,7 +500,7 @@ exports[`ThemedButton sm size snapshot 1`] = `
         {
           "color": "#FFFFFF",
           "fontSize": 14,
-          "fontWeight": "600",
+          "fontWeight": "700",
           "letterSpacing": 0.2,
         },
         undefined,

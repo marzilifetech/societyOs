@@ -79,12 +79,12 @@ exports[`BottomActionBar primary + secondary snapshot 1`] = `
           style={
             {
               "alignItems": "center",
-              "backgroundColor": "#E8E8EC",
+              "backgroundColor": "#FFFFFF",
               "borderColor": "rgba(0,0,0,0.12)",
-              "borderRadius": 16,
+              "borderRadius": 999,
               "borderWidth": 1,
               "justifyContent": "center",
-              "minHeight": 52,
+              "minHeight": 48,
               "opacity": 1,
               "paddingHorizontal": 16,
               "width": "100%",
@@ -97,7 +97,7 @@ exports[`BottomActionBar primary + secondary snapshot 1`] = `
                 {
                   "color": "#000000",
                   "fontSize": 16,
-                  "fontWeight": "600",
+                  "fontWeight": "700",
                   "letterSpacing": 0.3,
                 },
                 undefined,
@@ -148,12 +148,12 @@ exports[`BottomActionBar primary + secondary snapshot 1`] = `
           style={
             {
               "alignItems": "center",
-              "backgroundColor": "#821A52",
+              "backgroundColor": "#141414",
               "borderColor": "transparent",
-              "borderRadius": 16,
+              "borderRadius": 999,
               "borderWidth": 0,
               "justifyContent": "center",
-              "minHeight": 52,
+              "minHeight": 48,
               "opacity": 1,
               "paddingHorizontal": 16,
               "width": "100%",
@@ -166,7 +166,7 @@ exports[`BottomActionBar primary + secondary snapshot 1`] = `
                 {
                   "color": "#FFFFFF",
                   "fontSize": 16,
-                  "fontWeight": "600",
+                  "fontWeight": "700",
                   "letterSpacing": 0.3,
                 },
                 undefined,
@@ -261,12 +261,12 @@ exports[`BottomActionBar primary-only snapshot 1`] = `
           style={
             {
               "alignItems": "center",
-              "backgroundColor": "#821A52",
+              "backgroundColor": "#141414",
               "borderColor": "transparent",
-              "borderRadius": 16,
+              "borderRadius": 999,
               "borderWidth": 0,
               "justifyContent": "center",
-              "minHeight": 52,
+              "minHeight": 48,
               "opacity": 1,
               "paddingHorizontal": 16,
               "width": "100%",
@@ -279,7 +279,7 @@ exports[`BottomActionBar primary-only snapshot 1`] = `
                 {
                   "color": "#FFFFFF",
                   "fontSize": 16,
-                  "fontWeight": "600",
+                  "fontWeight": "700",
                   "letterSpacing": 0.3,
                 },
                 undefined,

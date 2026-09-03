@@ -10,6 +10,10 @@ module.exports = {
     'node_modules/(?!((.pnpm/[^/]*/node_modules/))?((jest-)?react-native|@react-native(-community)?|@react-native/.*|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@unimodules/.*|unimodules|sentry-expo|native-base|react-native-svg|nativewind|@tanstack/.*))',
   ],
   moduleNameMapper: {
+    // `expo/virtual/env` is `export const env = process.env`, evaluated in a
+    // scope where `process` is undefined under this preset — it took down every
+    // suite that transitively imported it. See the stub for detail.
+    '^expo/virtual/env$': '<rootDir>/__tests__/__mocks__/expo-virtual-env.js',
     '\\.(css|less|sass|scss)$': '<rootDir>/__tests__/__mocks__/style-mock.js',
     'react-native-css-interop/.*': '<rootDir>/__tests__/__mocks__/react-native-css-interop.js',
     '^react-native-css-interop$': '<rootDir>/__tests__/__mocks__/react-native-css-interop.js',

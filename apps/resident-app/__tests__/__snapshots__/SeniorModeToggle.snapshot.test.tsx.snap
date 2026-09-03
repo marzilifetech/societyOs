@@ -3,7 +3,7 @@
 exports[`SeniorModeToggle renders in OFF state snapshot 1`] = `
 <View
   accessibilityHint="Increases text size, button size, and contrast for easier reading"
-  accessibilityLabel="Senior Mode"
+  accessibilityLabel="Larger Fonts"
   accessibilityRole="switch"
   accessibilityState={
     {
@@ -36,7 +36,7 @@ exports[`SeniorModeToggle renders in OFF state snapshot 1`] = `
     {
       "backgroundColor": "#F7F7F8",
       "borderColor": "rgba(0,0,0,0.12)",
-      "borderRadius": 20,
+      "borderRadius": 16,
       "borderWidth": 1,
       "marginBottom": 12,
       "opacity": 1,
@@ -89,7 +89,7 @@ exports[`SeniorModeToggle renders in OFF state snapshot 1`] = `
             }
           }
         >
-          Senior Mode
+          Larger Fonts
         </Text>
       </View>
       <Text
@@ -113,8 +113,7 @@ exports[`SeniorModeToggle renders in OFF state snapshot 1`] = `
       style={
         [
           {
-            "height": 31,
-            "width": 51,
+            "alignSelf": "flex-start",
           },
           {
             "backgroundColor": "rgba(255,255,255,0.15)",
@@ -133,7 +132,7 @@ exports[`SeniorModeToggle renders in OFF state snapshot 1`] = `
 exports[`SeniorModeToggle renders in ON state snapshot (shows ON badge) 1`] = `
 <View
   accessibilityHint="Increases text size, button size, and contrast for easier reading"
-  accessibilityLabel="Senior Mode"
+  accessibilityLabel="Larger Fonts"
   accessibilityRole="switch"
   accessibilityState={
     {
@@ -166,7 +165,7 @@ exports[`SeniorModeToggle renders in ON state snapshot (shows ON badge) 1`] = `
     {
       "backgroundColor": "rgba(130,26,82,0.15)",
       "borderColor": "rgba(130,26,82,0.4)",
-      "borderRadius": 20,
+      "borderRadius": 16,
       "borderWidth": 1,
       "marginBottom": 12,
       "opacity": 1,
@@ -219,7 +218,7 @@ exports[`SeniorModeToggle renders in ON state snapshot (shows ON badge) 1`] = `
             }
           }
         >
-          Senior Mode
+          Larger Fonts
         </Text>
         <View
           style={
@@ -266,8 +265,7 @@ exports[`SeniorModeToggle renders in ON state snapshot (shows ON badge) 1`] = `
       style={
         [
           {
-            "height": 31,
-            "width": 51,
+            "alignSelf": "flex-start",
           },
           {
             "backgroundColor": "rgba(255,255,255,0.15)",

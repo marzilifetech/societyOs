@@ -46,9 +46,9 @@ exports[`ThemedText heading variant snapshot 1`] = `
     [
       {
         "color": "#000000",
-        "fontSize": 30,
+        "fontSize": 26,
         "fontWeight": "700",
-        "lineHeight": 36,
+        "lineHeight": 31.2,
       },
       undefined,
       undefined,
@@ -107,9 +107,9 @@ exports[`ThemedText subheading variant snapshot 1`] = `
     [
       {
         "color": "#000000",
-        "fontSize": 24,
+        "fontSize": 22,
         "fontWeight": "600",
-        "lineHeight": 33.599999999999994,
+        "lineHeight": 30.799999999999997,
       },
       undefined,
       undefined,
