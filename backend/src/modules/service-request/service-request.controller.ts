@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards, Header, StreamableFile } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { ServiceRequestService } from './service-request.service';
 import {
@@ -69,6 +69,33 @@ export class ServiceRequestController {
     @Query('status') status?: ServiceRequestStatus,
   ) {
     return this.srService.findBySociety(societyId, status, user.managedBlocks);
+  }
+
+  /**
+   * Full CSV export for the current filters.
+   *
+   * Declared BEFORE the `:id`-shaped routes below: Nest/Express match in
+   * declaration order, so a `:id` route placed first would swallow
+   * `/service-requests/export` and try to load a request with id "export".
+   */
+  @Get('export')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  @Header('Content-Type', 'text/csv')
+  @Header('Content-Disposition', 'attachment; filename="service-requests.csv"')
+  async exportCsv(
+    @SocietyId() societyId: string,
+    @CurrentUser() user: JwtPayload,
+    @Query('status') status?: ServiceRequestStatus,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ): Promise<StreamableFile> {
+    const csv = await this.srService.exportCsv(societyId, {
+      status,
+      from,
+      to,
+      managedBlocks: user.managedBlocks,
+    });
+    return new StreamableFile(Buffer.from(csv, 'utf8'));
   }
 
   @Get(':id/photo-upload-url')

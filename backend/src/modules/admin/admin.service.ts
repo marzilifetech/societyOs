@@ -3,11 +3,12 @@ import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
 import { PushService } from '../../common/notification/push.service';
-import { UserStatus, UserRole, ComplaintStatus, TravelPauseStatus, InfrastructureType, InfrastructureStatus } from '@prisma/client';
+import { UserStatus, UserRole, ComplaintStatus, TravelPauseStatus, InfrastructureType, InfrastructureStatus, EventStatus, IncidentSeverity } from '@prisma/client';
 import { requireLeavePendingInSociety } from '../../common/utils/leave-admin.util';
 import { ComplianceService } from '../compliance/compliance.service';
 import { AuditService } from '../../common/audit/audit.service';
 import { parseCsv, rowToRecord, toCsvRow } from '../../common/utils/csv.util';
+import { formatIst, formatIstDate } from '../../common/utils/ist-time.util';
 import { SocietySeederService } from '../society/society-seeder.service';
 import { runWithTenantContext, getTenantContext } from '../../common/tenancy/tenant.context';
 import { asyncPool } from '../../common/utils/async-pool';
@@ -25,6 +26,39 @@ const COMPLAINT_TRANSITIONS: Record<ComplaintStatus, ComplaintStatus[]> = {
   [ComplaintStatus.REJECTED]: [ComplaintStatus.OPEN, ComplaintStatus.UNDER_REVIEW],
   [ComplaintStatus.CLOSED]: [],
 };
+
+export type MaintenanceRateMode = 'FLAT' | 'PER_SQFT';
+
+/** Society maintenance rate card, persisted at `society.config.maintenance`. */
+export interface MaintenanceRateConfig {
+  mode: MaintenanceRateMode;
+  /** Charged per unit when mode = FLAT. */
+  flatRate: number;
+  /** Multiplied by `flat.areaSqft` when mode = PER_SQFT. */
+  ratePerSqft: number;
+  /** Day of month the bill falls due (1-28, clamped). */
+  dueDay: number;
+  /** Per-flat amount overrides keyed by flatId (shops, duplexes, exempt units). */
+  overrides: Record<string, number>;
+}
+
+export interface BillPlanLine {
+  flatId: string;
+  flat: string;
+  residentId: string;
+  residentName: string | null;
+  userId: string | null;
+  base: number;
+  travelPauseCredit: number;
+  total: number;
+  breakdown: Record<string, any>;
+}
+
+export interface BillPlanSkip {
+  flatId: string;
+  flat: string;
+  reason: 'already_billed' | 'no_resident' | 'missing_area';
+}
 
 @Injectable()
 export class AdminService {
@@ -163,10 +197,19 @@ export class AdminService {
     };
   }
 
-  async getResidents(societyId: string, managedBlocks?: string[]) {
+  /**
+   * @param status  Optional explicit filter. When omitted, REJECTED registrations
+   *   are hidden: once an admin rejects a resident entry it must disappear from
+   *   the resident list (it is not a resident). The row is NOT deleted — pass
+   *   `status=REJECTED` to audit past rejections from the Rejected filter.
+   */
+  async getResidents(societyId: string, managedBlocks?: string[], status?: string) {
     const blockWhere = managedBlocks?.length ? { flat: { block: { in: managedBlocks } } } : {};
+    const statusWhere = status
+      ? { status: status as UserStatus }
+      : { status: { not: UserStatus.REJECTED } };
     const residents = await this.prisma.resident.findMany({
-      where: { user: { societyId }, deletedAt: null, ...blockWhere },
+      where: { user: { societyId, ...statusWhere }, deletedAt: null, ...blockWhere },
       include: { user: true, flat: true },
       orderBy: { createdAt: 'desc' },
     });
@@ -310,6 +353,13 @@ export class AdminService {
       categories: sm.categories,
       joiningDate: sm.joiningDate,
       leavingDate: sm.leavingDate ?? null,
+      // Account state lives on User, not StaffMember. The list previously
+      // omitted it entirely, so `PATCH /staff/:id/deactivate` succeeded on the
+      // server (login IS blocked) while the row rendered identically — the
+      // "shows as completed but isn't processed" report. Surface it so the UI
+      // can badge Inactive/Suspended and offer Reactivate.
+      status: sm.user.status,
+      isActive: sm.user.status === UserStatus.ACTIVE && !sm.leavingDate,
       createdAt: sm.createdAt,
     }));
   }
@@ -587,20 +637,30 @@ export class AdminService {
       this.logger.warn(`payment reminder bill=${billId} user=${uid} reason=${result.reason ?? 'unknown'}`);
     }
 
-    // Non-critical billing: in-app / ops follow-up when push deferred, opted out, or missing token
+    // A reminder is "sent" if it reached the resident by ANY channel. When the
+    // resident has no device token (or FCM is unconfigured) push.send now still
+    // writes the in-app inbox row, so the reminder IS delivered — it just is
+    // not a push. Reporting that as a hard failure ("No ECM/FCM file or token")
+    // is what made this button look broken.
+    const deliveredInApp = result.deliveredInApp === true;
+    const sent = result.ok || deliveredInApp;
+    const channel = result.ok ? ('push' as const) : deliveredInApp ? ('in_app' as const) : ('none' as const);
+
     return {
-      sent: result.ok,
+      sent,
       billId,
       reason: result.reason,
-      channel: result.ok ? 'push' : 'none',
+      channel,
       note:
         result.reason === 'queued_quiet_hours'
           ? 'Notification queued for after quiet hours'
           : result.reason === 'opted_out'
             ? 'Resident opted out of billing pushes; use another channel if required'
             : result.reason === 'no_token'
-              ? 'No FCM token on file'
-              : undefined,
+              ? 'Resident has no push-enabled device — reminder saved to their in-app inbox'
+              : result.reason === 'firebase_not_initialized'
+                ? 'Push service unavailable — reminder saved to their in-app inbox'
+                : undefined,
     };
   }
 
@@ -649,22 +709,85 @@ export class AdminService {
     return { credit, days: pausedDays };
   }
 
-  async generateBills(societyId: string, year: number, month: number) {
+  /**
+   * Society maintenance rate card, stored in `society.config.maintenance`.
+   *
+   * Bill generation used to hardcode `const baseAmount = 0`, so every generated
+   * bill was for zero rupees — the feature ran, reported success, and produced
+   * nothing chargeable. The rate now comes from configuration:
+   *
+   *   FLAT      -> every unit pays `flatRate`
+   *   PER_SQFT  -> unit pays `ratePerSqft * flat.areaSqft`
+   *
+   * Per-flat overrides (`overrides: { "<flatId>": amount }`) cover the usual
+   * exceptions (shops, duplexes, society-owned units at zero).
+   */
+  async getMaintenanceRateConfig(societyId: string): Promise<MaintenanceRateConfig> {
+    const society = await this.prisma.society.findUnique({ where: { id: societyId } });
+    if (!society) throw new NotFoundException('Society not found');
+    const cfg = ((society.config as Record<string, any> | null) ?? {}).maintenance ?? {};
+    return {
+      mode: cfg.mode === 'PER_SQFT' ? 'PER_SQFT' : 'FLAT',
+      flatRate: Number(cfg.flatRate ?? 0) || 0,
+      ratePerSqft: Number(cfg.ratePerSqft ?? 0) || 0,
+      dueDay: Math.min(28, Math.max(1, Number(cfg.dueDay ?? 28) || 28)),
+      overrides: (cfg.overrides && typeof cfg.overrides === 'object' ? cfg.overrides : {}) as Record<string, number>,
+    };
+  }
+
+  async updateMaintenanceRateConfig(
+    societyId: string,
+    dto: Partial<MaintenanceRateConfig>,
+  ): Promise<MaintenanceRateConfig> {
+    const society = await this.prisma.society.findUnique({ where: { id: societyId } });
+    if (!society) throw new NotFoundException('Society not found');
+    const current = await this.getMaintenanceRateConfig(societyId);
+    const next: MaintenanceRateConfig = {
+      mode: dto.mode === 'PER_SQFT' || dto.mode === 'FLAT' ? dto.mode : current.mode,
+      flatRate: dto.flatRate !== undefined ? Number(dto.flatRate) : current.flatRate,
+      ratePerSqft: dto.ratePerSqft !== undefined ? Number(dto.ratePerSqft) : current.ratePerSqft,
+      dueDay: dto.dueDay !== undefined ? Math.min(28, Math.max(1, Number(dto.dueDay))) : current.dueDay,
+      overrides: dto.overrides !== undefined ? dto.overrides : current.overrides,
+    };
+    if (next.flatRate < 0 || next.ratePerSqft < 0) {
+      throw new BadRequestException({ code: 'INVALID_RATE', message: 'Rates cannot be negative' });
+    }
+    const config = { ...((society.config as Record<string, any> | null) ?? {}), maintenance: next };
+    await this.prisma.society.update({ where: { id: societyId }, data: { config: config as any } });
+    return next;
+  }
+
+  /**
+   * Shared planner for `previewBills` (dry run) and `generateBills` (commit),
+   * so the number the admin approves is byte-for-byte the number that is
+   * written. Two independent implementations would drift.
+   *
+   * One bill PER FLAT, billed to the flat's primary occupant (OWNER first,
+   * else earliest move-in). The old code emitted one bill per RESIDENT, so a
+   * four-person flat was billed four times for the same unit.
+   */
+  private async planBills(societyId: string, year: number, month: number) {
+    if (!Number.isInteger(month) || month < 1 || month > 12) {
+      throw new BadRequestException({ code: 'INVALID_MONTH', message: 'month must be between 1 and 12' });
+    }
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+      throw new BadRequestException({ code: 'INVALID_YEAR', message: 'year must be between 2000 and 2100' });
+    }
+
+    const rate = await this.getMaintenanceRateConfig(societyId);
     const period = `${year}-${String(month).padStart(2, '0')}`;
-    const dueDate = new Date(year, month - 1, 28);
+    const dueDate = new Date(year, month - 1, rate.dueDay);
     const periodStart = new Date(year, month - 1, 1);
     const periodEnd = new Date(year, month, 1);
     const daysInMonth = (periodEnd.getTime() - periodStart.getTime()) / 86_400_000;
 
     const flats = await this.prisma.flat.findMany({
       where: { societyId },
-      include: { residents: true },
+      include: { residents: { where: { deletedAt: null }, include: { user: true } } },
+      orderBy: [{ block: 'asc' }, { number: 'asc' }],
     });
 
     const residentIds = flats.flatMap((f) => f.residents.map((r) => r.id));
-
-    // Pre-fetch all relevant travel pauses ONCE — was O(residents) queries
-    // due to per-resident computeTravelPauseCredit calls.
     const allPauses = residentIds.length
       ? await this.prisma.travelPause.findMany({
           where: {
@@ -676,52 +799,144 @@ export class AdminService {
           select: { residentId: true, startDate: true, returnDate: true },
         })
       : [];
-
     const pausesByResident = new Map<string, Array<{ startDate: Date; returnDate: Date }>>();
-    for (const p of allPauses) {
-      const list = pausesByResident.get(p.residentId) ?? [];
-      list.push({ startDate: p.startDate, returnDate: p.returnDate });
-      pausesByResident.set(p.residentId, list);
+    for (const pause of allPauses) {
+      const list = pausesByResident.get(pause.residentId) ?? [];
+      list.push({ startDate: pause.startDate, returnDate: pause.returnDate });
+      pausesByResident.set(pause.residentId, list);
     }
 
     const existingBills = await this.prisma.maintenanceBill.findMany({
       where: { flat: { societyId }, period },
-      select: { flatId: true, residentId: true },
+      select: { flatId: true },
     });
-    const existingKeys = new Set(existingBills.map((b) => `${b.flatId}:${b.residentId}`));
+    const billedFlatIds = new Set(existingBills.map((b) => b.flatId));
 
-    const toCreate: any[] = [];
-    const toNotify: Array<{ userId: string; total: number }> = [];
+    const lines: BillPlanLine[] = [];
+    const skipped: BillPlanSkip[] = [];
+
     for (const flat of flats) {
-      for (const resident of flat.residents) {
-        const key = `${flat.id}:${resident.id}`;
-        if (existingKeys.has(key)) continue;
-        const baseAmount = 0; // base amount set by society config; credit computed when non-zero
-        const { credit: travelPauseCredit, days: pausedDays } = this.computeCreditFromPauses(
-          pausesByResident.get(resident.id) ?? [],
-          periodStart,
-          periodEnd,
-          daysInMonth,
-          baseAmount,
-        );
-        const breakdown: Record<string, any> = {};
-        if (pausedDays > 0) {
-          breakdown.travelPauseCredit = travelPauseCredit;
-          breakdown.pausedDays = pausedDays;
-        }
-        const total = Math.max(0, baseAmount - travelPauseCredit);
-        toCreate.push({
-          flatId: flat.id,
-          residentId: resident.id,
-          period,
-          breakdown,
-          total,
-          dueDate,
-          status: 'PENDING',
-        });
-        if (resident.userId) toNotify.push({ userId: resident.userId, total });
+      const label = `${flat.block ? `${flat.block}-` : ''}${flat.number}`;
+
+      if (billedFlatIds.has(flat.id)) {
+        skipped.push({ flatId: flat.id, flat: label, reason: 'already_billed' });
+        continue;
       }
+      // Prefer the owner; otherwise the longest-standing occupant. A vacant
+      // flat has nobody to bill, and silently skipping it is why "generate"
+      // used to look like it worked while producing nothing.
+      const primary =
+        flat.residents.find((r) => r.type === 'OWNER') ??
+        [...flat.residents].sort(
+          (a, b) => (a.moveInDate?.getTime() ?? a.createdAt.getTime()) - (b.moveInDate?.getTime() ?? b.createdAt.getTime()),
+        )[0];
+      if (!primary) {
+        skipped.push({ flatId: flat.id, flat: label, reason: 'no_resident' });
+        continue;
+      }
+
+      const override = rate.overrides?.[flat.id];
+      let baseAmount: number;
+      if (override !== undefined && Number.isFinite(Number(override))) {
+        baseAmount = Number(override);
+      } else if (rate.mode === 'PER_SQFT') {
+        if (!flat.areaSqft) {
+          skipped.push({ flatId: flat.id, flat: label, reason: 'missing_area' });
+          continue;
+        }
+        baseAmount = rate.ratePerSqft * flat.areaSqft;
+      } else {
+        baseAmount = rate.flatRate;
+      }
+      baseAmount = Math.round(baseAmount * 100) / 100;
+
+      const { credit: travelPauseCredit, days: pausedDays } = this.computeCreditFromPauses(
+        pausesByResident.get(primary.id) ?? [],
+        periodStart,
+        periodEnd,
+        daysInMonth,
+        baseAmount,
+      );
+
+      const breakdown: Record<string, any> = { base: baseAmount, rateMode: rate.mode };
+      if (rate.mode === 'PER_SQFT') {
+        breakdown.areaSqft = flat.areaSqft;
+        breakdown.ratePerSqft = rate.ratePerSqft;
+      }
+      if (override !== undefined) breakdown.override = Number(override);
+      if (pausedDays > 0) {
+        breakdown.travelPauseCredit = travelPauseCredit;
+        breakdown.pausedDays = pausedDays;
+      }
+
+      const total = Math.max(0, Math.round((baseAmount - travelPauseCredit) * 100) / 100);
+      lines.push({
+        flatId: flat.id,
+        flat: label,
+        residentId: primary.id,
+        residentName: primary.user?.name ?? null,
+        userId: primary.userId ?? null,
+        base: baseAmount,
+        travelPauseCredit,
+        total,
+        breakdown,
+      });
     }
+
+    return { period, dueDate, rate, lines, skipped };
+  }
+
+  /**
+   * Dry run for bill generation — the value-add the billing screen was missing.
+   *
+   * Generation is a one-shot, irreversible, society-wide financial write. The
+   * admin previously clicked "Generate" and found out afterwards. This returns
+   * the exact per-flat charge sheet, the total, and every flat that will be
+   * skipped (and why) BEFORE anything is written.
+   */
+  async previewBills(societyId: string, year: number, month: number) {
+    const plan = await this.planBills(societyId, year, month);
+    const totalAmount = plan.lines.reduce((sum, l) => sum + l.total, 0);
+    const totalCredit = plan.lines.reduce((sum, l) => sum + l.travelPauseCredit, 0);
+    return {
+      period: plan.period,
+      dueDate: plan.dueDate,
+      rate: plan.rate,
+      billCount: plan.lines.length,
+      totalAmount: Math.round(totalAmount * 100) / 100,
+      totalTravelPauseCredit: Math.round(totalCredit * 100) / 100,
+      lines: plan.lines,
+      skipped: plan.skipped,
+      warnings: [
+        ...(plan.rate.mode === 'FLAT' && plan.rate.flatRate <= 0
+          ? ['No flat maintenance rate is configured — every bill would be \u20b90. Set a rate before generating.']
+          : []),
+        ...(plan.rate.mode === 'PER_SQFT' && plan.rate.ratePerSqft <= 0
+          ? ['No per-sqft rate is configured — every bill would be \u20b90. Set a rate before generating.']
+          : []),
+        ...(plan.skipped.some((sk) => sk.reason === 'missing_area')
+          ? ['Some flats have no area on record and will be skipped in PER_SQFT mode.']
+          : []),
+        ...(plan.skipped.some((sk) => sk.reason === 'no_resident')
+          ? ['Some flats have no resident on record and cannot be billed.']
+          : []),
+      ],
+    };
+  }
+
+  async generateBills(societyId: string, year: number, month: number) {
+    const plan = await this.planBills(societyId, year, month);
+    const { period, dueDate, lines, skipped } = plan;
+
+    const toCreate = lines.map((line) => ({
+      flatId: line.flatId,
+      residentId: line.residentId,
+      period,
+      breakdown: line.breakdown,
+      total: line.total,
+      dueDate,
+      status: 'PENDING' as const,
+    }));
 
     // Atomic: if createMany fails halfway we don't want a partial month of
     // bills. Wrap the (single) write in $transaction for forward-compat with
@@ -732,31 +947,46 @@ export class AdminService {
       });
 
       // Notify each resident their bill is ready (fire-and-forget).
-      for (const n of toNotify) {
+      for (const line of lines) {
+        if (!line.userId) continue;
         void this.push
           .send(
-            n.userId,
+            line.userId,
             {
               title: 'Maintenance bill ready',
-              body: `Your maintenance bill of ₹${n.total} for ${period} is ready.`,
+              body: `Your maintenance bill of \u20b9${line.total} for ${period} is ready.`,
               category: 'payments_dues',
               collapseKey: `bill-period:${period}`,
             },
-            { type: 'BILL_GENERATED', period, amount: String(n.total) },
+            { type: 'BILL_GENERATED', period, amount: String(line.total) },
           )
-          .catch((e) => this.logger.warn(`bill push failed user=${n.userId}: ${(e as Error).message}`));
+          .catch((e) => this.logger.warn(`bill push failed user=${line.userId}: ${(e as Error).message}`));
       }
     }
 
-    return { created: toCreate.length, period };
+    return {
+      created: toCreate.length,
+      period,
+      totalAmount: Math.round(toCreate.reduce((sum, b) => sum + b.total, 0) * 100) / 100,
+      skipped: skipped.length,
+      skippedDetail: skipped,
+    };
   }
 
-  async getAdminEvents(societyId: string) {
+  /**
+   * @param status  Optional filter (`PUBLISHED` | `CANCELLED` | ...). Omitted =
+   *   every event, which is what the manage screen wants. Callers rendering an
+   *   "Upcoming" list must filter on `isUpcoming` (or pass status=PUBLISHED) —
+   *   the admin dashboard previously filtered on `startAt > now` alone, which
+   *   is why a cancelled event kept showing under Upcoming Events.
+   */
+  async getAdminEvents(societyId: string, status?: string) {
     const events = await this.prisma.event.findMany({
-      where: { societyId },
+      where: { societyId, ...(status ? { status: status as EventStatus } : {}) },
       include: { _count: { select: { registrations: true } } },
       orderBy: { date: 'asc' },
     });
+    const now = Date.now();
     return events.map((event) => ({
       id: event.id,
       title: event.title,
@@ -768,6 +998,10 @@ export class AdminService {
       maxAttendees: event.capacity,
       registeredCount: event._count.registrations,
       status: event.status,
+      // Server-derived so every client agrees on what "upcoming" means.
+      // A CANCELLED or DRAFT event is never upcoming, however far in the future.
+      isUpcoming: event.status === EventStatus.PUBLISHED && event.date.getTime() > now,
+      isCancelled: event.status === EventStatus.CANCELLED,
       createdAt: event.createdAt,
     }));
   }
@@ -936,7 +1170,16 @@ export class AdminService {
     });
 
     let totalBilled = 0, totalCollected = 0;
-    const aging = { current: 0, overdue30: 0, overdue60: 0, overdue90: 0 };
+    // Each bucket carries BOTH a count and an amount. The Reports page renders
+    // `bucket.count` / `fmt(bucket.amount)`; when this returned bare numbers,
+    // `undefined.toLocaleString()` threw and the whole page failed to render —
+    // the "Reports section can't be viewed" report.
+    const aging = {
+      current: { count: 0, amount: 0 },
+      overdue30: { count: 0, amount: 0 },
+      overdue60: { count: 0, amount: 0 },
+      overdue90: { count: 0, amount: 0 },
+    };
     const monthMap: Record<string, { billed: number; collected: number }> = {};
 
     for (let m = 1; m <= 12; m++) {
@@ -960,25 +1203,35 @@ export class AdminService {
         }
       } else if (bill.status === 'PENDING' || bill.status === 'FAILED') {
         const daysOverdue = Math.floor((now.getTime() - bill.dueDate.getTime()) / 86_400_000);
-        if (daysOverdue <= 0) aging.current += amount;
-        else if (daysOverdue <= 30) aging.current += amount;
-        else if (daysOverdue <= 60) aging.overdue30 += amount;
-        else if (daysOverdue <= 90) aging.overdue60 += amount;
-        else aging.overdue90 += amount;
+        const bucket =
+          daysOverdue <= 30 ? aging.current
+            : daysOverdue <= 60 ? aging.overdue30
+              : daysOverdue <= 90 ? aging.overdue60
+                : aging.overdue90;
+        bucket.count += 1;
+        bucket.amount += amount;
       }
     }
 
     const totalOutstanding = totalBilled - totalCollected;
 
     return {
-      summary: { totalBilled, totalCollected, totalOutstanding },
-      agingBuckets: {
-        current: aging.current,
-        overdue30: aging.overdue30,
-        overdue60: aging.overdue60,
-        overdue90: aging.overdue90,
+      summary: {
+        totalBilled,
+        totalCollected,
+        // `outstanding` is what the Reports page reads. `totalOutstanding` is
+        // kept as an alias so any existing consumer keeps working.
+        outstanding: totalOutstanding,
+        totalOutstanding,
+        collectionRate: totalBilled > 0 ? Math.round((totalCollected / totalBilled) * 1000) / 10 : 0,
+        billCount: bills.length,
       },
-      monthlyTrend: Object.entries(monthMap).map(([month, data]) => ({ month, ...data })),
+      agingBuckets: aging,
+      monthlyTrend: Object.entries(monthMap).map(([month, data]) => ({
+        month,
+        ...data,
+        outstanding: data.billed - data.collected,
+      })),
     };
   }
 
@@ -1167,14 +1420,36 @@ async createStaff(
     return { success: true, message: 'Staff transferred successfully' };
   }
 
-  async deactivateStaff(staffId: string, societyId: string) {
+  /**
+   * Suspend a staff member's app access without ending their employment.
+   *
+   * Distinct from `dismissStaff`, which is off-boarding (sets leavingDate +
+   * deletedAt and marks the user SUSPENDED). Deactivation is reversible via
+   * `reactivateStaff`.
+   */
+  async deactivateStaff(staffId: string, societyId: string, actor?: { id: string; role: string }) {
     // Tenant scope: prisma.staffMember.findUnique is NOT auto-scoped by the
     // tenant extension (it skips findUnique/update/delete). Caller passes
     // their own societyId; we reject any staff record from a different one.
-    const staff = await this.prisma.staffMember.findUnique({ where: { id: staffId } });
+    const staff = await this.prisma.staffMember.findUnique({
+      where: { id: staffId },
+      include: { user: { select: { status: true } } },
+    });
     if (!staff) throw new NotFoundException('Staff member not found');
     if (staff.societyId !== societyId) {
       throw new ForbiddenException({ code: 'CROSS_TENANT_ACCESS' });
+    }
+
+    const before = staff.user?.status;
+    if (before === UserStatus.INACTIVE) {
+      // Idempotent: the dashboard can double-submit, and reporting "done" for
+      // a no-op is exactly the confusion this endpoint was blamed for.
+      return {
+        success: true,
+        alreadyInactive: true,
+        status: UserStatus.INACTIVE,
+        message: 'Staff member is already deactivated',
+      };
     }
 
     await this.prisma.user.update({
@@ -1182,7 +1457,84 @@ async createStaff(
       data: { status: UserStatus.INACTIVE },
     });
 
-    return { success: true, message: 'Staff deactivated successfully' };
+    await this.audit
+      .write({
+        entityType: 'StaffMember',
+        entityId: staffId,
+        action: 'STAFF_DEACTIVATED',
+        module: 'admin',
+        actorId: actor?.id ?? null,
+        actorRole: actor?.role ?? null,
+        societyId,
+        before: { status: before ?? null },
+        after: { status: UserStatus.INACTIVE },
+      })
+      .catch((e) => this.logger.warn(`staff-deactivate audit failed staff=${staffId}: ${(e as Error).message}`));
+
+    void this.push
+      .send(
+        staff.userId,
+        {
+          title: 'Access paused',
+          body: 'Your staff app access has been paused by the society office.',
+          category: 'account_auth',
+          collapseKey: `staff-deactivated:${staffId}`,
+        },
+        { type: 'STAFF_DEACTIVATED', entityId: staffId, staffId },
+      )
+      .catch((e) => this.logger.warn(`staff-deactivated push failed staff=${staffId}: ${(e as Error).message}`));
+
+    return {
+      success: true,
+      status: UserStatus.INACTIVE,
+      message: 'Staff deactivated successfully',
+    };
+  }
+
+  /** Restore app access for a previously deactivated (or suspended) staff member. */
+  async reactivateStaff(staffId: string, societyId: string, actor?: { id: string; role: string }) {
+    const staff = await this.prisma.staffMember.findUnique({
+      where: { id: staffId },
+      include: { user: { select: { status: true } } },
+    });
+    if (!staff) throw new NotFoundException('Staff member not found');
+    if (staff.societyId !== societyId) {
+      throw new ForbiddenException({ code: 'CROSS_TENANT_ACCESS' });
+    }
+
+    const before = staff.user?.status;
+    await this.prisma.user.update({
+      where: { id: staff.userId },
+      data: { status: UserStatus.ACTIVE },
+    });
+    // A dismissed member being reactivated is a re-hire: clear the off-boarding
+    // markers so they reappear as current staff rather than a greyed Ex-Staff row.
+    if (staff.leavingDate || staff.deletedAt) {
+      await this.prisma.staffMember.update({
+        where: { id: staffId },
+        data: { leavingDate: null, deletedAt: null },
+      });
+    }
+
+    await this.audit
+      .write({
+        entityType: 'StaffMember',
+        entityId: staffId,
+        action: 'STAFF_REACTIVATED',
+        module: 'admin',
+        actorId: actor?.id ?? null,
+        actorRole: actor?.role ?? null,
+        societyId,
+        before: { status: before ?? null },
+        after: { status: UserStatus.ACTIVE },
+      })
+      .catch((e) => this.logger.warn(`staff-reactivate audit failed staff=${staffId}: ${(e as Error).message}`));
+
+    return {
+      success: true,
+      status: UserStatus.ACTIVE,
+      message: 'Staff reactivated successfully',
+    };
   }
 
   async getStaffDetail(staffId: string, societyId: string) {
@@ -1217,6 +1569,8 @@ async createStaff(
       leavingDate: staff.leavingDate ?? null,
       familyDetails: staff.familyDetails ?? null,
       emergencyContact: (staff as any).emergencyContact ?? null,
+      status: user.status,
+      isActive: user.status === UserStatus.ACTIVE && !staff.leavingDate,
       pendingLoansCount,
     };
   }
@@ -1644,6 +1998,105 @@ async createStaff(
       .map((g) => ({ category: g.category ?? 'OTHER', count: g._count._all }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 5);
+  }
+
+  /**
+   * Society-wide attendance for a single day.
+   *
+   * Staff check-in wrote a StaffAttendance row correctly, but NOTHING in the
+   * admin dashboard ever read it — there was no endpoint and no widget, which
+   * is the "after checking in, it is not updated in the dashboard" report.
+   *
+   * `date` is interpreted as an IST calendar day, matching how check-in stamps
+   * `@db.Date`, so "today" means today for the society and not for whichever
+   * region the server happens to run in.
+   */
+  async getStaffAttendanceToday(societyId: string, date?: string) {
+    const day = date ? new Date(`${date}T00:00:00.000Z`) : new Date(`${formatIstDate(new Date())}T00:00:00.000Z`);
+    if (Number.isNaN(day.getTime())) {
+      throw new BadRequestException({ code: 'INVALID_DATE', message: 'date must be YYYY-MM-DD' });
+    }
+    const next = new Date(day.getTime() + 86_400_000);
+
+    const staff = await this.prisma.staffMember.findMany({
+      where: { societyId, deletedAt: null },
+      include: { user: { select: { name: true, phone: true, status: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+    const staffIds = staff.map((sm) => sm.id);
+
+    const [records, approvedLeaves] = await Promise.all([
+      staffIds.length
+        ? this.prisma.staffAttendance.findMany({
+            where: { staffId: { in: staffIds }, date: { gte: day, lt: next } },
+          })
+        : Promise.resolve([]),
+      staffIds.length
+        ? this.prisma.leaveRequest.findMany({
+            where: {
+              staffId: { in: staffIds },
+              status: 'APPROVED',
+              startDate: { lte: day },
+              endDate: { gte: day },
+            },
+            select: { staffId: true, type: true },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const byStaff = new Map(records.map((r) => [r.staffId, r]));
+    const leaveByStaff = new Map(approvedLeaves.map((l) => [l.staffId, l.type]));
+
+    const rows = staff.map((sm) => {
+      const record = byStaff.get(sm.id);
+      const onLeave = leaveByStaff.get(sm.id);
+      const state = record?.checkIn
+        ? record.checkOut
+          ? ('CHECKED_OUT' as const)
+          : ('ON_DUTY' as const)
+        : onLeave
+          ? ('ON_LEAVE' as const)
+          : ('ABSENT' as const);
+      const hoursWorked =
+        record?.checkIn && record?.checkOut
+          ? Math.round(((record.checkOut.getTime() - record.checkIn.getTime()) / 3_600_000) * 100) / 100
+          : null;
+      return {
+        staffId: sm.id,
+        name: sm.user.name,
+        phone: sm.user.phone,
+        designation: sm.designation,
+        department: sm.department ?? null,
+        state,
+        checkIn: record?.checkIn ?? null,
+        checkOut: record?.checkOut ?? null,
+        checkInIst: formatIst(record?.checkIn ?? null) || null,
+        checkOutIst: formatIst(record?.checkOut ?? null) || null,
+        isLate: record?.isLate ?? false,
+        lateReason: record?.lateReason ?? null,
+        hoursWorked,
+        leaveType: onLeave ?? null,
+      };
+    });
+
+    const summary = {
+      date: formatIstDate(day),
+      totalStaff: rows.length,
+      onDuty: rows.filter((r) => r.state === 'ON_DUTY').length,
+      checkedOut: rows.filter((r) => r.state === 'CHECKED_OUT').length,
+      onLeave: rows.filter((r) => r.state === 'ON_LEAVE').length,
+      absent: rows.filter((r) => r.state === 'ABSENT').length,
+      late: rows.filter((r) => r.isLate).length,
+    };
+    const present = summary.onDuty + summary.checkedOut;
+    return {
+      summary: {
+        ...summary,
+        present,
+        attendanceRate: summary.totalStaff > 0 ? Math.round((present / summary.totalStaff) * 1000) / 10 : 0,
+      },
+      staff: rows,
+    };
   }
 
   async getStaffAttendance(societyId: string, staffId: string, month?: string) {

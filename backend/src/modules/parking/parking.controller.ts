@@ -1,7 +1,12 @@
-import { Controller, Get, Post, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { ParkingService } from './parking.service';
-import { RequestGuestParkingDto, ReportUnauthorizedDto, GuestParkingRequestDto } from './dto/parking.dto';
+import {
+  RequestGuestParkingDto,
+  ReportUnauthorizedDto,
+  GuestParkingRequestDto,
+  LogGuestParkingDto,
+} from './dto/parking.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -71,5 +76,32 @@ export class ParkingController {
   @Roles(UserRole.RESIDENT)
   reportUnauthorized(@CurrentUser() user: JwtPayload, @SocietyId() societyId: string, @Body() dto: ReportUnauthorizedDto) {
     return this.parkingService.reportUnauthorized(user.sub, societyId, dto);
+  }
+
+  // ── Admin / gate guest parking ──────────────────────────────────────────
+  // POST /parking/guest above is @Roles(RESIDENT) and resolves a Resident
+  // profile from the caller, so the dashboard's "Log Guest Parking" button
+  // 403'd for every admin. These endpoints are the admin/security equivalent.
+
+  @Post('admin/guest')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.STAFF)
+  logGuestParking(
+    @CurrentUser() user: JwtPayload,
+    @SocietyId() societyId: string,
+    @Body() dto: LogGuestParkingDto,
+  ) {
+    return this.parkingService.logGuestParking(societyId, user.sub, dto);
+  }
+
+  @Get('admin/guest')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.STAFF)
+  listGuestParking(@SocietyId() societyId: string, @Query('active') active?: string) {
+    return this.parkingService.listGuestParking(societyId, active === 'true' || active === '1');
+  }
+
+  @Patch('admin/guest/:id/exit')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.STAFF)
+  exitGuestParking(@SocietyId() societyId: string, @Param('id') id: string) {
+    return this.parkingService.exitGuestParking(societyId, id);
   }
 }

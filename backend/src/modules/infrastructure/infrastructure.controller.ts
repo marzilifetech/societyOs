@@ -28,8 +28,12 @@ export class InfrastructureController {
 
   @Patch('incidents/:id/resolve')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.STAFF)
-  resolveIncident(@Param('id') id: string, @Body() dto: ResolveIncidentDto) {
-    return this.infrastructureService.resolveIncident(id, dto);
+  resolveIncident(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: ResolveIncidentDto,
+  ) {
+    return this.infrastructureService.resolveIncident(id, dto, user.sub);
   }
 
   @Patch(':id/status')

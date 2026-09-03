@@ -1,7 +1,14 @@
-import { Controller, Get, Post, Body, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Param, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { AgmService } from './agm.service';
-import { VoteDto, CastResolutionVoteDto, AssignProxyDto, CreateResolutionDto } from './dto/agm.dto';
+import {
+  VoteDto,
+  CastResolutionVoteDto,
+  AssignProxyDto,
+  CreateResolutionDto,
+  CreateAgmMeetingDto,
+  UpdateAgmMeetingDto,
+} from './dto/agm.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -19,6 +26,22 @@ export class AgmController {
   @Get('meetings')
   getMeetings(@SocietyId() societyId: string) {
     return this.agmService.getMeetings(societyId);
+  }
+
+  @Post('meetings')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  createMeeting(@SocietyId() societyId: string, @Body() dto: CreateAgmMeetingDto) {
+    return this.agmService.createMeeting(societyId, dto);
+  }
+
+  @Patch('meetings/:id')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  updateMeeting(
+    @Param('id') id: string,
+    @SocietyId() societyId: string,
+    @Body() dto: UpdateAgmMeetingDto,
+  ) {
+    return this.agmService.updateMeeting(id, societyId, dto);
   }
 
   @Get('meetings/:id/results')

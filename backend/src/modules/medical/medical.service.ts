@@ -303,12 +303,53 @@ export class MedicalService {
     });
   }
 
-  async updateMedicalStaff(id: string, dto: any) {
-    return this.prisma.medicalStaff.update({ where: { id }, data: dto });
+  /**
+   * `availableDays` / `timeSlots` / `qualifications` are NOT columns on
+   * MedicalStaff — they live inside the `schedule` JSON blob (see
+   * `createMedicalStaff`, which maps them correctly). This method used to pass
+   * the request body straight into `prisma.update`, so the admin's Edit Doctor
+   * form — which always sends `availableDays` — failed with
+   * `Unknown argument 'availableDays'`. Merge them into `schedule` instead, and
+   * preserve the keys the caller did not send.
+   */
+  async updateMedicalStaff(id: string, societyId: string, dto: Record<string, any>) {
+    const existing = await this.prisma.medicalStaff.findFirst({ where: { id, societyId } });
+    if (!existing) throw new NotFoundException('Medical staff not found');
+
+    const { availableDays, timeSlots, qualifications, specialization, ...rest } = dto ?? {};
+
+    // Never let a caller write straight into unknown columns.
+    const data: Record<string, any> = {};
+    if (rest.name !== undefined) data.name = String(rest.name).trim();
+    if (rest.designation !== undefined) data.designation = String(rest.designation).trim();
+    else if (specialization !== undefined) data.designation = String(specialization).trim();
+    if (rest.phone !== undefined) data.phone = rest.phone;
+    if (rest.isAvailable !== undefined) data.isAvailable = Boolean(rest.isAvailable);
+
+    const currentSchedule =
+      typeof existing.schedule === 'object' && existing.schedule && !Array.isArray(existing.schedule)
+        ? (existing.schedule as Record<string, unknown>)
+        : {};
+    const nextSchedule = { ...currentSchedule };
+    if (availableDays !== undefined) nextSchedule.availableDays = availableDays;
+    if (timeSlots !== undefined) nextSchedule.timeSlots = timeSlots;
+    if (qualifications !== undefined) nextSchedule.qualifications = qualifications;
+    if (Object.keys(nextSchedule).length) data.schedule = nextSchedule as any;
+
+    return this.prisma.medicalStaff.update({ where: { id }, data });
   }
 
-  async deleteMedicalStaff(id: string) {
+  async deleteMedicalStaff(id: string, societyId: string) {
+    const existing = await this.prisma.medicalStaff.findFirst({ where: { id, societyId } });
+    if (!existing) throw new NotFoundException('Medical staff not found');
     return this.prisma.medicalStaff.update({ where: { id }, data: { isAvailable: false } });
+  }
+
+  /** Restore a deactivated doctor. Deactivation had no inverse before. */
+  async reactivateMedicalStaff(id: string, societyId: string) {
+    const existing = await this.prisma.medicalStaff.findFirst({ where: { id, societyId } });
+    if (!existing) throw new NotFoundException('Medical staff not found');
+    return this.prisma.medicalStaff.update({ where: { id }, data: { isAvailable: true } });
   }
 
   async getAdminAppointments(societyId: string, date?: string, doctorId?: string) {
@@ -412,7 +453,8 @@ export class MedicalService {
     const alerts = await this.prisma.sosAlert.findMany({
       where: { societyId },
       include: { resident: true },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+      take: 200,
     });
     const userIds = alerts.map((a) => a.residentId);
     const ackIds = alerts.map((a) => a.acknowledgedBy).filter((v): v is string => !!v);
@@ -433,8 +475,8 @@ export class MedicalService {
       const flat = flatByUserId.get(a.residentId);
       return {
         id: a.id,
-        residentName: a.resident?.name ?? null,
-        flat: flat ? `${flat.block ? flat.block + '-' : ''}${flat.number}` : null,
+        residentName: a.resident?.name ?? 'Unknown resident',
+        flat: flat ? `${flat.block ? flat.block + '-' : ''}${flat.number}` : '\u2014',
         alertTime: a.createdAt,
         acknowledgedBy: a.acknowledgedBy ? ackNameById.get(a.acknowledgedBy) ?? null : null,
         acknowledgedAt: a.acknowledgedAt,
@@ -442,6 +484,11 @@ export class MedicalService {
         responseTimeSecs: a.responseTimeSecs,
         status: a.status,
         note: a.note,
+        // Booleans the Medical > SOS Log table renders directly. Without them
+        // every row showed "No" for both columns regardless of the real state.
+        acknowledged: a.status !== 'ACTIVE' || a.acknowledgedAt != null,
+        resolved: a.resolvedAt != null,
+        rating: null as number | null,
       };
     });
   }

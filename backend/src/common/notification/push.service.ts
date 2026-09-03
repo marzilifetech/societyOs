@@ -11,6 +11,21 @@ import {
   type NotificationType,
 } from './notification-categories';
 
+/**
+ * Outcome of a single-recipient send.
+ *
+ * `ok:false` no longer implies the recipient got nothing: when there is no
+ * device token (or FCM is unconfigured) the message is still written to the
+ * in-app inbox and `deliveredInApp` is set, so callers can report
+ * "delivered in-app" instead of a bare failure.
+ */
+export interface PushSendResult {
+  ok: boolean;
+  reason?: string;
+  /** True when the message reached the in-app inbox despite no push delivery. */
+  deliveredInApp?: boolean;
+}
+
 export interface PushNotificationAction {
   id: string;
   title: string;
@@ -578,7 +593,7 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
     notification: PushNotification,
     data?: Record<string, string>,
     deferredLogId?: string,
-  ): Promise<{ ok: boolean; reason?: string }> {
+  ): Promise<PushSendResult> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { id: true, phone: true },
@@ -595,13 +610,20 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
 
     const tokens = await this.resolveTokens(userId);
     if (!tokens.length) {
-      await this.reconcileDeferredSkipped(deferredLogId);
-      return { ok: false, reason: 'no_token' };
+      // No device token does NOT mean "throw the message away". Previously the
+      // whole notification vanished — no push AND no inbox row — so a
+      // maintenance reminder to a resident who had not enabled push simply
+      // never existed. Persist it so it lands in the in-app inbox and the
+      // recipient sees it next time they open the app.
+      await this.writeLog({ id: deferredLogId, userId, notification, data, status: 'SENT' });
+      return { ok: false, reason: 'no_token', deliveredInApp: true };
     }
 
     if (!this.initialized) {
-      await this.reconcileDeferredSkipped(deferredLogId);
-      return { ok: false, reason: 'firebase_not_initialized' };
+      // Same reasoning as `no_token`: an unconfigured/unavailable FCM must not
+      // silently discard the message.
+      await this.writeLog({ id: deferredLogId, userId, notification, data, status: 'SENT' });
+      return { ok: false, reason: 'firebase_not_initialized', deliveredInApp: true };
     }
 
     // OS badge = the recipient's unread inbox count. +1 for this push (its log
@@ -672,7 +694,7 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
     userId: string,
     notification: PushNotification,
     data?: Record<string, string>,
-  ): Promise<{ ok: boolean; reason?: string }> {
+  ): Promise<PushSendResult> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { id: true, phone: true },

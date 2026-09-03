@@ -9,6 +9,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { UserRole } from '@prisma/client';
 import {
   CreateLeaveRequestDto,
+  resolveLeaveFields,
   UpdateLeaveStatusDto,
   AttendanceQueryDto,
   CheckInDto,
@@ -115,7 +116,9 @@ export class StaffController {
   @Post('leave')
   @Roles(UserRole.STAFF)
   requestLeave(@CurrentUser() user: JwtPayload, @Body() dto: CreateLeaveRequestDto) {
-    return this.staffService.requestLeave(user.sub, dto);
+    // The staff app sends leaveType/fromDate/toDate; resolveLeaveFields folds
+    // those aliases onto the canonical names.
+    return this.staffService.requestLeave(user.sub, resolveLeaveFields(dto));
   }
 
   @Patch('leave/:id')

@@ -204,7 +204,10 @@ describe('PushService', () => {
     );
   });
 
-  it('returns no_token when the user has no devices or fcmToken', async () => {
+  // A missing device token must NOT discard the message. It previously did —
+  // no push AND no inbox row — so e.g. a maintenance reminder to a resident
+  // who never enabled push simply never existed anywhere.
+  it('still writes the in-app inbox row when the user has no devices or fcmToken', async () => {
     const prisma = makePrisma();
     prisma.user.findUnique.mockResolvedValue({ id: 'u1', phone: '+910000000000' });
     prisma.device.findMany.mockResolvedValue([]);
@@ -212,8 +215,13 @@ describe('PushService', () => {
     const svc = makeService(prisma);
     const res = await (svc as any).sendNow('u1', baseNotification, undefined);
 
-    expect(res).toEqual({ ok: false, reason: 'no_token' });
+    expect(res).toEqual({ ok: false, reason: 'no_token', deliveredInApp: true });
     expect(mockSendEachForMulticast).not.toHaveBeenCalled();
+    expect(prisma.notificationLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ userId: 'u1', status: 'SENT' }),
+      }),
+    );
   });
 
   it('builds a simple message with android notification.imageUrl when imageUrl is provided', async () => {

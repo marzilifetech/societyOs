@@ -301,7 +301,39 @@ export class WalletService {
     return { success: true, transactionId: txn.id, amount: dto.amount };
   }
 
-  async refund(residentId: string, dto: { amount: number; description: string; reference: string }) {
+  async refund(
+    residentId: string,
+    dto: {
+      amount: number;
+      description: string;
+      reference: string;
+      /** Caller's tenant. Required for admin-issued refunds. */
+      societyId?: string;
+      issuedBy?: string;
+    },
+  ) {
+    if (!(dto.amount > 0)) {
+      throw new BadRequestException({ code: 'INVALID_AMOUNT', message: 'Amount must be greater than zero' });
+    }
+
+    // Tenant scope. `Resident` is deliberately NOT in the Prisma tenant
+    // extension's DIRECT_TENANT_SCOPED set (it has no societyId column), so
+    // without this check an admin could credit a resident in another society
+    // just by knowing their id.
+    const resident = await this.prisma.resident.findFirst({
+      where: {
+        id: residentId,
+        ...(dto.societyId ? { user: { societyId: dto.societyId } } : {}),
+      },
+      select: { id: true, userId: true },
+    });
+    if (!resident) {
+      throw new NotFoundException({
+        code: 'RESIDENT_NOT_FOUND',
+        message: 'Resident not found in this society',
+      });
+    }
+
     // Idempotency: check if reference already processed
     const existing = await this.prisma.walletTransaction.findFirst({
       where: { reference: dto.reference, type: 'CREDIT' },
@@ -315,7 +347,7 @@ export class WalletService {
           amount: dto.amount,
           type: 'CREDIT',
           status: 'COMPLETED',
-          description: dto.description,
+          description: dto.issuedBy ? `${dto.description} (refund issued by admin)` : dto.description,
           reference: dto.reference,
         },
       }),
@@ -325,10 +357,42 @@ export class WalletService {
       }),
     ]);
 
-    const resident = await this.prisma.resident.findUnique({ where: { id: residentId }, select: { userId: true } });
-    if (resident?.userId) this.notifyWalletCredited(resident.userId, dto.amount, txn.id);
+    if (resident.userId) this.notifyWalletCredited(resident.userId, dto.amount, txn.id);
 
-    return { success: true, transactionId: txn.id };
+    return { success: true, transactionId: txn.id, amount: dto.amount, residentId };
+  }
+
+  /**
+   * Type-ahead for the admin refund form. The form used to ask the operator to
+   * type a raw `res_abc123` id by hand, which is unusable in practice.
+   */
+  async searchResidentsForRefund(societyId: string, q?: string) {
+    const term = q?.trim();
+    const residents = await this.prisma.resident.findMany({
+      where: {
+        deletedAt: null,
+        user: { societyId },
+        ...(term
+          ? {
+              OR: [
+                { user: { societyId, name: { contains: term, mode: 'insensitive' as const } } },
+                { user: { societyId, phone: { contains: term } } },
+                { flat: { number: { contains: term, mode: 'insensitive' as const } } },
+              ],
+            }
+          : {}),
+      },
+      include: { user: { select: { name: true, phone: true } }, flat: { select: { block: true, number: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+    return residents.map((r) => ({
+      id: r.id,
+      name: r.user?.name ?? 'Resident',
+      phone: r.user?.phone ?? null,
+      flat: r.flat ? `${r.flat.block ? `${r.flat.block}-` : ''}${r.flat.number}` : null,
+      walletBalance: Number(r.walletBalance),
+    }));
   }
 
   /**

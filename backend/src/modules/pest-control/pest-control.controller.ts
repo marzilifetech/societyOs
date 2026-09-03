@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { ParseEntityIdPipe } from '../../common/pipes/parse-entity-id.pipe';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { PestControlService } from './pest-control.service';
 import { CreatePestControlDto } from './dto/create-pest-control.dto';
@@ -29,7 +30,7 @@ export class PestControlController {
 
   @Get(':id')
   @Roles(UserRole.RESIDENT, UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.STAFF)
-  findOne(@Param('id', ParseUUIDPipe) id: string, @SocietyId() societyId: string) {
+  findOne(@Param('id', ParseEntityIdPipe) id: string, @SocietyId() societyId: string) {
     return this.pestControlService.findOne(id, societyId);
   }
 
@@ -41,13 +42,13 @@ export class PestControlController {
 
   @Patch(':id/complete')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.STAFF)
-  complete(@Param('id', ParseUUIDPipe) id: string, @SocietyId() societyId: string) {
+  complete(@Param('id', ParseEntityIdPipe) id: string, @SocietyId() societyId: string) {
     return this.pestControlService.complete(id, societyId);
   }
 
   @Patch(':id/cancel')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  cancel(@Param('id', ParseUUIDPipe) id: string, @SocietyId() societyId: string) {
+  cancel(@Param('id', ParseEntityIdPipe) id: string, @SocietyId() societyId: string) {
     return this.pestControlService.cancel(id, societyId);
   }
 }

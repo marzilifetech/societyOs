@@ -1,18 +1,144 @@
-import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import { AgmMeetingStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { PushService } from '../../common/notification/push.service';
 import { requireResidentByUserId } from '../../common/utils/resident-context';
 import { VoteDto, VoteChoice, CreateResolutionDto } from './dto/agm.dto';
 
 @Injectable()
 export class AgmService {
-  constructor(private prisma: PrismaService) {}
+  private readonly logger = new Logger(AgmService.name);
+  constructor(
+    private prisma: PrismaService,
+    private push: PushService,
+  ) {}
 
   async getMeetings(societyId: string) {
-    return this.prisma.agmMeeting.findMany({
+    const meetings = await this.prisma.agmMeeting.findMany({
       where: { societyId },
       include: { resolutions: true },
       orderBy: { date: 'desc' },
     });
+    return meetings.map((m) => this.decorateMeeting(m));
+  }
+
+  /**
+   * Create an AGM / general-body meeting.
+   *
+   * There was NO create endpoint at all — the admin screen POSTed
+   * /agm/meetings and got a 404 back, which is the "Cannot create a meeting"
+   * report. Notifying residents is part of scheduling a general-body meeting,
+   * so it happens here rather than being a separate step someone must remember.
+   */
+  async createMeeting(
+    societyId: string,
+    dto: { title: string; date: string; agenda?: string[]; status?: AgmMeetingStatus },
+  ) {
+    const title = dto.title?.trim();
+    if (!title) {
+      throw new BadRequestException({ code: 'TITLE_REQUIRED', message: 'Meeting title is required' });
+    }
+    const date = new Date(dto.date);
+    if (Number.isNaN(date.getTime())) {
+      throw new BadRequestException({ code: 'INVALID_DATE', message: 'A valid meeting date is required' });
+    }
+
+    const meeting = await this.prisma.agmMeeting.create({
+      data: {
+        societyId,
+        title,
+        date,
+        agenda: (dto.agenda ?? []) as any,
+        status: dto.status ?? AgmMeetingStatus.UPCOMING,
+      },
+      include: { resolutions: true },
+    });
+
+    void this.push
+      ?.sendToSociety(
+        societyId,
+        'RESIDENT',
+        {
+          title: `Meeting scheduled: ${meeting.title}`,
+          body: `${meeting.date.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })} \u2014 view the agenda in the app.`,
+          category: 'community',
+          collapseKey: `agm:${meeting.id}`,
+        },
+        { type: 'AGM_MEETING_CREATED', entityId: meeting.id, meetingId: meeting.id },
+      )
+      .catch((e: Error) => this.logger.warn(`agm meeting push failed meeting=${meeting.id}: ${e.message}`));
+
+    return this.decorateMeeting(meeting);
+  }
+
+  async updateMeeting(
+    id: string,
+    societyId: string,
+    dto: { title?: string; date?: string; agenda?: string[]; status?: AgmMeetingStatus; minutesUrl?: string },
+  ) {
+    const existing = await this.prisma.agmMeeting.findFirst({ where: { id, societyId } });
+    if (!existing) throw new NotFoundException('Meeting not found');
+
+    const data: Record<string, any> = {};
+    if (dto.title !== undefined) {
+      const title = dto.title.trim();
+      if (!title) throw new BadRequestException({ code: 'TITLE_REQUIRED', message: 'Meeting title is required' });
+      data.title = title;
+    }
+    if (dto.date !== undefined) {
+      const date = new Date(dto.date);
+      if (Number.isNaN(date.getTime())) {
+        throw new BadRequestException({ code: 'INVALID_DATE', message: 'A valid meeting date is required' });
+      }
+      data.date = date;
+    }
+    if (dto.agenda !== undefined) data.agenda = dto.agenda as any;
+    if (dto.status !== undefined) data.status = dto.status;
+    if (dto.minutesUrl !== undefined) data.minutesUrl = dto.minutesUrl || null;
+
+    const updated = await this.prisma.agmMeeting.update({
+      where: { id },
+      data,
+      include: { resolutions: true },
+    });
+    return this.decorateMeeting(updated);
+  }
+
+  /**
+   * Shapes a meeting for admin/resident lists.
+   *
+   * `AgmResolution` has no `votingDeadline` column — `createResolution` stashes
+   * it in the `votes` JSON under the reserved `__deadline` key. Surfacing it
+   * here is what lets the admin screen render a deadline instead of
+   * `undefined`. It also strips the raw ballot: `votes` is a map of
+   * residentId -> choice, and returning it wholesale leaked every resident's
+   * individual vote to any caller.
+   */
+  private decorateMeeting<T extends { resolutions?: any[] }>(meeting: T) {
+    if (!Array.isArray(meeting.resolutions)) return meeting;
+    return {
+      ...meeting,
+      resolutions: meeting.resolutions.map((r) => this.decorateResolution(r)),
+    };
+  }
+
+  private decorateResolution(resolution: any) {
+    const raw = (resolution?.votes as Record<string, any>) ?? {};
+    const counts = { FOR: 0, AGAINST: 0, ABSTAIN: 0, total: 0 };
+    for (const [key, value] of Object.entries(raw)) {
+      if (key === '__proxies' || key === '__deadline') continue;
+      const vote = value as string;
+      if (vote === 'FOR' || vote === 'AGAINST' || vote === 'ABSTAIN') {
+        counts[vote] += 1;
+        counts.total += 1;
+      }
+    }
+    const { votes: _omitted, ...rest } = resolution ?? {};
+    return {
+      ...rest,
+      votingDeadline: raw.__deadline ?? null,
+      voteSummary: counts,
+    };
   }
 
   async getMeeting(id: string) {

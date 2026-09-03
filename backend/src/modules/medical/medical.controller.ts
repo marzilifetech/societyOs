@@ -145,8 +145,18 @@ export class MedicalController {
 
   @Patch('/admin/medical/staff/:id')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  updateMedicalStaff(@Param('id') id: string, @Body() dto: any) {
-    return this.medicalService.updateMedicalStaff(id, dto);
+  updateMedicalStaff(
+    @Param('id') id: string,
+    @SocietyId() societyId: string,
+    @Body() dto: Record<string, any>,
+  ) {
+    return this.medicalService.updateMedicalStaff(id, societyId, dto);
+  }
+
+  @Patch('/admin/medical/staff/:id/reactivate')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  reactivateMedicalStaff(@Param('id') id: string, @SocietyId() societyId: string) {
+    return this.medicalService.reactivateMedicalStaff(id, societyId);
   }
 
   @Patch('/admin/medical/appointments/:id')
@@ -161,8 +171,8 @@ export class MedicalController {
 
   @Delete('/admin/medical/staff/:id')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  deleteMedicalStaff(@Param('id') id: string) {
-    return this.medicalService.deleteMedicalStaff(id);
+  deleteMedicalStaff(@Param('id') id: string, @SocietyId() societyId: string) {
+    return this.medicalService.deleteMedicalStaff(id, societyId);
   }
 
   @Get('/admin/medical/appointments')

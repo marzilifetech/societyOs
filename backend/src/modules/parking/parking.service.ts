@@ -1,7 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { requireResidentByUserId } from '../../common/utils/resident-context';
-import { RequestGuestParkingDto, ReportUnauthorizedDto, GuestParkingRequestDto } from './dto/parking.dto';
+import {
+  RequestGuestParkingDto,
+  ReportUnauthorizedDto,
+  GuestParkingRequestDto,
+  LogGuestParkingDto,
+} from './dto/parking.dto';
 import { ParkingSlotType, IncidentType, IncidentSeverity } from '@prisma/client';
 
 @Injectable()
@@ -85,7 +90,15 @@ export class ParkingService {
     const occupied = await this.prisma.parkingSlot.count({
       where: { societyId, type: ParkingSlotType.VISITOR, isOccupied: true },
     });
-    return { total, occupied, available: total - occupied };
+    const guestsOnSite = await this.prisma.guestParkingLog.count({
+      where: { societyId, exitAt: null },
+    });
+    return {
+      total,
+      occupied,
+      available: Math.max(0, total - occupied),
+      guestsOnSite,
+    };
   }
 
   async requestGuestParking(userId: string, societyId: string, dto: RequestGuestParkingDto) {
@@ -106,6 +119,136 @@ export class ParkingService {
       requestedAt: visitor.createdAt,
       visitorId: visitor.id,
     };
+  }
+
+  // ── Admin / gate guest parking ────────────────────────────────────────────
+  //
+  // The dashboard's "Log Guest Parking" button posted to POST /parking/guest,
+  // which is @Roles(RESIDENT) and calls requireResidentByUserId() on the
+  // caller. An admin is not a resident, so the button 403'd every time — the
+  // "Log guest parking is not functional" report. Gate-side logging is a
+  // genuinely different operation (no host resident, needs an occupancy
+  // lifecycle) and gets its own record.
+
+  /**
+   * Log a guest vehicle at the gate. Optionally occupies a VISITOR slot; when
+   * `slotId` is omitted the first free VISITOR slot is auto-assigned so the
+   * availability counter stays honest.
+   */
+  async logGuestParking(
+    societyId: string,
+    loggedById: string,
+    dto: LogGuestParkingDto,
+  ) {
+    const plate = dto.vehiclePlate.trim().toUpperCase();
+    if (!plate) {
+      throw new BadRequestException({ code: 'PLATE_REQUIRED', message: 'Vehicle plate is required' });
+    }
+
+    // Same plate already parked and not yet exited -> reject rather than
+    // silently double-occupying a bay.
+    const openForPlate = await this.prisma.guestParkingLog.findFirst({
+      where: { societyId, vehiclePlate: plate, exitAt: null },
+    });
+    if (openForPlate) {
+      throw new ConflictException({
+        code: 'ALREADY_PARKED',
+        message: `${plate} is already logged in and has not exited yet`,
+        logId: openForPlate.id,
+      });
+    }
+
+    let slotId: string | null = null;
+    if (dto.slotId) {
+      const slot = await this.prisma.parkingSlot.findFirst({
+        where: { id: dto.slotId, societyId },
+      });
+      if (!slot) {
+        throw new NotFoundException({ code: 'SLOT_NOT_FOUND', message: 'Parking slot not found' });
+      }
+      if (slot.isOccupied) {
+        throw new ConflictException({ code: 'SLOT_OCCUPIED', message: `Slot ${slot.slotNumber} is occupied` });
+      }
+      slotId = slot.id;
+    } else {
+      const free = await this.prisma.parkingSlot.findFirst({
+        where: { societyId, type: ParkingSlotType.VISITOR, isOccupied: false },
+        orderBy: { slotNumber: 'asc' },
+      });
+      slotId = free?.id ?? null; // no visitor bays configured -> log without one
+    }
+
+    const log = await this.prisma.guestParkingLog.create({
+      data: {
+        societyId,
+        slotId,
+        vehiclePlate: plate,
+        visitorName: dto.visitorName?.trim() || null,
+        flatLabel: dto.flatLabel?.trim() || null,
+        notes: dto.notes?.trim() || null,
+        loggedById,
+      },
+      include: { slot: true },
+    });
+
+    if (slotId) {
+      await this.prisma.parkingSlot.update({ where: { id: slotId }, data: { isOccupied: true } });
+    }
+
+    return {
+      id: log.id,
+      vehiclePlate: log.vehiclePlate,
+      visitorName: log.visitorName,
+      flatLabel: log.flatLabel,
+      notes: log.notes,
+      slot: log.slot ? { id: log.slot.id, slotNumber: log.slot.slotNumber } : null,
+      entryAt: log.entryAt,
+      exitAt: null as Date | null,
+      slotAssigned: Boolean(slotId),
+    };
+  }
+
+  /** Mark a guest vehicle as departed and release its bay. */
+  async exitGuestParking(societyId: string, logId: string) {
+    const log = await this.prisma.guestParkingLog.findFirst({ where: { id: logId, societyId } });
+    if (!log) throw new NotFoundException({ code: 'LOG_NOT_FOUND', message: 'Guest parking entry not found' });
+    if (log.exitAt) return { ...log, alreadyExited: true };
+
+    const updated = await this.prisma.guestParkingLog.update({
+      where: { id: logId },
+      data: { exitAt: new Date() },
+    });
+    if (log.slotId) {
+      await this.prisma.parkingSlot
+        .update({ where: { id: log.slotId }, data: { isOccupied: false } })
+        .catch(() => undefined);
+    }
+    return { ...updated, alreadyExited: false };
+  }
+
+  /** Guest parking log. `active=true` returns only vehicles still on-site. */
+  async listGuestParking(societyId: string, active?: boolean) {
+    const logs = await this.prisma.guestParkingLog.findMany({
+      where: { societyId, ...(active ? { exitAt: null } : {}) },
+      include: { slot: { select: { id: true, slotNumber: true } } },
+      orderBy: { entryAt: 'desc' },
+      take: 200,
+    });
+    return logs.map((log) => ({
+      id: log.id,
+      vehiclePlate: log.vehiclePlate,
+      visitorName: log.visitorName,
+      flatLabel: log.flatLabel,
+      notes: log.notes,
+      slot: log.slot,
+      entryAt: log.entryAt,
+      exitAt: log.exitAt,
+      isParked: log.exitAt == null,
+      durationMinutes: Math.max(
+        0,
+        Math.round(((log.exitAt ?? new Date()).getTime() - log.entryAt.getTime()) / 60_000),
+      ),
+    }));
   }
 
   async reportUnauthorized(userId: string, societyId: string, dto: ReportUnauthorizedDto) {

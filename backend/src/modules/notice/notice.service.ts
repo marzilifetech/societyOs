@@ -270,6 +270,17 @@ export class NoticeService {
     });
   }
 
+  /**
+   * Admin poll list.
+   *
+   * `Poll` has no status column — a poll is closed purely by its deadline
+   * passing (and `closePoll` works by setting the deadline to now). The admin
+   * screen renders `poll.status` and gates its "Close Poll" button on
+   * `status === 'ACTIVE'`, so with no status in the payload every poll rendered
+   * as neither active nor closed: an expired poll kept sitting in the list
+   * looking live, with no way to close it. Derive it here so there is exactly
+   * one definition of "closed" and every client agrees.
+   */
   async getAllPolls(societyId: string) {
     const polls = await this.prisma.poll.findMany({
       where: { societyId },
@@ -277,11 +288,21 @@ export class NoticeService {
       orderBy: { createdAt: 'desc' },
     });
 
-    return polls.map((poll) => ({
-      ...poll,
-      options: Array.isArray(poll.options) ? poll.options : [],
-      voteCount: poll._count.votes,
-    }));
+    const now = Date.now();
+    return polls.map((poll) => {
+      const isClosed = poll.deadline.getTime() <= now;
+      return {
+        ...poll,
+        options: Array.isArray(poll.options) ? poll.options : [],
+        voteCount: poll._count.votes,
+        // `totalVotes` is the name the admin screen reads; `voteCount` kept for
+        // any existing consumer.
+        totalVotes: poll._count.votes,
+        status: isClosed ? 'CLOSED' : 'ACTIVE',
+        isClosed,
+        closesAt: poll.deadline.toISOString(),
+      };
+    });
   }
 
   async closePoll(pollId: string, societyId: string) {
@@ -290,7 +311,11 @@ export class NoticeService {
       societyId,
       'Poll',
     );
-    return this.prisma.poll.update({ where: { id: pollId }, data: { deadline: new Date() } });
+    const updated = await this.prisma.poll.update({
+      where: { id: pollId },
+      data: { deadline: new Date() },
+    });
+    return { ...updated, status: 'CLOSED', isClosed: true };
   }
 
   // ── Property admin methods ───────────────────────────────────────────────────

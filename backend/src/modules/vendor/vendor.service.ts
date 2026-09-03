@@ -1,7 +1,12 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { requireResidentByUserId } from '../../common/utils/resident-context';
-import { CreateVendorDto, UpdateVendorDto, VendorCategory } from './dto/create-vendor.dto';
+import {
+  CreateVendorDto,
+  UpdateVendorDto,
+  VendorCategory,
+  normaliseVendorCategory,
+} from './dto/create-vendor.dto';
 import { CreateVendorOrderDto, UpdateVendorOrderStatusDto } from './dto/create-order.dto';
 
 @Injectable()
@@ -42,14 +47,33 @@ export class VendorService {
   }
 
   async createVendor(societyId: string, dto: CreateVendorDto) {
+    const name = dto.name?.trim();
+    if (!name) {
+      throw new BadRequestException({ code: 'NAME_REQUIRED', message: 'Vendor name is required' });
+    }
     return this.prisma.vendor.create({
-      data: { societyId, ...dto, isActive: dto.isActive ?? true },
+      data: {
+        societyId,
+        name,
+        category: normaliseVendorCategory(dto.category),
+        // The dashboard sends '' for an untouched optional field; store null so
+        // the list does not render an empty phone chip.
+        phone: dto.phone?.trim() || null,
+        logoUrl: dto.logoUrl?.trim() || null,
+        isActive: dto.isActive ?? true,
+      },
     });
   }
 
   async updateVendor(id: string, dto: UpdateVendorDto) {
     await this.getVendor(id);
-    return this.prisma.vendor.update({ where: { id }, data: dto as any });
+    const data: Record<string, any> = {};
+    if (dto.name !== undefined) data.name = dto.name.trim();
+    if (dto.category !== undefined) data.category = normaliseVendorCategory(dto.category);
+    if (dto.phone !== undefined) data.phone = dto.phone.trim() || null;
+    if (dto.logoUrl !== undefined) data.logoUrl = dto.logoUrl.trim() || null;
+    if (dto.isActive !== undefined) data.isActive = dto.isActive;
+    return this.prisma.vendor.update({ where: { id }, data: data as any });
   }
 
   async softDeleteVendor(id: string) {

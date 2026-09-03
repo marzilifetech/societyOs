@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Patch, Body, Param, ParseUUIDPipe, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { ParseEntityIdPipe } from '../../common/pipes/parse-entity-id.pipe';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { SubscriptionService } from './subscription.service';
 import { CreateSubscriptionDto, PauseSubscriptionDto, CancelSubscriptionDto } from './dto/create-subscription.dto';
@@ -32,22 +33,22 @@ export class SubscriptionController {
   }
 
   @Get(':id')
-  findOne(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: JwtPayload) {
+  findOne(@Param('id', ParseEntityIdPipe) id: string, @CurrentUser() user: JwtPayload) {
     return this.subscriptionService.findOne(id, user.sub);
   }
 
   @Patch(':id/pause')
-  pause(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: JwtPayload, @Body() dto: PauseSubscriptionDto) {
+  pause(@Param('id', ParseEntityIdPipe) id: string, @CurrentUser() user: JwtPayload, @Body() dto: PauseSubscriptionDto) {
     return this.subscriptionService.pause(id, user.sub, dto);
   }
 
   @Patch(':id/cancel')
-  cancel(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: JwtPayload, @Body() dto: CancelSubscriptionDto) {
+  cancel(@Param('id', ParseEntityIdPipe) id: string, @CurrentUser() user: JwtPayload, @Body() dto: CancelSubscriptionDto) {
     return this.subscriptionService.cancel(id, user.sub, dto);
   }
 
   @Post(':id/resume')
-  resume(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: JwtPayload) {
+  resume(@Param('id', ParseEntityIdPipe) id: string, @CurrentUser() user: JwtPayload) {
     return this.subscriptionService.resume(id, user.sub);
   }
 }

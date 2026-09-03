@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Patch, Param, Body, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { ConciergeService } from './concierge.service';
-import { RateConciergeDto } from './dto/concierge.dto';
+import { RateConciergeDto, CreateConciergeRequestDto } from './dto/concierge.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
@@ -21,7 +21,7 @@ export class ConciergeController {
   createRequest(
     @CurrentUser() user: JwtPayload,
     @SocietyId() societyId: string,
-    @Body() dto: { type: string; description?: string },
+    @Body() dto: CreateConciergeRequestDto,
   ) {
     return this.conciergeService.createRequest(user.sub, societyId, dto);
   }
@@ -86,6 +86,21 @@ export class ConciergeRequestsController {
   @Patch(':id/rate')
   @Roles(UserRole.RESIDENT)
   rate(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @SocietyId() societyId: string,
+    @Body() dto: RateConciergeDto,
+  ) {
+    return this.conciergeService.rateRequest(user.sub, id, societyId, dto);
+  }
+
+  /**
+   * POST alias. The resident app rates with POST; only PATCH existed, so every
+   * rating attempt 404'd.
+   */
+  @Post(':id/rate')
+  @Roles(UserRole.RESIDENT)
+  ratePost(
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,
     @SocietyId() societyId: string,

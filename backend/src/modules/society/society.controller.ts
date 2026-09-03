@@ -40,6 +40,15 @@ export class SocietyController {
     return this.societyService.getBudget(societyId, query.year, query.month);
   }
 
+  /** Every published budget, newest first — backs the Budget History tab. */
+  @Get('budget/history')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.RESIDENT)
+  listBudgets(@SocietyId() societyId: string) {
+    return this.societyService.listBudgets(societyId);
+  }
+
   @Post('budget')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)

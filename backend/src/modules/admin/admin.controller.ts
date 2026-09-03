@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Param, Query, Body, UseGuards, Header, StreamableFile, Req } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Put, Delete, Param, Query, Body, UseGuards, Header, StreamableFile, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
@@ -13,6 +13,7 @@ import {
   CreateSocietyDto,
   CreateStaffDto,
   SendPushNotificationDto,
+  UpdateMaintenanceRateDto,
   UpdateSocietyDto,
 } from './dto/admin.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -103,8 +104,12 @@ export class AdminController {
 
   @Get('residents')
   @RequirePermission(PERMISSIONS.RESIDENTS_READ)
-  getResidents(@SocietyId() societyId: string, @CurrentUser() user: JwtPayload) {
-    return this.adminService.getResidents(societyId, user.managedBlocks);
+  getResidents(
+    @SocietyId() societyId: string,
+    @CurrentUser() user: JwtPayload,
+    @Query('status') status?: string,
+  ) {
+    return this.adminService.getResidents(societyId, user.managedBlocks, status);
   }
 
   @Patch('residents/:id/approve')
@@ -216,8 +221,23 @@ export class AdminController {
   @Patch('staff/:id/deactivate')
   @RequirePermission(PERMISSIONS.STAFF_DEACTIVATE)
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  deactivateStaff(@Param('id') id: string, @SocietyId() societyId: string) {
-    return this.adminService.deactivateStaff(id, societyId);
+  deactivateStaff(
+    @Param('id') id: string,
+    @SocietyId() societyId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.adminService.deactivateStaff(id, societyId, { id: user.sub, role: user.role });
+  }
+
+  @Patch('staff/:id/reactivate')
+  @RequirePermission(PERMISSIONS.STAFF_DEACTIVATE)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  reactivateStaff(
+    @Param('id') id: string,
+    @SocietyId() societyId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.adminService.reactivateStaff(id, societyId, { id: user.sub, role: user.role });
   }
 
   @Get('staff/:id')
@@ -225,6 +245,17 @@ export class AdminController {
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   getStaffDetail(@Param('id') id: string, @SocietyId() societyId: string) {
     return this.adminService.getStaffDetail(id, societyId);
+  }
+
+  /**
+   * Society-wide attendance for a day. Declared before `staff/:id/...` so the
+   * literal `attendance` segment is not captured as a staff id.
+   */
+  @Get('staff/attendance/today')
+  @RequirePermission(PERMISSIONS.STAFF_READ)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  getStaffAttendanceToday(@SocietyId() societyId: string, @Query('date') date?: string) {
+    return this.adminService.getStaffAttendanceToday(societyId, date);
   }
 
   @Get('staff/:id/attendance')
@@ -531,13 +562,42 @@ export class AdminController {
     @Body('year') year: number,
     @Body('month') month: number,
   ) {
-    return this.adminService.generateBills(societyId, year, month);
+    return this.adminService.generateBills(societyId, Number(year), Number(month));
+  }
+
+  /**
+   * Dry run: exact per-flat charge sheet, total, and every skipped flat with a
+   * reason — reviewed BEFORE the irreversible society-wide write.
+   */
+  @Post('maintenance/bills/preview')
+  @RequirePermission(PERMISSIONS.BILLING_READ)
+  previewBills(
+    @SocietyId() societyId: string,
+    @Body('year') year: number,
+    @Body('month') month: number,
+  ) {
+    return this.adminService.previewBills(societyId, Number(year), Number(month));
+  }
+
+  @Get('maintenance/rate-config')
+  @RequirePermission(PERMISSIONS.BILLING_READ)
+  getMaintenanceRateConfig(@SocietyId() societyId: string) {
+    return this.adminService.getMaintenanceRateConfig(societyId);
+  }
+
+  @Put('maintenance/rate-config')
+  @RequirePermission(PERMISSIONS.BILLING_WRITE)
+  updateMaintenanceRateConfig(
+    @SocietyId() societyId: string,
+    @Body() dto: UpdateMaintenanceRateDto,
+  ) {
+    return this.adminService.updateMaintenanceRateConfig(societyId, dto);
   }
 
   @Get('events')
   @RequirePermission(PERMISSIONS.EVENTS_MANAGE)
-  getAdminEvents(@SocietyId() societyId: string) {
-    return this.adminService.getAdminEvents(societyId);
+  getAdminEvents(@SocietyId() societyId: string, @Query('status') status?: string) {
+    return this.adminService.getAdminEvents(societyId, status);
   }
 
   @Post('events')

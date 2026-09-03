@@ -10,7 +10,9 @@ import {
   IsString,
   Length,
   Matches,
+  Max,
   MaxLength,
+  Min,
   MinLength,
   ValidateNested,
 } from 'class-validator';
@@ -280,4 +282,41 @@ export class CreateSocietyDto {
   @IsOptional()
   @IsString()
   residentsCsv?: string;
+}
+
+/**
+ * Society maintenance rate card. Bill generation previously hardcoded a base
+ * amount of 0, so every generated bill was for zero rupees; the rate now comes
+ * from here. Every field is optional so the screen can PATCH-style save one
+ * setting at a time.
+ */
+export class UpdateMaintenanceRateDto {
+  @ApiPropertyOptional({ enum: ['FLAT', 'PER_SQFT'] })
+  @IsOptional()
+  @IsIn(['FLAT', 'PER_SQFT'])
+  mode?: 'FLAT' | 'PER_SQFT';
+
+  @ApiPropertyOptional({ description: 'Amount charged per unit when mode = FLAT' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  flatRate?: number;
+
+  @ApiPropertyOptional({ description: 'Multiplied by flat.areaSqft when mode = PER_SQFT' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  ratePerSqft?: number;
+
+  @ApiPropertyOptional({ description: 'Day of month the bill falls due (1-28)' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(28)
+  dueDay?: number;
+
+  @ApiPropertyOptional({ description: 'Per-flat amount overrides keyed by flatId' })
+  @IsOptional()
+  @IsObject()
+  overrides?: Record<string, number>;
 }

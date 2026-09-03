@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Patch, Body, Param, ParseUUIDPipe, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { ParseEntityIdPipe } from '../../common/pipes/parse-entity-id.pipe';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { PackageService } from './package.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -49,7 +50,7 @@ export class PackageController {
 
   @Patch(':id/collect')
   @Roles(UserRole.RESIDENT, UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.STAFF)
-  markCollected(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: JwtPayload) {
+  markCollected(@Param('id', ParseEntityIdPipe) id: string, @CurrentUser() user: JwtPayload) {
     return this.packageService.markCollected(id, user.societyId);
   }
 }

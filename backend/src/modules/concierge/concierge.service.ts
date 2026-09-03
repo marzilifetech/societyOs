@@ -1,5 +1,5 @@
 import { Injectable, Logger, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
-import { RateConciergeDto } from './dto/concierge.dto';
+import { RateConciergeDto, normaliseConciergeType } from './dto/concierge.dto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PushService } from '../../common/notification/push.service';
 import { requireOwnedById } from '../../common/tenancy/require-owned.util';
@@ -9,11 +9,27 @@ export class ConciergeService {
   private readonly logger = new Logger(ConciergeService.name);
   constructor(private prisma: PrismaService, private push: PushService) {}
 
-  async createRequest(userId: string, societyId: string, dto: { type: string; description?: string }) {
+  async createRequest(
+    userId: string,
+    societyId: string,
+    dto: { type: string; description?: string; preferredTime?: string },
+  ) {
     const resident = await this.prisma.resident.findFirst({ where: { user: { id: userId } } });
     if (!resident) throw new NotFoundException('Resident not found');
+
+    const type = normaliseConciergeType(dto.type);
+    const label = typeof dto.type === 'string' ? dto.type.trim() : '';
+    // Keep the original label when it did not map cleanly, so the desk still
+    // knows the resident asked for e.g. "Heavy Lifting" and not just "OTHER".
+    const parts = [dto.description?.trim(), type === 'OTHER' && label && label.toUpperCase() !== 'OTHER' ? `Category: ${label}` : '', dto.preferredTime?.trim() ? `Preferred: ${dto.preferredTime.trim()}` : ''].filter(Boolean);
+
     return this.prisma.conciergeRequest.create({
-      data: { societyId, residentId: resident.id, type: dto.type as any, description: dto.description ?? '' },
+      data: {
+        societyId,
+        residentId: resident.id,
+        type,
+        description: parts.join(' \u2014 ') || label || 'Assistance requested',
+      },
       include: { resident: { include: { user: true, flat: true } } },
     });
   }

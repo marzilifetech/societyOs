@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { IsString, IsOptional, IsEnum, IsDateString, IsNumber, IsInt, Min, Max, IsBoolean, IsObject } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
@@ -17,22 +18,77 @@ export enum LeaveStatus {
   REJECTED = 'REJECTED',
 }
 
+/**
+ * Apply for leave.
+ *
+ * The staff app posts `{ leaveType, fromDate, toDate, reason }` — it copied the
+ * shape of the ADMIN leave-list RESPONSE, which renames these fields. This DTO
+ * only declared `{ type, startDate, endDate }`, and the global ValidationPipe
+ * runs with `forbidNonWhitelisted: true`, so every submission was rejected with
+ * `400 property leaveType should not exist`: the "Submit request is not
+ * functional" report.
+ *
+ * Both spellings are accepted. Doing this server-side matters because app
+ * builds already in users' hands cannot be force-updated — they start working
+ * the moment this ships. `resolveLeaveFields` picks the canonical values.
+ */
 export class CreateLeaveRequestDto {
-  @ApiProperty({ enum: LeaveType })
+  @ApiPropertyOptional({ enum: LeaveType, description: 'Alias of `leaveType`.' })
+  @IsOptional()
   @IsEnum(LeaveType)
-  type: LeaveType;
+  type?: LeaveType;
 
-  @ApiProperty()
-  @IsDateString()
-  startDate: string;
+  @ApiPropertyOptional({ enum: LeaveType, description: 'Alias of `type`.' })
+  @IsOptional()
+  @IsEnum(LeaveType)
+  leaveType?: LeaveType;
 
-  @ApiProperty()
+  @ApiPropertyOptional({ description: 'Alias of `fromDate`.' })
+  @IsOptional()
   @IsDateString()
-  endDate: string;
+  startDate?: string;
+
+  @ApiPropertyOptional({ description: 'Alias of `startDate`.' })
+  @IsOptional()
+  @IsDateString()
+  fromDate?: string;
+
+  @ApiPropertyOptional({ description: 'Alias of `toDate`.' })
+  @IsOptional()
+  @IsDateString()
+  endDate?: string;
+
+  @ApiPropertyOptional({ description: 'Alias of `endDate`.' })
+  @IsOptional()
+  @IsDateString()
+  toDate?: string;
 
   @ApiProperty()
   @IsString()
   reason: string;
+}
+
+/** Collapses the accepted aliases into the canonical leave fields. */
+export function resolveLeaveFields(dto: CreateLeaveRequestDto): {
+  type: LeaveType;
+  startDate: string;
+  endDate: string;
+  reason: string;
+} {
+  const type = dto.type ?? dto.leaveType;
+  const startDate = dto.startDate ?? dto.fromDate;
+  const endDate = dto.endDate ?? dto.toDate;
+  const missing: string[] = [];
+  if (!type) missing.push('type');
+  if (!startDate) missing.push('startDate');
+  if (!endDate) missing.push('endDate');
+  if (missing.length) {
+    throw new BadRequestException({
+      code: 'LEAVE_FIELDS_MISSING',
+      message: `Missing required leave field(s): ${missing.join(', ')}`,
+    });
+  }
+  return { type: type as LeaveType, startDate: startDate!, endDate: endDate!, reason: dto.reason };
 }
 
 export class UpdateLeaveStatusDto {

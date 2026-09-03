@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Body, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Post, Body, Query, UseGuards } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { WalletService } from './wallet.service';
@@ -9,7 +10,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
 import { SocietyId } from '../../common/decorators/society.decorator';
 import { UserRole } from '@prisma/client';
-import { IsNumber, IsOptional, IsString, IsPositive, IsNotEmpty, IsInt, Min } from 'class-validator';
+import { IsNumber, IsOptional, IsString, IsPositive, IsNotEmpty, IsInt, MaxLength, Min } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 
@@ -53,6 +54,17 @@ class TransactionPageDto {
   limit?: number = 20;
 }
 
+/**
+ * Admin-issued wallet refund.
+ *
+ * The dashboard's Issue Refund form sends `reason` (its textarea label) and
+ * treats `reference` as optional. This DTO demanded `description` and a
+ * non-empty `reference`, and the global ValidationPipe runs with
+ * `forbidNonWhitelisted: true` — so every submission was rejected with
+ * `400 property reason should not exist`. Accept both names, and mint a
+ * reference when the admin has no external one, which is the normal case for a
+ * goodwill credit.
+ */
 class RefundDto {
   @ApiProperty()
   @IsString()
@@ -64,15 +76,23 @@ class RefundDto {
   @IsPositive()
   amount: number;
 
-  @ApiProperty()
+  @ApiPropertyOptional({ description: 'Reason for the refund. Alias of `reason`.' })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  description: string;
+  @MaxLength(500)
+  description?: string;
 
-  @ApiProperty()
+  @ApiPropertyOptional({ description: 'Reason for the refund. Alias of `description`.' })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  reference: string;
+  @MaxLength(500)
+  reason?: string;
+
+  @ApiPropertyOptional({ description: 'External reference. Auto-generated when omitted.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  reference?: string;
 }
 
 @ApiTags('wallet')
@@ -122,7 +142,33 @@ export class AdminWalletController {
   }
 
   @Post('refund')
-  refund(@Body() dto: RefundDto) {
-    return this.walletService.refund(dto.residentId, dto);
+  refund(
+    @Body() dto: RefundDto,
+    @SocietyId() societyId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    const description = (dto.description ?? dto.reason ?? '').trim();
+    if (!description) {
+      throw new BadRequestException({
+        code: 'REASON_REQUIRED',
+        message: 'A reason for the refund is required',
+      });
+    }
+    return this.walletService.refund(dto.residentId, {
+      amount: dto.amount,
+      description,
+      // Idempotency key. Without a caller-supplied external reference we mint
+      // one; a blank/shared reference would make the service's "already
+      // processed" check collapse every refund into the first one.
+      reference: dto.reference?.trim() || `manual-refund:${randomUUID()}`,
+      societyId,
+      issuedBy: user.sub,
+    });
+  }
+
+  /** Resident lookup for the refund form, so admins stop typing raw ids. */
+  @Get('residents')
+  searchResidents(@SocietyId() societyId: string, @Query('q') q?: string) {
+    return this.walletService.searchResidentsForRefund(societyId, q);
   }
 }

@@ -745,13 +745,72 @@ describe('AdminService', () => {
 
   describe('deactivateStaff', () => {
     it('sets user status INACTIVE for same-society staff', async () => {
-      mockPrisma.staffMember.findUnique.mockResolvedValue({ id: 'sm-1', userId: 'u1', societyId: 'soc-1' });
+      mockPrisma.staffMember.findUnique.mockResolvedValue({
+        id: 'sm-1',
+        userId: 'u1',
+        societyId: 'soc-1',
+        user: { status: 'ACTIVE' },
+      });
       mockPrisma.user.update.mockResolvedValue({});
       const result = await service.deactivateStaff('sm-1', 'soc-1');
       expect(result.success).toBe(true);
+      // The caller needs the resulting state: the dashboard reported
+      // "deactivated" while the row rendered unchanged, because nothing in the
+      // response (or in getStaff) ever carried the account status.
+      expect(result.status).toBe('INACTIVE');
       expect(mockPrisma.user.update).toHaveBeenCalledWith({
         where: { id: 'u1' },
         data: { status: 'INACTIVE' },
+      });
+    });
+
+    it('is idempotent and does not re-write an already-inactive staff member', async () => {
+      mockPrisma.staffMember.findUnique.mockResolvedValue({
+        id: 'sm-1',
+        userId: 'u1',
+        societyId: 'soc-1',
+        user: { status: 'INACTIVE' },
+      });
+      const result = await service.deactivateStaff('sm-1', 'soc-1');
+      expect(result).toMatchObject({ success: true, alreadyInactive: true, status: 'INACTIVE' });
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects staff from another society', async () => {
+      mockPrisma.staffMember.findUnique.mockResolvedValue({
+        id: 'sm-1',
+        userId: 'u1',
+        societyId: 'other-soc',
+        user: { status: 'ACTIVE' },
+      });
+      await expect(service.deactivateStaff('sm-1', 'soc-1')).rejects.toThrow(ForbiddenException);
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('reactivateStaff', () => {
+    it('restores ACTIVE and clears off-boarding markers on a re-hire', async () => {
+      mockPrisma.staffMember.findUnique.mockResolvedValue({
+        id: 'sm-1',
+        userId: 'u1',
+        societyId: 'soc-1',
+        leavingDate: new Date('2026-01-01'),
+        deletedAt: new Date('2026-01-01'),
+        user: { status: 'SUSPENDED' },
+      });
+      mockPrisma.user.update.mockResolvedValue({});
+      mockPrisma.staffMember.update.mockResolvedValue({});
+
+      const result = await service.reactivateStaff('sm-1', 'soc-1');
+
+      expect(result).toMatchObject({ success: true, status: 'ACTIVE' });
+      expect(mockPrisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'u1' },
+        data: { status: 'ACTIVE' },
+      });
+      expect(mockPrisma.staffMember.update).toHaveBeenCalledWith({
+        where: { id: 'sm-1' },
+        data: { leavingDate: null, deletedAt: null },
       });
     });
   });

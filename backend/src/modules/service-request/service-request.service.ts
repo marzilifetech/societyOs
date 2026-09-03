@@ -16,6 +16,8 @@ import {
   RateServiceRequestDto,
 } from './dto/service-request.dto';
 import { requireResidentByUserId } from '../../common/utils/resident-context';
+import { toCsvRow } from '../../common/utils/csv.util';
+import { formatIst } from '../../common/utils/ist-time.util';
 import { SERVICE_REQUEST_TRANSITIONS } from './service-request.transitions';
 import { S3Service } from '../../common/storage/s3.service';
 import { ServiceRequestGateway } from './service-request.gateway';
@@ -270,6 +272,111 @@ export class ServiceRequestService {
       orderBy: { createdAt: 'desc' },
     });
     return this.enrichManyWithAssignedStaff(rows);
+  }
+
+  /**
+   * Complete CSV export of service requests.
+   *
+   * The dashboard used to build this in the browser from `displayRequests` —
+   * i.e. only the rows currently loaded AND currently filtered, with 10 columns
+   * that omitted the description, the assigned staff, every timestamp past
+   * creation, and the resolution. That is the "Export CSV is incomplete"
+   * report. Exporting server-side means the file covers the full result set for
+   * the chosen filters and carries the whole record.
+   *
+   * All timestamps are rendered in IST so the CSV matches what the operator
+   * saw on screen (see `formatIst`).
+   */
+  async exportCsv(
+    societyId: string,
+    opts: { status?: ServiceRequestStatus; from?: string; to?: string; managedBlocks?: string[] } = {},
+  ): Promise<string> {
+    const blockWhere = opts.managedBlocks?.length
+      ? { resident: { flat: { block: { in: opts.managedBlocks } } } }
+      : {};
+    const createdAt: Record<string, Date> = {};
+    if (opts.from) {
+      const d = new Date(opts.from);
+      if (!Number.isNaN(d.getTime())) createdAt.gte = d;
+    }
+    if (opts.to) {
+      const d = new Date(opts.to);
+      if (!Number.isNaN(d.getTime())) createdAt.lte = d;
+    }
+
+    const rows = await this.prisma.serviceRequest.findMany({
+      where: {
+        societyId,
+        deletedAt: null,
+        ...(opts.status ? { status: opts.status } : {}),
+        ...(Object.keys(createdAt).length ? { createdAt } : {}),
+        ...blockWhere,
+      },
+      include: {
+        resident: { include: { user: true, flat: true } },
+        photos: true,
+        notes: { orderBy: { createdAt: 'asc' } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // Resolve assignee names in one query rather than per row.
+    const staffIds = [...new Set(rows.flatMap((r) => r.assignedToIds))];
+    const staff = staffIds.length
+      ? await this.prisma.staffMember.findMany({
+          where: { id: { in: staffIds } },
+          include: { user: { select: { name: true } } },
+        })
+      : [];
+    const staffNameById = new Map(staff.map((sm) => [sm.id, sm.user?.name ?? sm.designation]));
+
+    const header = [
+      'ID', 'Created At (IST)', 'Category', 'Status', 'Description',
+      'Resident', 'Phone', 'Unit', 'Block',
+      'Assigned To', 'Preferred Time', 'Scheduled (IST)', 'SLA Deadline (IST)',
+      'Accepted At (IST)', 'Resolved At (IST)', 'Confirmed At (IST)',
+      'Age (hours)', 'Resolution Time (hours)',
+      'Paid', 'Auto Assigned', 'Tags', 'Photos', 'Rating', 'Rating Note',
+      'Admin Note', 'Dispute Reason', 'Latest Note',
+    ];
+
+    const now = Date.now();
+    const lines = rows.map((r) => {
+      const ageHours = (now - r.createdAt.getTime()) / 3_600_000;
+      const resolutionHours =
+        r.resolvedAt != null ? (r.resolvedAt.getTime() - r.createdAt.getTime()) / 3_600_000 : null;
+      return toCsvRow([
+        r.id,
+        formatIst(r.createdAt),
+        r.category,
+        r.status,
+        r.description ?? '',
+        r.resident?.user?.name ?? '',
+        r.resident?.user?.phone ?? '',
+        r.resident?.flat?.number ?? '',
+        r.resident?.flat?.block ?? '',
+        r.assignedToIds.map((id) => staffNameById.get(id) ?? id).join('; '),
+        r.preferredTime ?? '',
+        formatIst(r.scheduledTime),
+        formatIst(r.slaDeadline),
+        formatIst(r.acceptedAt),
+        formatIst(r.resolvedAt),
+        formatIst(r.confirmedAt),
+        ageHours.toFixed(1),
+        resolutionHours != null ? resolutionHours.toFixed(1) : '',
+        r.isPaid ? 'Paid' : 'Free',
+        r.autoAssigned ? 'Yes' : 'No',
+        (r.tags ?? []).join('; '),
+        String(r.photos?.length ?? 0),
+        r.rating != null ? Number(r.rating).toFixed(1) : '',
+        r.ratingText ?? r.ratingNote ?? '',
+        r.adminNote ?? '',
+        r.disputeReason ?? '',
+        r.notes?.length ? r.notes[r.notes.length - 1].body ?? '' : '',
+      ]);
+    });
+
+    return [toCsvRow(header), ...lines].join('\n') + '\n';
   }
 
   async findByStaff(userId: string, societyId: string) {

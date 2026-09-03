@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { ParseEntityIdPipe } from '../../common/pipes/parse-entity-id.pipe';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { HousekeepingService } from './housekeeping.service';
 import { CreateHousekeepingDto } from './dto/create-housekeeping.dto';
@@ -46,20 +47,20 @@ export class HousekeepingController {
 
   @Get(':id')
   @Roles(UserRole.RESIDENT)
-  findOne(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: JwtPayload) {
+  findOne(@Param('id', ParseEntityIdPipe) id: string, @CurrentUser() user: JwtPayload) {
     return this.housekeepingService.findOne(id, user.sub);
   }
 
   @Patch(':id/cancel')
   @Roles(UserRole.RESIDENT)
-  cancel(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: JwtPayload) {
+  cancel(@Param('id', ParseEntityIdPipe) id: string, @CurrentUser() user: JwtPayload) {
     return this.housekeepingService.cancel(id, user.sub);
   }
 
   @Patch(':id/rate')
   @Roles(UserRole.RESIDENT)
   rate(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseEntityIdPipe) id: string,
     @CurrentUser() user: JwtPayload,
     @Body() dto: RateHousekeepingDto,
   ) {
@@ -69,7 +70,7 @@ export class HousekeepingController {
   @Patch(':id/status')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.STAFF)
   updateStatus(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseEntityIdPipe) id: string,
     @SocietyId() societyId: string,
     @Body() dto: UpdateHousekeepingStatusDto,
   ) {
@@ -79,7 +80,7 @@ export class HousekeepingController {
   @Get(':id/photo-upload-url')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.STAFF)
   getPhotoUploadUrl(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseEntityIdPipe) id: string,
     @SocietyId() societyId: string,
     @Query('phase') phase?: string,
     @Query('contentType') contentType?: string,

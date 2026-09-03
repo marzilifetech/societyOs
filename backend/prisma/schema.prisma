@@ -448,6 +448,7 @@ model Society {
   securityRounds         SecurityRound[]
   societyBudgets         SocietyBudget[]
   conciergeRequests      ConciergeRequest[]
+  guestParkingLogs       GuestParkingLog[]
   laundryBookings        LaundryBooking[]
   securityIncidents      SecurityIncident[]
   housekeepingRequests   HousekeepingRequest[]
@@ -1514,11 +1515,45 @@ model ParkingSlot {
   isOccupied Boolean         @default(false)
   createdAt  DateTime        @default(now())
 
-  society   Society    @relation(fields: [societyId], references: [id])
-  residents Resident[]
+  society          Society           @relation(fields: [societyId], references: [id])
+  residents        Resident[]
+  guestParkingLogs GuestParkingLog[]
 
   @@index([societyId])
   @@map("parking_slots")
+}
+
+/// Guest vehicle logged at the gate by an admin or security staff member.
+///
+/// Separate from `Visitor` on purpose: a guest car parked in a visitor bay is
+/// not necessarily somebody's visitor, has no host resident to notify, and
+/// needs its own occupancy lifecycle (parked -> exited) so the Parking screen
+/// can report real availability. The admin "Log Guest Parking" button used to
+/// POST /parking/guest, which is @Roles(RESIDENT) and resolves a resident
+/// profile from the caller - so it 403'd for every admin.
+model GuestParkingLog {
+  id           String    @id @default(cuid())
+  societyId    String
+  slotId       String?
+  vehiclePlate String
+  visitorName  String?
+  /// Flat being visited, when the guard knows it. Free-text on purpose: the
+  /// gate often has a flat number written on a slip, not a Flat row id.
+  flatLabel    String?
+  notes        String?
+  /// User id of the admin / security staff who logged the entry.
+  loggedById   String
+  entryAt      DateTime  @default(now())
+  exitAt       DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  society Society      @relation(fields: [societyId], references: [id])
+  slot    ParkingSlot? @relation(fields: [slotId], references: [id])
+
+  @@index([societyId, exitAt])
+  @@index([societyId, vehiclePlate])
+  @@map("guest_parking_logs")
 }
 
 model Vehicle {
@@ -1673,14 +1708,20 @@ model InfrastructureItem {
 }
 
 model InfraIncident {
-  id          String    @id @default(cuid())
+  id          String           @id @default(cuid())
   itemId      String
   reportedBy  String
+  // Short headline. The admin "Report Incident" form has always collected a
+  // title + severity; the DTO never declared them, so `forbidNonWhitelisted`
+  // rejected every submission with 400. Persisted here instead of dropped.
+  title       String?
   description String
+  severity    IncidentSeverity @default(MEDIUM)
   photoUrl    String?
   resolvedAt  DateTime?
+  resolvedBy  String?
   resolution  String?
-  createdAt   DateTime  @default(now())
+  createdAt   DateTime         @default(now())
 
   item InfrastructureItem @relation(fields: [itemId], references: [id])
 

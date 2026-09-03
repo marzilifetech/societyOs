@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, ParseUUIDPipe, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { ParseEntityIdPipe } from '../../common/pipes/parse-entity-id.pipe';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { VendorService } from './vendor.service';
 import { CreateVendorDto, UpdateVendorDto } from './dto/create-vendor.dto';
@@ -55,13 +56,13 @@ export class VendorController {
 
   @Patch('orders/:id/status')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  updateOrderStatus(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateVendorOrderStatusDto) {
+  updateOrderStatus(@Param('id', ParseEntityIdPipe) id: string, @Body() dto: UpdateVendorOrderStatusDto) {
     return this.vendorService.updateOrderStatus(id, dto);
   }
 
   @Get(':id')
   @Roles(UserRole.RESIDENT, UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  getVendor(@Param('id', ParseUUIDPipe) id: string) {
+  getVendor(@Param('id', ParseEntityIdPipe) id: string) {
     return this.vendorService.getVendor(id);
   }
 
@@ -73,13 +74,13 @@ export class VendorController {
 
   @Patch(':id')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  updateVendor(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateVendorDto) {
+  updateVendor(@Param('id', ParseEntityIdPipe) id: string, @Body() dto: UpdateVendorDto) {
     return this.vendorService.updateVendor(id, dto);
   }
 
   @Delete(':id')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  deleteVendor(@Param('id', ParseUUIDPipe) id: string) {
+  deleteVendor(@Param('id', ParseEntityIdPipe) id: string) {
     return this.vendorService.softDeleteVendor(id);
   }
 
@@ -88,7 +89,7 @@ export class VendorController {
   @Post(':id/orders')
   @Roles(UserRole.RESIDENT)
   placeOrder(
-    @Param('id', ParseUUIDPipe) vendorId: string,
+    @Param('id', ParseEntityIdPipe) vendorId: string,
     @CurrentUser() user: JwtPayload,
     @SocietyId() societyId: string,
     @Body() dto: CreateVendorOrderDto,
