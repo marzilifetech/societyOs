@@ -83,3 +83,6 @@ tokens.json
 # Redis local snapshot (created by a locally-running redis-server)
 dump.rdb
 *.rdb
+
+# Expo-generated iOS project (mirrors the existing apps/*/android/ rule).
+apps/*/ios/
