@@ -91,6 +91,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // `android/` folder, so every prebuild — i.e. every EAS/Play Store build
       // — silently reverted it while local builds kept working. See the plugin
       // for the full rationale.
+      // Keeps the fmt C++17 workaround in the Podfile across `expo prebuild`;
+      // without it, iOS builds fail in fmt/format-inl.h on Xcode 26.
+      './plugins/withIosFmtCxx17',
       './plugins/withAndroidNoSystemSplash',
       // Same reasoning: release signing was a hand edit in the gitignored
       // android/ folder, so `expo prebuild` kept reverting local release builds
