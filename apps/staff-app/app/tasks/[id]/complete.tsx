@@ -17,7 +17,8 @@ import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '@societyos/theme';
 import { api } from '../../../src/lib/api';
-import { compressImage, uploadToPresigned } from '../../../src/lib/upload';
+import { compressImage } from '../../../src/lib/upload';
+import { uploadMediaAndGetKey } from '../../../src/lib/photo-upload';
 import { AppHeader } from '../../../src/components/ui';
 
 export default function CompleteWorkScreen() {
@@ -58,11 +59,11 @@ export default function CompleteWorkScreen() {
     try {
       const photoUrls: string[] = [];
       for (const uri of afterPhotos) {
-        const presign = await api.get<{ url: string; key: string }>(
-          `/service-requests/${id}/photo-upload-url?phase=AFTER`,
-        );
-        await uploadToPresigned(presign.url, uri, 'image/jpeg');
-        photoUrls.push(presign.key);
+        const uploadedKey = await uploadMediaAndGetKey(uri, {
+          contentType: 'image/jpeg',
+          filename: `upload-${Date.now()}.jpg`,
+        });
+        photoUrls.push(uploadedKey);
       }
       await api.patch(`/service-requests/${id}/complete`, { photoUrls, notes });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});

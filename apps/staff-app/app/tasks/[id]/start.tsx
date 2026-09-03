@@ -16,7 +16,8 @@ import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '@societyos/theme';
 import { api } from '../../../src/lib/api';
-import { compressImage, uploadToPresigned } from '../../../src/lib/upload';
+import { compressImage } from '../../../src/lib/upload';
+import { uploadMediaAndGetKey } from '../../../src/lib/photo-upload';
 import { AppHeader, Card } from '../../../src/components/ui';
 
 export default function StartWorkScreen() {
@@ -69,11 +70,11 @@ export default function StartWorkScreen() {
     }
     setUploading(true);
     try {
-      const presign = await api.get<{ url: string; key: string }>(
-        `/service-requests/${id}/photo-upload-url?phase=BEFORE`,
-      );
-      await uploadToPresigned(presign.url, beforePhoto, 'image/jpeg');
-      await startWork.mutateAsync(presign.key);
+      const uploadedKey = await uploadMediaAndGetKey(beforePhoto, {
+        contentType: 'image/jpeg',
+        filename: `upload-${Date.now()}.jpg`,
+      });
+      await startWork.mutateAsync(uploadedKey);
     } catch (e: any) {
       Alert.alert('Upload failed', e.message);
     } finally {

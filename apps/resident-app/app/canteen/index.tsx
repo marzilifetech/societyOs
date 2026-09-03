@@ -259,7 +259,6 @@ export default function CanteenScreen() {
   const t = useTheme();
   const [selectedMeal, setSelectedMeal] = useState<MealType>('BREAKFAST');
   const [refreshing, setRefreshing] = useState(false);
-  const sectionRefs = useRef<Record<MealType, number>>({} as any);
   const scrollRef = useRef<ScrollView>(null);
 
   const { data: menus, isLoading, isError, refetch } = useQuery<Menu[]>({
@@ -284,13 +283,26 @@ export default function CanteenScreen() {
     }
   });
 
-  const tabOptions = MEAL_TYPES.map((mt) => ({ key: mt, label: MEAL_LABELS[mt] }));
+  // Show a count on each tab so an empty meal is obvious before tapping it.
+  const tabOptions = MEAL_TYPES.map((mt) => ({
+    key: mt,
+    label: dishesPerMeal[mt].length ? `${MEAL_LABELS[mt]} (${dishesPerMeal[mt].length})` : MEAL_LABELS[mt],
+  }));
 
+  /**
+   * Selecting a meal FILTERS the list.
+   *
+   * The tabs used to scroll to a section inside one long stacked list of every
+   * meal, so picking "Lunch" still left breakfast, snacks and dinner on screen
+   * — the categories were never actually shown separately. Each tab now shows
+   * only its own dishes.
+   */
   const handleTabChange = (mt: MealType) => {
     setSelectedMeal(mt);
-    const y = sectionRefs.current[mt];
-    if (y != null) scrollRef.current?.scrollTo({ y, animated: true });
+    scrollRef.current?.scrollTo({ y: 0, animated: true });
   };
+
+  const visibleDishes = dishesPerMeal[selectedMeal];
 
   const preorderBtn = (
     <TouchableOpacity
@@ -356,32 +368,22 @@ export default function CanteenScreen() {
           }
           contentContainerStyle={{ paddingHorizontal: t.screenPadding, paddingBottom: 40 }}
         >
-          {MEAL_TYPES.map((mt) => {
-            const dishes = dishesPerMeal[mt];
-            return (
-              <View
-                key={mt}
-                onLayout={(e) => { sectionRefs.current[mt] = e.nativeEvent.layout.y; }}
-              >
-                <SectionHeader meal={mt} count={dishes.length} />
-                {dishes.length === 0 ? (
-                  <RoundCard tone="gray" padding={t.cardPaddingLg} style={{ marginBottom: 4 }}>
-                    <Text style={{ color: t.textMuted, fontSize: t.fontSm, textAlign: 'center' }}>
-                      No {MEAL_LABELS[mt].toLowerCase()} items today
-                    </Text>
-                  </RoundCard>
-                ) : (
-                  dishes.map((dish) => (
-                    <DishRow
-                      key={dish.id}
-                      dish={dish}
-                      onPress={() => router.push(`/canteen/${dish.id}` as any)}
-                    />
-                  ))
-                )}
-              </View>
-            );
-          })}
+          <SectionHeader meal={selectedMeal} count={visibleDishes.length} />
+          {visibleDishes.length === 0 ? (
+            <RoundCard tone="gray" padding={t.cardPaddingLg} style={{ marginBottom: 4 }}>
+              <Text style={{ color: t.textMuted, fontSize: t.fontSm, textAlign: 'center' }}>
+                No {MEAL_LABELS[selectedMeal].toLowerCase()} items today
+              </Text>
+            </RoundCard>
+          ) : (
+            visibleDishes.map((dish) => (
+              <DishRow
+                key={dish.id}
+                dish={dish}
+                onPress={() => router.push(`/canteen/${dish.id}` as any)}
+              />
+            ))
+          )}
         </ScrollView>
       )}
     </View>

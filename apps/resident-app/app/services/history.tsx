@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, RefreshControl } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -7,6 +7,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import { api } from '../../src/lib/api';
 import { useTheme } from '../../src/hooks/useTheme';
+import { useRefreshOnFocus, usePullToRefresh } from '../../src/hooks/useRefreshOnFocus';
 import {
   ScreenHeader,
   Display,
@@ -76,10 +77,16 @@ export default function ServiceHistoryScreen() {
   const t = useTheme();
   const [tab, setTab] = useState<Tab>('all');
 
-  const { data: requests, isLoading } = useQuery<ServiceRequestSummary[]>({
+  const { data: requests, isLoading, refetch } = useQuery<ServiceRequestSummary[]>({
     queryKey: ['my-service-requests'],
     queryFn: () => api.get<ServiceRequestSummary[]>('/service-requests/my'),
   });
+
+  // The list is cached with a 2-minute staleTime and refetchOnWindowFocus is
+  // off, so status changes made by staff never appeared on a screen the
+  // resident had already visited. Refresh on focus, and offer pull-to-refresh.
+  useRefreshOnFocus(refetch);
+  const { refreshing, onRefresh } = usePullToRefresh(refetch);
 
   const all = requests ?? [];
 
@@ -135,6 +142,7 @@ export default function ServiceHistoryScreen() {
             paddingBottom: 24,
           }}
           showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
           <SegmentedTabs
             value={tab}

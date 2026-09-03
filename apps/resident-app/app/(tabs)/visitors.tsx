@@ -1,10 +1,11 @@
-import { View, Text, FlatList, TouchableOpacity } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, RefreshControl } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
 import { useTheme } from '../../src/hooks/useTheme';
+import { useRefreshOnFocus, usePullToRefresh } from '../../src/hooks/useRefreshOnFocus';
 import { Display, IconCircle, rd } from '../../src/components/ui';
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
@@ -28,10 +29,27 @@ const STATUS_CONFIG: Record<string, { bg: string; fg: string; icon: IoniconName;
 
 export default function VisitorsTab() {
   const t = useTheme();
-  const { data: visitors, isLoading } = useQuery({
+  const { data: visitors, isLoading, refetch } = useQuery({
     queryKey: ['my-visitors'],
     queryFn: () => api.get<any[]>('/visitors/my'),
   });
+  useRefreshOnFocus(refetch);
+  const { refreshing, onRefresh } = usePullToRefresh(refetch);
+
+  /**
+   * Entries the gate has logged and that are waiting on this resident.
+   *
+   * They used to render as ordinary "Expected" rows buried in creation order,
+   * with nothing indicating that a decision was needed — so a guard-logged
+   * entry was effectively invisible here.
+   */
+  const sorted = [...(visitors ?? [])].sort((a, b) => {
+    const aPending = a.approvalStatus === 'PENDING' ? 0 : 1;
+    const bPending = b.approvalStatus === 'PENDING' ? 0 : 1;
+    if (aPending !== bPending) return aPending - bPending;
+    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+  });
+  const pendingCount = sorted.filter((v) => v.approvalStatus === 'PENDING').length;
 
   return (
     <SafeAreaView className="flex-1 bg-white">
@@ -48,8 +66,20 @@ export default function VisitorsTab() {
         </TouchableOpacity>
       </View>
 
+      {pendingCount > 0 && (
+        <View className="mx-6 mb-2 rounded-2xl bg-amber-50 border border-amber-200 px-4 py-3">
+          <Text className="text-sm font-semibold text-amber-900">
+            {pendingCount} entry request{pendingCount > 1 ? 's' : ''} waiting for you
+          </Text>
+          <Text className="text-xs text-amber-700 mt-0.5">
+            Someone is at the gate. Tap to approve or deny.
+          </Text>
+        </View>
+      )}
+
       <FlatList
-        data={visitors}
+        data={sorted}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         keyExtractor={(item) => item.id}
         initialNumToRender={10}
         maxToRenderPerBatch={10}
@@ -57,7 +87,10 @@ export default function VisitorsTab() {
         contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 8, paddingBottom: 32 }}
         showsVerticalScrollIndicator={false}
         renderItem={({ item }) => {
-          const c = STATUS_CONFIG[item.status] ?? {
+          const awaiting = item.approvalStatus === 'PENDING';
+          const c = awaiting
+            ? { bg: rd.amberSoft, fg: rd.amberInk, icon: 'alert-circle' as IoniconName, label: 'Awaiting you' }
+            : STATUS_CONFIG[item.status] ?? {
             bg: rd.inkSoft,
             fg: '#4B5563',
             icon: 'person' as IoniconName,
@@ -67,7 +100,11 @@ export default function VisitorsTab() {
             <TouchableOpacity
               className="bg-white border border-gray-100 rounded-2xl px-4 py-4 mb-3"
               style={cardShadow}
-              onPress={() => router.push(`/visitor/${item.id}` as any)}
+              onPress={() =>
+                router.push(
+                  (awaiting ? `/visitor/review/${item.id}` : `/visitor/${item.id}`) as any,
+                )
+              }
               accessibilityRole="button"
               accessibilityLabel={`View visitor pass for ${item.name}`}
             >

@@ -15,7 +15,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
 import { api } from '../../../src/lib/api';
-import { compressImage, uploadToPresigned } from '../../../src/lib/upload';
+import { compressImage } from '../../../src/lib/upload';
+import { uploadMediaAndGetKey } from '../../../src/lib/photo-upload';
 
 export default function HousekeepingCompleteScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -55,11 +56,11 @@ export default function HousekeepingCompleteScreen() {
     setUploading(true);
     try {
       const uploadPhoto = async (uri: string, phase: string) => {
-        const presign = await api.get<{ url: string; key: string }>(
-          `/housekeeping/${id}/photo-upload-url?phase=${phase}`,
-        );
-        await uploadToPresigned(presign.url, uri, 'image/jpeg');
-        return presign.key;
+        const uploadedKey = await uploadMediaAndGetKey(uri, {
+          contentType: 'image/jpeg',
+          filename: `upload-${Date.now()}.jpg`,
+        });
+        return uploadedKey;
       };
       const [beforeKey, afterKey] = await Promise.all([
         uploadPhoto(beforePhoto, 'BEFORE'),

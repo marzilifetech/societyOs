@@ -15,7 +15,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
 import { api } from '../../../src/lib/api';
-import { compressImage, uploadToPresigned } from '../../../src/lib/upload';
+import { compressImage } from '../../../src/lib/upload';
+import { uploadMediaAndGetKey } from '../../../src/lib/photo-upload';
 
 export default function LaundryPickupScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -57,12 +58,12 @@ export default function LaundryPickupScreen() {
     }
     setUploading(true);
     try {
-      const presign = await api.get<{ url: string; key: string }>(
-        `/laundry/${id}/photo-upload-url`,
-      );
-      await uploadToPresigned(presign.url, photo, 'image/jpeg');
+      const uploadedKey = await uploadMediaAndGetKey(photo, {
+        contentType: 'image/jpeg',
+        filename: `upload-${Date.now()}.jpg`,
+      });
       await api.patch(`/laundry/${id}/pickup`, {
-        photoUrl: presign.key,
+        photoUrl: uploadedKey,
         garmentCount: Number(garmentCount),
       });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});

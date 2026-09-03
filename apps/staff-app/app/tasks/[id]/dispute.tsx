@@ -16,7 +16,8 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
 import { colors } from '@societyos/theme';
 import { api } from '../../../src/lib/api';
-import { compressImage, uploadToPresigned } from '../../../src/lib/upload';
+import { compressImage } from '../../../src/lib/upload';
+import { uploadMediaAndGetKey } from '../../../src/lib/photo-upload';
 import { AppHeader, Card } from '../../../src/components/ui';
 
 export default function DisputeResponseScreen() {
@@ -47,11 +48,11 @@ export default function DisputeResponseScreen() {
     mutationFn: async () => {
       const photoUrls: string[] = [];
       for (const uri of photos) {
-        const presign = await api.get<{ url: string; key: string }>(
-          `/service-requests/${id}/photo-upload-url?phase=DISPUTE`,
-        );
-        await uploadToPresigned(presign.url, uri, 'image/jpeg');
-        photoUrls.push(presign.key);
+        const uploadedKey = await uploadMediaAndGetKey(uri, {
+          contentType: 'image/jpeg',
+          filename: `upload-${Date.now()}.jpg`,
+        });
+        photoUrls.push(uploadedKey);
       }
       return api.post(`/service-requests/${id}/dispute-response`, {
         response,

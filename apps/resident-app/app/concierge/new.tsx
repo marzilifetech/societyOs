@@ -8,7 +8,22 @@ import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
 import { DateField } from '../../src/components/common/DateField';
 
-const SERVICE_TYPES = ['Car Booking', 'Airport Transfer', 'Errand', 'Restaurant Booking', 'Delivery Collection', 'Other'];
+/**
+ * `value` goes on the wire (the `ConciergeRequestType` enum), `label` is shown.
+ *
+ * This screen used to POST `{ service, description, scheduledAt }` — none of
+ * which the API declares. With the global ValidationPipe running
+ * `forbidNonWhitelisted`, the request was rejected outright and no `type` was
+ * ever sent.
+ */
+const SERVICE_TYPES: { value: string; label: string }[] = [
+  { value: 'TAXI', label: 'Car Booking' },
+  { value: 'TAXI', label: 'Airport Transfer' },
+  { value: 'OTHER', label: 'Errand' },
+  { value: 'OTHER', label: 'Restaurant Booking' },
+  { value: 'COURIER', label: 'Delivery Collection' },
+  { value: 'OTHER', label: 'Other' },
+];
 
 export default function NewConciergeScreen() {
   const t = useTheme();
@@ -33,10 +48,13 @@ export default function NewConciergeScreen() {
   const handleSubmit = () => {
     if (!service) { Alert.alert('Required', 'Please select a service type.'); return; }
     if (!description.trim()) { Alert.alert('Required', 'Please describe your request.'); return; }
+    const picked = SERVICE_TYPES.find((s) => s.label === service);
     mutation.mutate({
-      service,
-      description: description.trim(),
-      scheduledAt: scheduledAt.trim() || undefined,
+      type: picked?.value ?? 'OTHER',
+      // Keep the human service name in the description so the desk knows
+      // "Airport Transfer" and not just "TAXI".
+      description: `${service}: ${description.trim()}`,
+      ...(scheduledAt.trim() ? { preferredTime: scheduledAt.trim() } : {}),
     });
   };
 
@@ -54,11 +72,11 @@ export default function NewConciergeScreen() {
         <View className="flex-row flex-wrap gap-2.5 mb-6">
           {SERVICE_TYPES.map((s) => (
             <TouchableOpacity
-              key={s}
-              onPress={() => setService(s)}
-              className={`rounded-xl px-3.5 py-2.5 min-h-[52px] justify-center border ${service === s ? 'bg-primary-500 border-primary-500' : 'bg-gray-100 border-gray-200'}`}
+              key={s.label}
+              onPress={() => setService(s.label)}
+              className={`rounded-xl px-3.5 py-2.5 min-h-[52px] justify-center border ${service === s.label ? 'bg-primary-500 border-primary-500' : 'bg-gray-100 border-gray-200'}`}
             >
-              <Text className={`font-semibold text-sm ${service === s ? 'text-white' : 'text-gray-700'}`}>{s}</Text>
+              <Text className={`font-semibold text-sm ${service === s.label ? 'text-white' : 'text-gray-700'}`}>{s.label}</Text>
             </TouchableOpacity>
           ))}
         </View>

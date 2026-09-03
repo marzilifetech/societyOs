@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../src/lib/api';
 import { useTheme } from '../../src/hooks/useTheme';
+import { PendingVisitorsPill } from '../../src/components/PendingVisitorsPill';
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
 
@@ -69,6 +70,17 @@ export default function TabsLayout() {
   return (
     <>
     <ResidentProfileGuard />
+    {/*
+      Guard-logged entry requests need an in-app surface.
+
+      When security logs a visitor at the gate the row is created PENDING and a
+      push goes out — but the push is the ONLY notification, so a resident with
+      push disabled, no token, or the app already open saw nothing at all: the
+      "entry request is not shown in the resident app" report. This component
+      polls for pending approvals and shows an approve/deny card. It existed and
+      was fully written, but was never mounted anywhere.
+    */}
+    <PendingVisitorsPill />
     <Tabs
       screenOptions={{
         headerShown: false,

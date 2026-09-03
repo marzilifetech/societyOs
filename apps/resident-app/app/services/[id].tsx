@@ -18,6 +18,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 import { api } from '../../src/lib/api';
 import { useTheme } from '../../src/hooks/useTheme';
+import { useRefreshOnFocus } from '../../src/hooks/useRefreshOnFocus';
 import { canRate } from '../../src/lib/serviceStatus';
 import { useServiceRequest } from '../../src/hooks/useServiceRequest';
 import {
@@ -99,10 +100,14 @@ export default function ServiceDetailScreen() {
   const [ratingNote, setRatingNote] = useState('');
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
 
-  const { data: sr, isLoading } = useQuery({
+  const { data: sr, isLoading, refetch } = useQuery({
     queryKey: ['service-request', id],
     queryFn: () => api.get<any>(`/service-requests/${id}`),
   });
+
+  // Staff progress this request from their own app; without a refresh on focus
+  // the resident kept seeing the status from whenever they last opened it.
+  useRefreshOnFocus(refetch);
 
   const { rate: rateMutation } = useServiceRequest(id, {
     disputeReason: '',

@@ -95,3 +95,34 @@ export async function uploadViaMedia(
     s3Key: created.s3_key,
   };
 }
+
+/**
+ * Drop-in replacement for the presign + `uploadToPresigned` PUT pair.
+ *
+ * Every staff upload used to do:
+ *
+ *   const presign = await api.get(`/…/photo-upload-url?phase=X`);
+ *   await uploadToPresigned(presign.url, uri, 'image/jpeg');
+ *   // …then send presign.key onward
+ *
+ * That PUT is signed for a bucket the backend's IAM principal cannot write to,
+ * so it returned 403 every time — task photos, housekeeping before/after,
+ * laundry pickup, dispute evidence and late-reason voice notes all failed, and
+ * the task-photo path silently queued them "offline" to retry against the same
+ * 403 forever. This routes through `/media`, the flow the resident app uses.
+ *
+ * Returns the URL/key to hand to whichever confirm endpoint the caller uses.
+ */
+export async function uploadMediaAndGetKey(
+  uri: string,
+  opts: { contentType?: string; filename?: string; visibility?: MediaVisibility } = {},
+): Promise<string> {
+  const result = await uploadViaMedia(uri, {
+    contentType: opts.contentType ?? 'image/jpeg',
+    visibility: opts.visibility ?? 'public',
+    filename: opts.filename,
+  });
+  // Prefer the CDN URL so the admin dashboard can render it directly; fall back
+  // to the raw S3 key for private assets, which have no public URL.
+  return result.publicUrl ?? result.s3Key;
+}

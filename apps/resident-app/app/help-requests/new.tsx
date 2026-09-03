@@ -7,6 +7,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Modal,
+  Alert,
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -34,6 +35,16 @@ import {
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
 
+/**
+ * `value` is what goes on the wire, `label` is what the resident reads.
+ *
+ * These used to be the same string, so the human label ("Package Pickup") was
+ * sent straight into `ConciergeRequest.type`, a Prisma enum — every submission
+ * failed with `Invalid value for argument 'type'` and Request Help did nothing.
+ * The API maps unknown-but-recognisable keys (HEAVY_LIFTING, MINOR_FIX) onto
+ * OTHER and keeps the label in the description, so the desk still sees what was
+ * actually asked for.
+ */
 const CATEGORIES: {
   value: string;
   label: string;
@@ -43,7 +54,7 @@ const CATEGORIES: {
   iconColor: string;
 }[] = [
   {
-    value: 'Package Pickup',
+    value: 'COURIER',
     label: 'Package Pickup',
     icon: 'cube-outline',
     subtitle: 'Collect a parcel or package',
@@ -51,7 +62,7 @@ const CATEGORIES: {
     iconColor: '#2E7D32',
   },
   {
-    value: 'Heavy Lifting',
+    value: 'HEAVY_LIFTING',
     label: 'Heavy Lifting',
     icon: 'barbell-outline',
     subtitle: 'Move furniture or appliances',
@@ -59,7 +70,7 @@ const CATEGORIES: {
     iconColor: '#F57F17',
   },
   {
-    value: 'Document Collect',
+    value: 'FORM_HELP',
     label: 'Document Collect',
     icon: 'document-text-outline',
     subtitle: 'Pick up letters or documents',
@@ -67,7 +78,7 @@ const CATEGORIES: {
     iconColor: '#1565C0',
   },
   {
-    value: 'Elderly Assist',
+    value: 'ELDERLY_ASSIST',
     label: 'Elderly Assist',
     icon: 'accessibility-outline',
     subtitle: 'Help getting around',
@@ -75,7 +86,7 @@ const CATEGORIES: {
     iconColor: '#E65100',
   },
   {
-    value: 'Minor Fix',
+    value: 'MINOR_FIX',
     label: 'Minor Fix',
     icon: 'construct-outline',
     subtitle: 'Small repairs in the flat',
@@ -83,7 +94,7 @@ const CATEGORIES: {
     iconColor: '#616161',
   },
   {
-    value: 'Other Help',
+    value: 'OTHER',
     label: 'Other Help',
     icon: 'help-circle-outline',
     subtitle: 'Any other help needed',
@@ -122,8 +133,13 @@ export default function NewHelpRequestScreen() {
   const [createdAt, setCreatedAt] = useState('');
 
   const mutation = useMutation({
-    mutationFn: (body: { type: string; description?: string }) =>
+    mutationFn: (body: { type: string; description?: string; preferredTime?: string }) =>
       api.post('/concierge', body),
+    onError: (err: any) => {
+      // There was no onError at all, so a failed request looked like a
+      // no-op: the button simply did nothing.
+      Alert.alert('Could not send request', err?.message ?? 'Please try again.');
+    },
     onSuccess: (raw: any) => {
       qc.invalidateQueries({ queryKey: ['concierge-requests'] });
       const unwrapped = unwrapApiEnvelope<{ id: string }>(raw);
@@ -139,9 +155,11 @@ export default function NewHelpRequestScreen() {
 
   const handleSubmit = () => {
     if (!isValid || mutation.isPending) return;
+    const label = selectedCat?.label ?? category;
     mutation.mutate({
       type: category,
-      description: description.trim() || category,
+      description: description.trim() || label,
+      ...(preferredTime ? { preferredTime } : {}),
     });
   };
 

@@ -54,8 +54,24 @@ export default function LeaveRequestScreen() {
   });
 
   const mutation = useMutation({
+    /**
+     * Canonical field names.
+     *
+     * This posted `{ leaveType, fromDate, toDate, reason }` — it had copied the
+     * shape of the ADMIN leave-list RESPONSE, which renames these fields. The
+     * API declares `{ type, startDate, endDate, reason }` and the global
+     * ValidationPipe runs with `forbidNonWhitelisted`, so every submission came
+     * back 400 and the button appeared to do nothing. The API now accepts both
+     * spellings (so builds already in the field work), and this sends the
+     * canonical one.
+     */
     mutationFn: () =>
-      api.post('/staff/leave', { leaveType, fromDate, toDate, reason }),
+      api.post('/staff/leave', {
+        type: leaveType,
+        startDate: fromDate,
+        endDate: toDate,
+        reason,
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['leave-history'] });
       qc.invalidateQueries({ queryKey: ['leave-balance'] });

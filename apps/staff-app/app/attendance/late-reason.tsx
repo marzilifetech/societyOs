@@ -13,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useMutation } from '@tanstack/react-query';
 import { api } from '../../src/lib/api';
 import { VoiceNoteRecorder } from '../../src/components/task/VoiceNoteRecorder';
-import { uploadToPresigned } from '../../src/lib/upload';
+import { uploadMediaAndGetKey } from '../../src/lib/photo-upload';
 
 export default function LateReasonScreen() {
   const [reason, setReason] = useState('');
@@ -24,12 +24,14 @@ export default function LateReasonScreen() {
       let voiceUrl: string | null = null;
       if (voiceUri) {
         try {
-          const presign = await api.get<{ url: string; key: string }>(
-            '/staff/check-in/voice-upload-url',
-          );
-          await uploadToPresigned(presign.url, voiceUri, 'audio/m4a');
-          voiceUrl = presign.key;
+          voiceUrl = await uploadMediaAndGetKey(voiceUri, {
+            contentType: 'audio/m4a',
+            filename: `late-reason-${Date.now()}.m4a`,
+            // A voice note about being late is personal; keep it off the CDN.
+            visibility: 'private',
+          });
         } catch (e) {
+          // The reason itself still submits without the recording.
           console.warn('voice upload failed', e);
         }
       }

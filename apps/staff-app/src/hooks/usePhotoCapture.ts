@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react';
 import { api } from '../lib/api';
-import { uploadToPresigned, savePhotoLocally } from '../lib/upload';
+import { savePhotoLocally } from '../lib/upload';
+import { uploadViaMedia } from '../lib/photo-upload';
 import {
   enqueueOffline,
   drainOfflineQueue,
@@ -12,13 +13,27 @@ type UploadResult = {
   failedCount: number;
 };
 
+/**
+ * Upload one task photo.
+ *
+ * This used to presign an S3 PUT and send the bytes itself. That path is known
+ * broken — see the note at the top of `lib/photo-upload.ts`: the backend's IAM
+ * principal has no PutObject permission, so every PUT came back 403. Each photo
+ * therefore failed, got queued "offline", and retried forever against the same
+ * 403 — which is what staff saw as "photo upload failure". The `/media` flow
+ * (backend mints the asset, S3 presigned POST, then confirm) is the one the
+ * resident app uses and the one that works.
+ */
 async function uploadPhoto(taskId: string, photo: PendingPhoto): Promise<void> {
-  const presign = await api.get<{ url: string; key: string }>(
-    `/service-requests/${taskId}/photo-upload-url?phase=${photo.phase}`,
-  );
-  await uploadToPresigned(presign.url, photo.uri, 'image/jpeg');
+  const uploaded = await uploadViaMedia(photo.uri, {
+    contentType: 'image/jpeg',
+    visibility: 'public',
+    filename: `task-${taskId}-${photo.phase}.jpg`,
+  });
   await api.post(`/service-requests/${taskId}/photos`, {
-    key: presign.key,
+    // The confirm endpoint stores whatever key it is given; the Marzi asset's
+    // s3Key is the durable pointer, and publicUrl is the CDN URL to render.
+    key: uploaded.publicUrl ?? uploaded.s3Key,
     phase: photo.phase,
     lat: photo.lat,
     lng: photo.lng,
