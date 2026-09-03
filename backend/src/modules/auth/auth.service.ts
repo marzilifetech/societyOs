@@ -307,9 +307,13 @@ export class AuthService {
 
     await this.bumpActivity(user.id);
 
-    if (user.role === UserRole.RESIDENT) {
+    // Keyed on HAVING a resident profile, not on role. A resident who is also a
+    // society admin has role=ADMIN, so their first app open never stamped
+    // appActivatedAt and the Residents screen kept showing them as
+    // "app not activated" forever.
+    {
       const resident = await this.prisma.resident.findUnique({ where: { userId: user.id } });
-      if (resident && !resident.appActivatedAt) {
+      if (resident && !resident.deletedAt && !resident.appActivatedAt) {
         await this.prisma.resident.update({
           where: { id: resident.id },
           data: { appActivatedAt: new Date() },

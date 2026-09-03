@@ -19,9 +19,13 @@ export class CanteenController {
   constructor(private canteenService: CanteenService) {}
 
   @Get('menu')
-  getMenu(@SocietyId() societyId: string, @Query('date') date: string) {
+  getMenu(
+    @SocietyId() societyId: string,
+    @Query('date') date: string,
+    @Query('mealType') mealType?: string,
+  ) {
     return date
-      ? this.canteenService.getMenu(societyId, date)
+      ? this.canteenService.getMenu(societyId, date, mealType)
       : this.canteenService.getWeekMenu(societyId);
   }
 
@@ -66,8 +70,16 @@ export class CanteenController {
     @SocietyId() societyId: string,
     @Query('date') date?: string,
     @Query('status') status?: string,
+    @Query('scope') scope?: string,
   ) {
-    return this.canteenService.listPreOrders(user.sub, societyId, user.role, date, status);
+    // `scope=mine` forces the personal view. A resident who is also a society
+    // admin has role=ADMIN, so a bare role check handed them the whole
+    // society's pre-orders inside their own resident app.
+    const effectiveRole =
+      scope === 'mine' && (user.isResident || user.role === UserRole.RESIDENT)
+        ? UserRole.RESIDENT
+        : user.role;
+    return this.canteenService.listPreOrders(user.sub, societyId, effectiveRole, date, status);
   }
 
   @Get('pre-orders/:id')

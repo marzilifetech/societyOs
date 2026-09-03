@@ -289,11 +289,15 @@ export class ServiceRequestService {
    */
   async exportCsv(
     societyId: string,
-    opts: { status?: ServiceRequestStatus; from?: string; to?: string; managedBlocks?: string[] } = {},
+    opts: { status?: string; from?: string; to?: string; managedBlocks?: string[] } = {},
   ): Promise<string> {
     const blockWhere = opts.managedBlocks?.length
       ? { resident: { flat: { block: { in: opts.managedBlocks } } } }
       : {};
+    const statuses = (opts.status ?? '')
+      .split(',')
+      .map((v) => v.trim().toUpperCase())
+      .filter(Boolean) as ServiceRequestStatus[];
     const createdAt: Record<string, Date> = {};
     if (opts.from) {
       const d = new Date(opts.from);
@@ -308,7 +312,13 @@ export class ServiceRequestService {
       where: {
         societyId,
         deletedAt: null,
-        ...(opts.status ? { status: opts.status } : {}),
+        // `status` accepts a comma-separated list so a tab that spans several
+        // statuses (e.g. "Scheduled") exports exactly what it displays.
+        ...(statuses.length === 1
+          ? { status: statuses[0] }
+          : statuses.length > 1
+            ? { status: { in: statuses } }
+            : {}),
         ...(Object.keys(createdAt).length ? { createdAt } : {}),
         ...blockWhere,
       },

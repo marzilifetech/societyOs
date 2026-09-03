@@ -188,11 +188,28 @@ export default function StaffDetailPage() {
   });
 
   const deactivateMutation = useMutation({
-    mutationFn: () => api.patch(`/admin/staff/${staffId}/deactivate`, {}),
-    onSuccess: () => {
+    mutationFn: () => api.patch<{ alreadyInactive?: boolean }>(`/admin/staff/${staffId}/deactivate`, {}),
+    onSuccess: (data) => {
       setShowDeactivate(false);
-      toast.success('Staff deactivated');
-      router.push('/staff');
+      toast.success(
+        data?.alreadyInactive
+          ? 'This staff member was already deactivated.'
+          : 'Staff deactivated. They can no longer sign in.',
+      );
+      // Stay on the record and refresh it, so the new state is visible rather
+      // than the operator being bounced to a list that looks unchanged.
+      qc.invalidateQueries({ queryKey: ['admin-staff-detail', staffId] });
+      qc.invalidateQueries({ queryKey: ['admin-staff'] });
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const reactivateMutation = useMutation({
+    mutationFn: () => api.patch(`/admin/staff/${staffId}/reactivate`, {}),
+    onSuccess: () => {
+      toast.success('Staff reactivated. They can sign in again.');
+      qc.invalidateQueries({ queryKey: ['admin-staff-detail', staffId] });
+      qc.invalidateQueries({ queryKey: ['admin-staff'] });
     },
     onError: (err: Error) => toast.error(err.message),
   });
@@ -630,12 +647,23 @@ export default function StaffDetailPage() {
             </button>
           )}
 
-          <button
-            onClick={() => setShowDeactivate(true)}
-            className="w-full py-3 rounded-xl border border-red-200 bg-white hover:bg-red-50 text-left px-4 text-red-600 flex items-center gap-2.5 text-sm transition-colors"
-          >
-            <Ban className="w-4 h-4" /> Deactivate Staff
-          </button>
+          {staff?.status && staff.status !== 'ACTIVE' ? (
+            <button
+              onClick={() => reactivateMutation.mutate()}
+              disabled={reactivateMutation.isPending}
+              className="w-full py-3 rounded-xl border border-green-200 bg-white hover:bg-green-50 text-left px-4 text-green-700 flex items-center gap-2.5 text-sm transition-colors disabled:opacity-50"
+            >
+              <Ban className="w-4 h-4" />
+              {reactivateMutation.isPending ? 'Reactivating…' : 'Reactivate Staff'}
+            </button>
+          ) : (
+            <button
+              onClick={() => setShowDeactivate(true)}
+              className="w-full py-3 rounded-xl border border-red-200 bg-white hover:bg-red-50 text-left px-4 text-red-600 flex items-center gap-2.5 text-sm transition-colors"
+            >
+              <Ban className="w-4 h-4" /> Deactivate Staff
+            </button>
+          )}
         </div>
       )}
 

@@ -31,17 +31,44 @@ const STATUS_META: Record<string, { label: string; color: string }> = {
   FAILED: { label: 'Failed', color: 'bg-red-100 text-red-700' },
 };
 
+type ResidentOption = {
+  id: string;
+  name: string;
+  phone: string | null;
+  flat: string | null;
+  walletBalance: number;
+};
+
 function RefundModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (amount: number) => void }) {
   const [residentId, setResidentId] = useState('');
+  const [residentQuery, setResidentQuery] = useState('');
   const [amount, setAmount] = useState('');
   const [reason, setReason] = useState('');
   const [reference, setReference] = useState('');
+
+  /**
+   * The form used to ask the operator to type a raw resident id ("res_abc123"),
+   * which nobody has to hand. Search by name, phone or flat instead.
+   */
+  const { data: residents = [], isFetching: searching } = useQuery({
+    queryKey: ['refund-resident-search', residentQuery],
+    queryFn: () =>
+      api.get<ResidentOption[]>(
+        `/admin/wallet/residents${residentQuery.trim() ? `?q=${encodeURIComponent(residentQuery.trim())}` : ''}`,
+      ),
+    staleTime: 30_000,
+  });
+
+  const selected = residents.find((r) => r.id === residentId) ?? null;
 
   const refundMutation = useMutation({
     mutationFn: () =>
       api.post('/admin/wallet/refund', {
         residentId: residentId.trim(),
         amount: parseFloat(amount),
+        // The API accepts `reason` (this form's label) or `description`.
+        // It used to require `description` while forbidding unknown fields, so
+        // every submit failed with "property reason should not exist".
         reason: reason.trim(),
         ...(reference.trim() ? { reference: reference.trim() } : {}),
       }),
@@ -71,15 +98,41 @@ function RefundModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Resident ID</label>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Resident</label>
             <input
               type="text"
-              value={residentId}
-              onChange={(e) => setResidentId(e.target.value)}
-              required
-              placeholder="e.g. res_abc123"
+              value={residentQuery}
+              onChange={(e) => { setResidentQuery(e.target.value); setResidentId(''); }}
+              placeholder="Search by name, phone or flat…"
               className="w-full text-sm border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-primary-400 transition-colors"
             />
+            {!selected && (
+              <div className="mt-1 max-h-40 overflow-y-auto border border-gray-100 rounded-xl divide-y divide-gray-50">
+                {searching && <p className="px-3 py-2 text-xs text-gray-400">Searching…</p>}
+                {!searching && residents.length === 0 && (
+                  <p className="px-3 py-2 text-xs text-gray-400">No matching resident.</p>
+                )}
+                {residents.map((r) => (
+                  <button
+                    type="button"
+                    key={r.id}
+                    onClick={() => { setResidentId(r.id); setResidentQuery(r.name); }}
+                    className="w-full text-left px-3 py-2 hover:bg-gray-50"
+                  >
+                    <span className="text-sm text-gray-900">{r.name}</span>
+                    <span className="text-xs text-gray-400 ml-2">
+                      {[r.flat, r.phone].filter(Boolean).join(' · ')}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {selected && (
+              <p className="mt-1 text-xs text-gray-500">
+                {selected.flat ? `${selected.flat} · ` : ''}Wallet balance ₹
+                {selected.walletBalance.toLocaleString('en-IN')}
+              </p>
+            )}
           </div>
 
           <div>

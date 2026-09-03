@@ -53,6 +53,22 @@ const STATUS_BADGE: Record<string, string> = {
   COMPLETED: 'bg-gray-100 text-gray-600',
 };
 
+/** Shape returned by GET /admin/events. */
+type AdminEvent = {
+  id: string;
+  title: string;
+  description: string | null;
+  category: string;
+  startAt: string;
+  venue: string;
+  maxAttendees: number | null;
+  registeredCount: number;
+  status: string;
+  isUpcoming: boolean;
+  isCancelled: boolean;
+  createdAt: string;
+};
+
 export default function EventsPage() {
   const qc = useQueryClient();
   const [showForm, setShowForm] = useState(false);
@@ -65,7 +81,20 @@ export default function EventsPage() {
 
   const { data: events, isLoading, isError, refetch } = useQuery({
     queryKey: ['admin-events'],
-    queryFn: () => api.get<Society_Event[]>('/events'),
+    // `/events` only returns PUBLISHED rows, so cancelling made the event
+    // disappear from this screen entirely — contradicting the confirmation copy
+    // below ("the event remains visible with a cancelled status"). The admin
+    // endpoint returns every event with a server-derived `isUpcoming`.
+    queryFn: () =>
+      api.get<AdminEvent[]>('/admin/events').then((rows) =>
+        rows.map((e) => ({
+          ...e,
+          // Normalise to the field names this screen already renders.
+          date: e.startAt,
+          capacity: e.maxAttendees,
+          registrationCount: e.registeredCount,
+        })) as unknown as Society_Event[],
+      ),
   });
 
   const resetForm = () => {
@@ -87,6 +116,7 @@ export default function EventsPage() {
     mutationFn: () => api.post('/events', trimmedPayload()),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin-events'] });
+      qc.invalidateQueries({ queryKey: ['events-upcoming'] });
       resetForm();
       toast.success('Event created');
     },
@@ -97,6 +127,7 @@ export default function EventsPage() {
     mutationFn: () => api.patch(`/events/admin/${editingId}`, trimmedPayload()),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin-events'] });
+      qc.invalidateQueries({ queryKey: ['events-upcoming'] });
       resetForm();
       toast.success('Event updated');
     },
@@ -107,6 +138,7 @@ export default function EventsPage() {
     mutationFn: (id: string) => api.patch(`/events/${id}/cancel`, {}),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin-events'] });
+      qc.invalidateQueries({ queryKey: ['events-upcoming'] });
       setConfirmCancelId(null);
       toast.success('Event cancelled');
     },
@@ -120,6 +152,7 @@ export default function EventsPage() {
     mutationFn: (id: string) => api.delete(`/events/admin/${id}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin-events'] });
+      qc.invalidateQueries({ queryKey: ['events-upcoming'] });
       setConfirmDeleteId(null);
       toast.success('Event deleted');
     },
@@ -257,7 +290,16 @@ export default function EventsPage() {
             </button>
           </div>
         ) : (
-          events.map((event) => {
+          [...events]
+            .sort((a, b) => {
+              // Live events first, then by date. A cancelled event should not
+              // sit above the ones people can still attend.
+              const aDead = (a as any).isCancelled || new Date(a.date) < new Date();
+              const bDead = (b as any).isCancelled || new Date(b.date) < new Date();
+              if (aDead !== bDead) return aDead ? 1 : -1;
+              return new Date(a.date).getTime() - new Date(b.date).getTime();
+            })
+            .map((event) => {
             const catColor = CATEGORY_COLORS[event.category] ?? 'bg-gray-100 text-gray-600';
             const isFull = event.capacity != null && event.registrationCount >= event.capacity;
             const capacityPct = event.capacity

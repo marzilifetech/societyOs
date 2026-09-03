@@ -289,16 +289,42 @@ export class MedicalService {
 
   // ── Admin methods ────────────────────────────────────────────────────────────
 
+  /**
+   * `availableDays` / `timeSlots` / `qualifications` / `specialty` are not
+   * columns on MedicalStaff — they belong inside the `schedule` JSON. This used
+   * to spread the rest of the request body straight into `prisma.create`, so
+   * the Doctors screen (which sends `specialty` and `qualifications`) failed
+   * with `Unknown argument 'specialty'`. Map explicitly and ignore the rest.
+   */
   async createMedicalStaff(
     societyId: string,
-    dto: { name: string; designation: string; availableDays?: string[]; timeSlots?: string[] },
+    dto: {
+      name: string;
+      designation?: string;
+      specialty?: string;
+      specialization?: string;
+      qualifications?: string;
+      availableDays?: string[];
+      timeSlots?: string[];
+      phone?: string;
+    },
   ) {
-    const { availableDays, timeSlots, ...rest } = dto;
+    const name = dto.name?.trim();
+    if (!name) {
+      throw new BadRequestException({ code: 'NAME_REQUIRED', message: "Doctor's name is required" });
+    }
+    const designation = (dto.designation ?? dto.specialty ?? dto.specialization ?? '').trim();
     return this.prisma.medicalStaff.create({
       data: {
         societyId,
-        ...rest,
-        schedule: { availableDays: availableDays ?? [], timeSlots: timeSlots ?? [] },
+        name,
+        designation,
+        ...(dto.phone ? { phone: dto.phone } : {}),
+        schedule: {
+          availableDays: dto.availableDays ?? [],
+          timeSlots: dto.timeSlots ?? [],
+          ...(dto.qualifications ? { qualifications: dto.qualifications } : {}),
+        },
       },
     });
   }
@@ -316,13 +342,14 @@ export class MedicalService {
     const existing = await this.prisma.medicalStaff.findFirst({ where: { id, societyId } });
     if (!existing) throw new NotFoundException('Medical staff not found');
 
-    const { availableDays, timeSlots, qualifications, specialization, ...rest } = dto ?? {};
+    const { availableDays, timeSlots, qualifications, specialization, specialty, ...rest } = dto ?? {};
 
     // Never let a caller write straight into unknown columns.
     const data: Record<string, any> = {};
     if (rest.name !== undefined) data.name = String(rest.name).trim();
     if (rest.designation !== undefined) data.designation = String(rest.designation).trim();
     else if (specialization !== undefined) data.designation = String(specialization).trim();
+    else if (specialty !== undefined) data.designation = String(specialty).trim();
     if (rest.phone !== undefined) data.phone = rest.phone;
     if (rest.isAvailable !== undefined) data.isAvailable = Boolean(rest.isAvailable);
 

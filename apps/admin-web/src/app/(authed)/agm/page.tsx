@@ -5,13 +5,20 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Vote, Plus } from 'lucide-react';
 import { api } from '@/lib/api';
+import { fromDateTimeLocalValue, formatDateTime } from '@/lib/datetime';
 import { ErrorState } from '@/components/ui/ErrorState';
 
 type Resolution = {
   id: string;
   title: string;
   description: string;
-  votingDeadline: string;
+  /**
+   * `AgmResolution` has no votingDeadline column — the service stashes it in
+   * the `votes` JSON under a reserved key and now surfaces it here. It used to
+   * render as `undefined`.
+   */
+  votingDeadline: string | null;
+  voteSummary?: { FOR: number; AGAINST: number; ABSTAIN: number; total: number };
 };
 
 type Meeting = {
@@ -19,6 +26,7 @@ type Meeting = {
   title: string;
   date: string;
   status: string;
+  agenda?: string[];
   resolutions: Resolution[];
 };
 
@@ -33,7 +41,7 @@ type VoteResult = {
 export default function AGMPage() {
   const qc = useQueryClient();
   const [showMeetingForm, setShowMeetingForm] = useState(false);
-  const [meetingForm, setMeetingForm] = useState({ title: '', date: '' });
+  const [meetingForm, setMeetingForm] = useState({ title: '', date: '', agenda: '' });
   const [resolutionForms, setResolutionForms] = useState<Record<string, { title: string; description: string; votingDeadline: string }>>({});
   const [showResolutionForm, setShowResolutionForm] = useState<string | null>(null);
   const [results, setResults] = useState<Record<string, VoteResult[]>>({});
@@ -44,12 +52,14 @@ export default function AGMPage() {
   });
 
   const createMeetingMutation = useMutation({
+    // POST /agm/meetings did not exist at all — every "Schedule" click 404'd,
+    // which is the "Cannot create a meeting" report.
     mutationFn: (body: object) => api.post('/agm/meetings', body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['agm-meetings-admin'] });
       toast.success('Meeting scheduled');
       setShowMeetingForm(false);
-      setMeetingForm({ title: '', date: '' });
+      setMeetingForm({ title: '', date: '', agenda: '' });
     },
     onError: (err: Error) => toast.error(err.message),
   });
@@ -106,18 +116,41 @@ export default function AGMPage() {
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Date</label>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Date &amp; time</label>
+              {/* A meeting has a time, not just a date. A bare date sent
+                  midnight, which read as the wrong day in some zones. */}
               <input
-                type="date"
+                type="datetime-local"
                 value={meetingForm.date}
                 onChange={(e) => setMeetingForm({ ...meetingForm, date: e.target.value })}
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-primary-400"
               />
             </div>
           </div>
+          <div className="mt-4">
+            <label className="block text-xs font-medium text-gray-500 mb-1">
+              Agenda <span className="text-gray-400 font-normal">(one item per line, optional)</span>
+            </label>
+            <textarea
+              rows={3}
+              value={meetingForm.agenda}
+              onChange={(e) => setMeetingForm({ ...meetingForm, agenda: e.target.value })}
+              placeholder={'Adoption of accounts\nElection of office bearers'}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-primary-400 resize-none"
+            />
+          </div>
           <div className="mt-4 flex justify-end">
             <button
-              onClick={() => createMeetingMutation.mutate({ title: meetingForm.title.trim(), date: meetingForm.date })}
+              onClick={() =>
+                createMeetingMutation.mutate({
+                  title: meetingForm.title.trim(),
+                  date: fromDateTimeLocalValue(meetingForm.date) ?? meetingForm.date,
+                  agenda: meetingForm.agenda
+                    .split('\n')
+                    .map((line) => line.trim())
+                    .filter(Boolean),
+                })
+              }
               disabled={createMeetingMutation.isPending || !meetingForm.title.trim() || !meetingForm.date}
               className="px-4 py-2 bg-primary-500 hover:bg-primary-600 text-white rounded-lg text-sm font-medium disabled:opacity-50"
             >
@@ -178,11 +211,22 @@ export default function AGMPage() {
                             <div className="flex-1">
                               <p className="text-sm font-medium text-gray-900">{r.title}</p>
                               <p className="text-xs text-gray-500 mt-0.5 line-clamp-1">{r.description}</p>
-                              {result && (
+                              {r.votingDeadline && (
+                                <p className="text-[11px] text-gray-400 mt-0.5">
+                                  Voting closes {formatDateTime(r.votingDeadline)}
+                                </p>
+                              )}
+                              {(result || r.voteSummary) && (
                                 <div className="flex gap-3 mt-2">
-                                  <span className="text-xs text-green-700 font-medium">For: {result.forCount}</span>
-                                  <span className="text-xs text-red-700 font-medium">Against: {result.againstCount}</span>
-                                  <span className="text-xs text-amber-700 font-medium">Abstain: {result.abstainCount}</span>
+                                  <span className="text-xs text-green-700 font-medium">
+                                    For: {result?.forCount ?? r.voteSummary?.FOR ?? 0}
+                                  </span>
+                                  <span className="text-xs text-red-700 font-medium">
+                                    Against: {result?.againstCount ?? r.voteSummary?.AGAINST ?? 0}
+                                  </span>
+                                  <span className="text-xs text-amber-700 font-medium">
+                                    Abstain: {result?.abstainCount ?? r.voteSummary?.ABSTAIN ?? 0}
+                                  </span>
                                 </div>
                               )}
                             </div>
@@ -224,7 +268,19 @@ export default function AGMPage() {
                     <div className="flex gap-2">
                       <button onClick={() => setShowResolutionForm(null)} className="text-xs text-gray-500 hover:text-gray-700">Cancel</button>
                       <button
-                        onClick={() => createResolutionMutation.mutate({ meetingId: meeting.id, body: { title: rf.title.trim(), description: rf.description.trim(), votingDeadline: rf.votingDeadline } })}
+                        onClick={() =>
+                          createResolutionMutation.mutate({
+                            meetingId: meeting.id,
+                            body: {
+                              title: rf.title.trim(),
+                              description: rf.description.trim(),
+                              // The picker speaks local wall-clock time; the API
+                              // wants an ISO instant.
+                              votingDeadline:
+                                fromDateTimeLocalValue(rf.votingDeadline) ?? rf.votingDeadline,
+                            },
+                          })
+                        }
                         disabled={createResolutionMutation.isPending || !rf.title.trim() || !rf.votingDeadline}
                         className="px-3 py-1.5 bg-primary-500 text-white rounded-lg text-xs font-medium disabled:opacity-50"
                       >

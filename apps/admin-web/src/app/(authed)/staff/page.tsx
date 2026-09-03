@@ -166,6 +166,13 @@ type StaffDetail = StaffUser & {
   joiningDate?: string;
   leavingDate?: string | null;
   salary?: number;
+  /**
+   * Account state, from User.status. The list omitted it entirely, so
+   * "Deactivate" reported success while the row rendered identically —
+   * the "shown as completed but it isn't processed" report.
+   */
+  status?: 'ACTIVE' | 'INACTIVE' | 'PENDING' | 'SUSPENDED' | 'REJECTED';
+  isActive?: boolean;
 };
 
 function StaffDrawer({ staffId }: { staffId: string }) {
@@ -265,12 +272,28 @@ export default function StaffPage() {
   });
 
   const deactivateMutation = useMutation({
-    mutationFn: (id: string) => api.patch(`/admin/staff/${id}/deactivate`, {}),
-    onSuccess: () => {
-      toast.success('Staff member deactivated');
+    mutationFn: (id: string) => api.patch<{ alreadyInactive?: boolean }>(`/admin/staff/${id}/deactivate`, {}),
+    onSuccess: (data) => {
+      // Only claim success for something that actually changed. This toast used
+      // to fire unconditionally while the row rendered identically, because the
+      // list carried no account status at all.
+      toast.success(
+        data?.alreadyInactive
+          ? 'This staff member was already deactivated.'
+          : 'Staff member deactivated. They can no longer sign in.',
+      );
       qc.invalidateQueries({ queryKey: ['admin-staff'] });
     },
     onError: (err: any) => toast.error(err?.message ?? 'Failed to deactivate staff'),
+  });
+
+  const reactivateMutation = useMutation({
+    mutationFn: (id: string) => api.patch(`/admin/staff/${id}/reactivate`, {}),
+    onSuccess: () => {
+      toast.success('Staff member reactivated. They can sign in again.');
+      qc.invalidateQueries({ queryKey: ['admin-staff'] });
+    },
+    onError: (err: any) => toast.error(err?.message ?? 'Failed to reactivate staff'),
   });
 
   const previewStaffImport = useMutation({
@@ -306,10 +329,15 @@ export default function StaffPage() {
     setExpandedId(prev => (prev === id ? null : id));
   };
 
-  const handleDeactivate = (e: React.MouseEvent, id: string) => {
+  const handleDeactivate = (e: React.MouseEvent, id: string, name?: string) => {
     e.stopPropagation();
-    if (!window.confirm('Are you sure you want to deactivate this staff member?')) return;
+    if (!window.confirm(`Deactivate ${name ?? 'this staff member'}? They will not be able to sign in to the staff app until reactivated.`)) return;
     deactivateMutation.mutate(id);
+  };
+
+  const handleReactivate = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    reactivateMutation.mutate(id);
   };
 
   return (
@@ -464,7 +492,10 @@ export default function StaffPage() {
               {staff.map((s) => (
                 <Fragment key={s.id}>
                   <tr
-                    className={cn('hover:bg-gray-50 cursor-pointer', s.leavingDate ? 'opacity-60' : '')}
+                    className={cn(
+                      'hover:bg-gray-50 cursor-pointer',
+                      s.leavingDate || (s.status && s.status !== 'ACTIVE') ? 'opacity-60' : '',
+                    )}
                     onClick={() => handleRowClick(s.id)}
                   >
                     <td className="px-4 py-3">
@@ -474,10 +505,19 @@ export default function StaffPage() {
                             {s.name?.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
                           </span>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-sm font-medium text-gray-900">{s.name}</span>
                           {s.leavingDate && (
                             <span className="text-xs bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded-full font-medium">Ex-Staff</span>
+                          )}
+                          {/* Deactivation blocks sign-in but leaves employment
+                              intact, so it needs its own visible state — the
+                              row previously looked untouched after the action
+                              reported success. */}
+                          {!s.leavingDate && s.status && s.status !== 'ACTIVE' && (
+                            <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium">
+                              {s.status === 'INACTIVE' ? 'Inactive' : s.status === 'PENDING' ? 'Pending' : 'Suspended'}
+                            </span>
                           )}
                         </div>
                       </div>
@@ -501,13 +541,23 @@ export default function StaffPage() {
                         : '-'}
                     </td>
                     <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        onClick={(e) => handleDeactivate(e, s.id)}
-                        disabled={deactivateMutation.isPending}
-                        className="text-xs bg-red-100 hover:bg-red-200 text-red-700 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
-                      >
-                        Deactivate
-                      </button>
+                      {s.status && s.status !== 'ACTIVE' ? (
+                        <button
+                          onClick={(e) => handleReactivate(e, s.id)}
+                          disabled={reactivateMutation.isPending}
+                          className="text-xs bg-green-100 hover:bg-green-200 text-green-700 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+                        >
+                          Reactivate
+                        </button>
+                      ) : (
+                        <button
+                          onClick={(e) => handleDeactivate(e, s.id, s.name)}
+                          disabled={deactivateMutation.isPending}
+                          className="text-xs bg-red-100 hover:bg-red-200 text-red-700 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+                        >
+                          Deactivate
+                        </button>
+                      )}
                     </td>
                   </tr>
                   {expandedId === s.id && <StaffDrawer staffId={s.id} />}

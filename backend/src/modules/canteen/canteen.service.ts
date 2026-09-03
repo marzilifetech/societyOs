@@ -9,10 +9,24 @@ export class CanteenService {
   private readonly logger = new Logger(CanteenService.name);
   constructor(private prisma: PrismaService, private push: PushService) {}
 
-  async getMenu(societyId: string, date: string) {
+  /**
+   * Menus for a date. Returns an ARRAY — one entry per meal type — which is the
+   * shape the resident app expects.
+   *
+   * `mealType` was accepted as a query parameter but never applied, so the
+   * admin screen (which asks for one meal and reads `menu.dishes`) always got
+   * the whole day and rendered nothing. Honour the filter here; the response
+   * stays an array so existing callers are unaffected.
+   */
+  async getMenu(societyId: string, date: string, mealType?: string) {
     return this.prisma.canteenMenu.findMany({
-      where: { societyId, date: new Date(date) },
-      include: { dishes: true },
+      where: {
+        societyId,
+        date: new Date(date),
+        ...(mealType ? { mealType } : {}),
+      },
+      include: { dishes: { orderBy: { name: 'asc' } } },
+      orderBy: { mealType: 'asc' },
     });
   }
 

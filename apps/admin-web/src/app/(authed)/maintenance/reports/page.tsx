@@ -30,7 +30,11 @@ interface MonthlyTrendItem {
 interface ReportSummary {
   totalBilled: number;
   totalCollected: number;
-  outstanding: number;
+  /** Canonical key. `totalOutstanding` is the legacy alias. */
+  outstanding?: number;
+  totalOutstanding?: number;
+  collectionRate?: number;
+  billCount?: number;
 }
 
 interface ReportsData {
@@ -41,9 +45,21 @@ interface ReportsData {
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000/v1';
 
-function fmt(amount: number) {
-  return `₹${amount.toLocaleString('en-IN')}`;
+/**
+ * Tolerates null/undefined instead of throwing.
+ *
+ * `fmt(data.summary.outstanding)` on a payload that only carried
+ * `totalOutstanding` threw `Cannot read properties of undefined (reading
+ * 'toLocaleString')`, which took the whole Reports page down — the "Reports
+ * section can't be viewed" report. The API is fixed; this keeps one bad field
+ * from ever blanking the page again.
+ */
+function fmt(amount: number | null | undefined) {
+  const n = Number(amount);
+  return `₹${(Number.isFinite(n) ? n : 0).toLocaleString('en-IN')}`;
 }
+
+const EMPTY_BUCKET: AgingBucket = { count: 0, amount: 0 };
 
 const AGING_ROWS = [
   { key: 'current' as const, label: 'Current (0–30 days)', color: 'bg-green-100 text-green-700' },
@@ -138,12 +154,32 @@ export default function MaintenanceReportsPage() {
             </div>
             <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
               <p className="text-sm text-gray-500 mb-1">Outstanding</p>
-              <p className="text-2xl font-bold text-red-500">{fmt(data.summary.outstanding)}</p>
+              <p className="text-2xl font-bold text-red-500">
+                {fmt(data.summary.outstanding ?? data.summary.totalOutstanding)}
+              </p>
               <span className="inline-block mt-1 text-xs font-medium px-2 py-0.5 rounded-full bg-red-100 text-red-600">
                 Unpaid
               </span>
             </div>
           </div>
+
+          {typeof data.summary.collectionRate === 'number' && (
+            <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 mb-6 flex items-center gap-6">
+              <div>
+                <p className="text-sm text-gray-500 mb-1">Collection rate</p>
+                <p className="text-2xl font-bold text-gray-900">{data.summary.collectionRate}%</p>
+              </div>
+              <div className="flex-1 h-2 rounded-full bg-gray-100 overflow-hidden">
+                <div
+                  className="h-full bg-green-500"
+                  style={{ width: `${Math.min(100, Math.max(0, data.summary.collectionRate))}%` }}
+                />
+              </div>
+              {typeof data.summary.billCount === 'number' && (
+                <p className="text-sm text-gray-400 shrink-0">{data.summary.billCount} bills</p>
+              )}
+            </div>
+          )}
 
           {/* Aging buckets */}
           <div className="bg-white rounded-2xl border border-gray-200 shadow-sm mb-6 overflow-hidden">
@@ -162,7 +198,9 @@ export default function MaintenanceReportsPage() {
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {AGING_ROWS.map(({ key, label, color }) => {
-                  const bucket = data.agingBuckets[key];
+                  // Buckets used to arrive as bare numbers, so `bucket.amount`
+                  // was undefined and `fmt()` threw.
+                  const bucket = data.agingBuckets?.[key] ?? EMPTY_BUCKET;
                   return (
                     <tr key={key} className="hover:bg-gray-50">
                       <td className="px-5 py-3 text-sm text-gray-700">
@@ -170,7 +208,7 @@ export default function MaintenanceReportsPage() {
                           {label}
                         </span>
                       </td>
-                      <td className="px-5 py-3 text-sm font-medium text-gray-900">{bucket.count}</td>
+                      <td className="px-5 py-3 text-sm font-medium text-gray-900">{bucket.count ?? 0}</td>
                       <td className="px-5 py-3 text-sm font-semibold text-gray-900">{fmt(bucket.amount)}</td>
                     </tr>
                   );
@@ -184,7 +222,7 @@ export default function MaintenanceReportsPage() {
             <div className="px-5 py-4 border-b border-gray-50">
               <h2 className="font-semibold text-gray-900">Monthly Trend — {selectedYear}</h2>
             </div>
-            {data.monthlyTrend.length === 0 ? (
+            {!data.monthlyTrend?.length ? (
               <div className="py-10 text-center text-gray-400 text-sm">No data for this year yet.</div>
             ) : (
               <table className="w-full">
@@ -198,7 +236,7 @@ export default function MaintenanceReportsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {data.monthlyTrend.map((row) => {
+                  {(data.monthlyTrend ?? []).map((row) => {
                     const outstanding = row.billed - row.collected;
                     return (
                       <tr key={row.month} className="hover:bg-gray-50">

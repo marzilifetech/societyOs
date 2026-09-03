@@ -8,13 +8,37 @@ import { api } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { ErrorState } from '@/components/ui/ErrorState';
 
-type BreakdownItem = { name: string; allocated: number; spent?: number };
+type BreakdownItem = {
+  name: string;
+  category?: string;
+  allocated: number;
+  spent?: number;
+  remaining?: number;
+  utilisationPct?: number;
+};
+
+/**
+ * Shaped by SocietyService.shapeBudget.
+ *
+ * The screen used to POST `{ year, totalBudget, breakdown }` at a DTO that
+ * required `{ year, month, totalIncome, lineItems }` — and the global
+ * ValidationPipe runs with `forbidNonWhitelisted: true`, so publishing was
+ * impossible. GET also returned a `{ budget }` wrapper the page never unwrapped,
+ * so every total rendered as `undefined`.
+ */
 type Budget = {
   id: string;
   year: number;
+  month: number | null;
+  isAnnual: boolean;
   totalBudget: number;
-  totalSpent?: number;
+  totalAllocated: number;
+  totalSpent: number;
+  remaining: number;
+  unallocated: number;
+  utilisationPct: number;
   breakdown: BreakdownItem[];
+  publishedAt?: string;
 };
 
 const CURRENT_YEAR = new Date().getFullYear();
@@ -53,10 +77,24 @@ function PublishForm({ onPublished }: { onPublished: () => void }) {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const total = Number(totalBudget);
+    if (!Number.isFinite(total) || total <= 0) {
+      toast.error('Enter a total budget amount.');
+      return;
+    }
     const validCats = categories
       .filter((c) => c.name.trim())
-      .map((c) => ({ ...c, name: c.name.trim() }));
-    publishMutation.mutate({ year, totalBudget: Number(totalBudget), breakdown: validCats });
+      .map((c) => ({ name: c.name.trim(), allocated: Number(c.allocated) || 0, spent: Number(c.spent) || 0 }));
+    const allocated = validCats.reduce((sum, c) => sum + c.allocated, 0);
+    if (allocated > total) {
+      // Caught server-side too; surfacing it here saves a round trip and
+      // explains the number rather than showing a bare 400.
+      toast.error(
+        `Categories allocate ₹${allocated.toLocaleString('en-IN')}, more than the ₹${total.toLocaleString('en-IN')} total.`,
+      );
+      return;
+    }
+    publishMutation.mutate({ year, totalBudget: total, breakdown: validCats });
   };
 
   return (
@@ -145,18 +183,54 @@ function BudgetDetail({ budget }: { budget: Budget }) {
     onError: (err: Error) => toast.error(err.message),
   });
 
-  const totalSpent = budget.totalSpent ?? rows.reduce((s, r) => s + (r.spent ?? 0), 0);
-  const remaining = budget.totalBudget - totalSpent;
+  // Recomputed from the edited rows so the header updates as the operator types,
+  // falling back to the server's rollup before any edit.
+  const totalSpent = rows.length ? rows.reduce((s, r) => s + (Number(r.spent) || 0), 0) : budget.totalSpent ?? 0;
+  const totalAllocated = rows.length
+    ? rows.reduce((s, r) => s + (Number(r.allocated) || 0), 0)
+    : budget.totalAllocated ?? 0;
+  const remaining = (budget.totalBudget ?? 0) - totalSpent;
+  const unallocated = (budget.totalBudget ?? 0) - totalAllocated;
+  const utilisation = budget.totalBudget > 0 ? Math.round((totalSpent / budget.totalBudget) * 1000) / 10 : 0;
 
-  const fmt = (n: number) =>
-    new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n);
+  const fmt = (n: number | null | undefined) =>
+    new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(
+      Number.isFinite(Number(n)) ? Number(n) : 0,
+    );
 
   return (
     <div>
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      {/* The page previously showed only a Total that rendered as undefined.
+          Allocation and utilisation are what make a published budget legible. */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
         <StatCard label="Total Budget" value={fmt(budget.totalBudget)} color="text-gray-900" />
+        <StatCard label="Allocated" value={fmt(totalAllocated)} color="text-blue-600" />
         <StatCard label="Spent" value={fmt(totalSpent)} color="text-amber-600" />
         <StatCard label="Remaining" value={fmt(remaining)} color={remaining >= 0 ? 'text-green-600' : 'text-red-600'} />
+      </div>
+
+      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 mb-6">
+        <div className="flex items-center justify-between text-sm mb-2">
+          <span className="text-gray-600 font-medium">Utilisation</span>
+          <span className="text-gray-900 font-semibold">{utilisation}%</span>
+        </div>
+        <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
+          <div
+            className={cn(
+              'h-2 rounded-full transition-all',
+              utilisation > 100 ? 'bg-red-500' : utilisation > 85 ? 'bg-amber-500' : 'bg-green-500',
+            )}
+            style={{ width: `${Math.min(100, Math.max(0, utilisation))}%` }}
+          />
+        </div>
+        <p className="text-xs text-gray-400 mt-2">
+          {unallocated >= 0
+            ? `${fmt(unallocated)} not yet allocated to a category.`
+            : `Over-allocated by ${fmt(Math.abs(unallocated))}.`}
+          {budget.publishedAt
+            ? ` Published ${new Date(budget.publishedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}.`
+            : ''}
+        </p>
       </div>
 
       <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
@@ -227,7 +301,7 @@ export default function BudgetPage() {
 
   const { data: historyBudgets, isLoading: histLoading, isError: histError, refetch: histRefetch } = useQuery({
     queryKey: ['society-budget-history'],
-    queryFn: () => api.get<Budget[]>('/societies/budget'),
+    queryFn: () => api.get<Budget[]>('/societies/budget/history'),
     enabled: tab === 'history',
   });
 

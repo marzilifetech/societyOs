@@ -34,6 +34,17 @@ function toISODate(d: Date) {
   return d.toISOString().split('T')[0];
 }
 
+/**
+ * `GET /canteen/menu?date=…` responds with every meal's menu for that date, as
+ * an array — the `mealType` query parameter is accepted but the payload still
+ * carries the whole day. Select the one this screen is showing.
+ */
+function pickMenu(res: Menu[] | Menu | null | undefined, mealType: string): Menu | null {
+  if (!res) return null;
+  const list = Array.isArray(res) ? res : [res];
+  return list.find((m) => m?.mealType === mealType) ?? null;
+}
+
 export default function MenuEditorPage() {
   const qc = useQueryClient();
   const [date, setDate] = useState(toISODate(new Date()));
@@ -43,7 +54,9 @@ export default function MenuEditorPage() {
 
   const { data: menu, isLoading, isError, refetch } = useQuery({
     queryKey: ['canteen-menu', date, meal],
-    queryFn: () => api.get<Menu>(`/canteen/menu?date=${date}&mealType=${meal}`),
+    // Returns an ARRAY of menus for the date (one per meal type); pick ours.
+    queryFn: () =>
+      api.get<Menu[] | Menu>(`/canteen/menu?date=${date}&mealType=${meal}`).then((res) => pickMenu(res, meal)),
   });
 
   const addMutation = useMutation({

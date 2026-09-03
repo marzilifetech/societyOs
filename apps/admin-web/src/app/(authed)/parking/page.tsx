@@ -38,9 +38,97 @@ const TYPE_COLORS: Record<string, string> = {
   HANDICAPPED: 'bg-amber-100 text-amber-700',
 };
 
+/**
+ * Guest vehicles currently on site.
+ *
+ * Logging a guest previously wrote nothing anyone could see: the button posted
+ * to a resident-only endpoint and there was no list. Occupancy now has a
+ * lifecycle, so the gate can also mark a vehicle as departed and free the bay.
+ */
+function GuestParkingLog() {
+  const qc = useQueryClient();
+  const { data: guests = [], isLoading } = useQuery({
+    queryKey: ['parking-guest-log'],
+    queryFn: () =>
+      api.get<
+        Array<{
+          id: string;
+          vehiclePlate: string;
+          visitorName: string | null;
+          flatLabel: string | null;
+          slot: { slotNumber: string } | null;
+          entryAt: string;
+          durationMinutes: number;
+        }>
+      >('/parking/admin/guest?active=true'),
+    refetchInterval: 60_000,
+  });
+
+  const exitMutation = useMutation({
+    mutationFn: (id: string) => api.patch(`/parking/admin/guest/${id}/exit`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['parking-guest-log'] });
+      qc.invalidateQueries({ queryKey: ['parking-slots'] });
+      qc.invalidateQueries({ queryKey: ['parking-availability'] });
+      toast.success('Marked as departed. The bay is free again.');
+    },
+    onError: (err: Error) => toast.error(err.message ?? 'Could not update the entry.'),
+  });
+
+  if (isLoading || guests.length === 0) return null;
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm mb-6 overflow-hidden">
+      <div className="px-5 py-4 border-b border-gray-50 flex items-center justify-between">
+        <h2 className="font-semibold text-gray-900">Guest vehicles on site</h2>
+        <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-semibold">
+          {guests.length}
+        </span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50">
+            <tr>
+              {['Vehicle', 'Visitor', 'Visiting', 'Bay', 'Parked for', ''].map((h, i) => (
+                <th key={i} className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-50">
+            {guests.map((g) => (
+              <tr key={g.id} className="hover:bg-gray-50">
+                <td className="px-5 py-3 font-medium text-gray-900">{g.vehiclePlate}</td>
+                <td className="px-5 py-3 text-gray-600">{g.visitorName ?? '—'}</td>
+                <td className="px-5 py-3 text-gray-600">{g.flatLabel ?? '—'}</td>
+                <td className="px-5 py-3 text-gray-600">{g.slot?.slotNumber ?? 'Unassigned'}</td>
+                <td className="px-5 py-3 text-gray-500">
+                  {g.durationMinutes >= 60
+                    ? `${Math.floor(g.durationMinutes / 60)}h ${g.durationMinutes % 60}m`
+                    : `${g.durationMinutes}m`}
+                </td>
+                <td className="px-5 py-3">
+                  <button
+                    onClick={() => exitMutation.mutate(g.id)}
+                    disabled={exitMutation.isPending}
+                    className="text-xs border border-gray-200 hover:border-gray-300 text-gray-700 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    Mark departed
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function GuestParkingModal({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient();
-  const [form, setForm] = useState({ vehiclePlate: '', visitorName: '', notes: '' });
+  const [form, setForm] = useState({ vehiclePlate: '', visitorName: '', flatLabel: '', notes: '' });
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -50,16 +138,25 @@ function GuestParkingModal({ onClose }: { onClose: () => void }) {
   }, [onClose]);
 
   const mutation = useMutation({
+    // POST /parking/guest is @Roles(RESIDENT) and resolves a Resident profile
+    // from the caller, so it 403'd for every admin — the "Log guest parking is
+    // not functional" report. `/parking/admin/guest` is the gate-side endpoint.
     mutationFn: (data: typeof form) =>
-      api.post('/parking/guest', {
+      api.post<{ slotAssigned: boolean; slot: { slotNumber: string } | null }>('/parking/admin/guest', {
         vehiclePlate: data.vehiclePlate.trim(),
         visitorName: data.visitorName.trim() || undefined,
+        flatLabel: data.flatLabel.trim() || undefined,
         notes: data.notes.trim() || undefined,
       }),
-    onSuccess: () => {
+    onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['parking-slots'] });
       qc.invalidateQueries({ queryKey: ['parking-availability'] });
-      toast.success('Guest parking logged');
+      qc.invalidateQueries({ queryKey: ['parking-guest-log'] });
+      toast.success(
+        res?.slot?.slotNumber
+          ? `Guest parking logged — bay ${res.slot.slotNumber}.`
+          : 'Guest parking logged. No visitor bay was free, so none was assigned.',
+      );
       onClose();
     },
     onError: (err: Error) => {
@@ -104,6 +201,16 @@ function GuestParkingModal({ onClose }: { onClose: () => void }) {
               placeholder="Optional"
               value={form.visitorName}
               onChange={(e) => setForm((f) => ({ ...f, visitorName: e.target.value }))}
+              className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-primary-400"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Visiting flat</label>
+            <input
+              type="text"
+              placeholder="e.g. A-402 (optional)"
+              value={form.flatLabel}
+              onChange={(e) => setForm((f) => ({ ...f, flatLabel: e.target.value }))}
               className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-primary-400"
             />
           </div>
@@ -167,6 +274,7 @@ export default function ParkingPage() {
   return (
     <div className="p-6 lg:p-8">
       {showGuestModal && <GuestParkingModal onClose={() => setShowGuestModal(false)} />}
+      <GuestParkingLog />
 
       <div className="mb-6 flex items-start justify-between">
         <div>

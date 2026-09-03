@@ -18,10 +18,11 @@ export class EventController {
 
   @Get()
   getEvents(@SocietyId() societyId: string, @CurrentUser() user: JwtPayload) {
-    return this.eventService.getEvents(
-      societyId,
-      user.role === UserRole.RESIDENT ? user.sub : undefined,
-    );
+    // `myRegistration` is personalisation, so it keys on whether the caller
+    // actually lives here. A committee member holding role=ADMIN is still a
+    // resident, and previously saw none of their own event registrations.
+    const isResident = user.isResident || user.role === UserRole.RESIDENT;
+    return this.eventService.getEvents(societyId, isResident ? user.sub : undefined);
   }
 
   @Get(':id')

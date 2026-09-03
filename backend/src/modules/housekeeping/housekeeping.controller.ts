@@ -38,7 +38,16 @@ export class HousekeepingController {
     @Query('date') date?: string,
     @Query('page') page = 1,
     @Query('limit') limit = 20,
+    @Query('scope') scope?: string,
   ) {
+    // A resident who is also a society admin has role=ADMIN, so a bare role
+    // check sent them the society-wide list inside their own resident app.
+    // `scope=mine` lets the caller state which view it wants; the default keeps
+    // the previous behaviour so the dashboard is untouched.
+    const wantsMine = scope === 'mine' || (scope == null && user.role === UserRole.RESIDENT);
+    if (wantsMine && (user.isResident || user.role === UserRole.RESIDENT)) {
+      return this.housekeepingService.findForResident(user.sub, +page, +limit);
+    }
     if (user.role === UserRole.RESIDENT) {
       return this.housekeepingService.findForResident(user.sub, +page, +limit);
     }

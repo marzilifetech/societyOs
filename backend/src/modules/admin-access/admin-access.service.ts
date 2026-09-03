@@ -485,6 +485,12 @@ export class AdminAccessService {
 
     await this.assertNotLastOwner(societyId, grant.id);
 
+    // Restore the role the person actually holds rather than assuming RESIDENT.
+    // Hardcoding RESIDENT turned a staff member who had been given admin access
+    // into a resident on revoke (losing every /staff route), and gave a
+    // non-resident manager a RESIDENT role with no Resident row behind it.
+    const restoredRole = await this.resolveBaseRole(grant.userId);
+
     await this.prisma.$transaction([
       this.prisma.societyAdmin.update({
         where: { id: grant.id },
@@ -492,10 +498,26 @@ export class AdminAccessService {
       }),
       this.prisma.user.update({
         where: { id: grant.userId },
-        data: { role: UserRole.RESIDENT, managedBlocks: [] },
+        data: { role: restoredRole, managedBlocks: [] },
       }),
     ]);
-    return { id: grant.id, revoked: true };
+    return { id: grant.id, revoked: true, restoredRole };
+  }
+
+  /**
+   * The role a user falls back to when their admin grant is removed, derived
+   * from the profiles they actually hold. Resident wins over staff: someone who
+   * both lives here and works here is primarily an occupant, and the RolesGuard
+   * `isResident` widening means the resident routes stay open either way.
+   */
+  private async resolveBaseRole(userId: string): Promise<UserRole> {
+    const [resident, staff] = await Promise.all([
+      this.prisma.resident.findFirst({ where: { userId, deletedAt: null }, select: { id: true } }),
+      this.prisma.staffMember.findFirst({ where: { userId, deletedAt: null }, select: { id: true } }),
+    ]);
+    if (resident) return UserRole.RESIDENT;
+    if (staff) return UserRole.STAFF;
+    return UserRole.RESIDENT;
   }
 
   /**

@@ -53,6 +53,9 @@ export default function InfrastructurePage() {
   const refetchIncidents = refetchItems;
 
   const reportMutation = useMutation({
+    // `title` and `severity` are now declared on the DTO. The global
+    // ValidationPipe runs with forbidNonWhitelisted, so sending them at an API
+    // that did not declare them 400'd every submission.
     mutationFn: ({ itemId, body }: { itemId: string; body: { title: string; description: string; severity: string } }) =>
       api.post('/infrastructure/report', { itemId, ...body }),
     onSuccess: () => {
@@ -65,7 +68,10 @@ export default function InfrastructurePage() {
   });
 
   const resolveMutation = useMutation({
-    mutationFn: (id: string) => api.patch(`/infrastructure/incidents/${id}/resolve`, {}),
+    // `resolution` is optional server-side now; it used to be required, so this
+    // empty body came back 400 and Resolve did nothing.
+    mutationFn: ({ id, resolution }: { id: string; resolution?: string }) =>
+      api.patch(`/infrastructure/incidents/${id}/resolve`, resolution ? { resolution } : {}),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['infrastructure-items'] });
       toast.success('Incident resolved');
@@ -294,7 +300,9 @@ export default function InfrastructurePage() {
                       {incident.status}
                     </span>
                   </div>
-                  <h3 className="font-semibold text-gray-900">{incident.title}</h3>
+                  <h3 className="font-semibold text-gray-900">
+                    {incident.title || incident.description?.slice(0, 60) || 'Incident'}
+                  </h3>
                   <p className="text-sm text-gray-500 mt-1 line-clamp-2">{incident.description}</p>
                   <p className="text-xs text-gray-400 mt-2">
                     Reported {new Date(incident.reportedAt ?? incident.createdAt ?? Date.now()).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
@@ -303,7 +311,10 @@ export default function InfrastructurePage() {
                 </div>
                 {incident.status !== 'RESOLVED' && (
                   <button
-                    onClick={() => resolveMutation.mutate(incident.id)}
+                    onClick={() => {
+                      const note = window.prompt('Resolution note (optional)') ?? undefined;
+                      resolveMutation.mutate({ id: incident.id, resolution: note?.trim() || undefined });
+                    }}
                     disabled={resolveMutation.isPending}
                     className="ml-4 shrink-0 inline-flex items-center gap-1 text-xs px-3 py-1.5 bg-green-500 hover:bg-green-600 text-white rounded-lg font-medium transition-colors disabled:opacity-50"
                   >

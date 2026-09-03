@@ -24,6 +24,10 @@ function makeService(overrides: any = {}) {
       createMany: jest.fn(),
     },
     adminRole: { findFirst: jest.fn(), findMany: jest.fn(), create: jest.fn(), update: jest.fn() },
+    // Revoking a grant restores the role the person actually holds, so the
+    // service reads their resident/staff profiles.
+    resident: { findFirst: jest.fn().mockResolvedValue(null) },
+    staffMember: { findFirst: jest.fn().mockResolvedValue(null) },
     $transaction: jest.fn().mockResolvedValue([]),
     ...overrides,
   };
@@ -331,6 +335,31 @@ describe('AdminAccessService.revokeAdmin', () => {
     // Legacy @Roles routes must stop passing immediately, so User.role is
     // demoted in the same transaction.
     expect(prisma.$transaction).toHaveBeenCalled();
+  });
+
+  it('restores STAFF (not RESIDENT) when the revoked admin is a staff member', async () => {
+    // Hardcoding RESIDENT on revoke turned a security supervisor who had been
+    // given dashboard access into a resident, losing every /staff route.
+    const { svc, prisma } = makeService();
+    prisma.societyAdmin.findFirst.mockResolvedValue({ id: 'g1', userId: 'staff-1', role: OWNER_ROLE });
+    prisma.societyAdmin.findMany.mockResolvedValue([{ role: OWNER_ROLE }]);
+    prisma.staffMember.findFirst.mockResolvedValue({ id: 'sm-1' });
+
+    await expect(svc.revokeAdmin('soc-1', SUPER, 'g1')).resolves.toMatchObject({
+      revoked: true,
+      restoredRole: UserRole.STAFF,
+    });
+  });
+
+  it('restores RESIDENT for a committee member who lives in the society', async () => {
+    const { svc, prisma } = makeService();
+    prisma.societyAdmin.findFirst.mockResolvedValue({ id: 'g1', userId: 'res-1', role: OWNER_ROLE });
+    prisma.societyAdmin.findMany.mockResolvedValue([{ role: OWNER_ROLE }]);
+    prisma.resident.findFirst.mockResolvedValue({ id: 'r-1' });
+
+    await expect(svc.revokeAdmin('soc-1', SUPER, 'g1')).resolves.toMatchObject({
+      restoredRole: UserRole.RESIDENT,
+    });
   });
 
   it('refuses to remove an admin with broader access than the actor', async () => {

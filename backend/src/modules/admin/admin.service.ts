@@ -213,6 +213,19 @@ export class AdminService {
       include: { user: true, flat: true },
       orderBy: { createdAt: 'desc' },
     });
+
+    // One query for every active admin grant in the society, so the badge costs
+    // nothing per row.
+    const grants = residents.length
+      ? await this.prisma.societyAdmin.findMany({
+          where: { societyId, isActive: true, userId: { in: residents.map((r) => r.userId) } },
+          include: { role: { select: { key: true, name: true } } },
+        })
+      : [];
+    const adminByUserId = new Map(
+      grants.map((g) => [g.userId, { roleKey: g.role.key, roleName: g.role.name, blocks: g.blocks }]),
+    );
+
     return residents.map((r) => ({
       id: r.id,
       userId: r.userId,
@@ -229,6 +242,14 @@ export class AdminService {
       roleNote: (r as any).roleNote ?? null,
       appActivatedAt: (r as any).appActivatedAt ?? null,
       emergencyContact: r.emergencyContact ?? null,
+      // A resident can ALSO be a society admin (committee members almost always
+      // are). Surfacing it here is what lets the Residents screen show the
+      // badge and offer promote/demote, instead of admin access being managed
+      // in a separate screen keyed by phone number.
+      isSocietyAdmin: adminByUserId.has(r.userId),
+      adminRoleName: adminByUserId.get(r.userId)?.roleName ?? null,
+      adminRoleKey: adminByUserId.get(r.userId)?.roleKey ?? null,
+      adminBlocks: adminByUserId.get(r.userId)?.blocks ?? [],
       createdAt: r.createdAt,
     }));
   }

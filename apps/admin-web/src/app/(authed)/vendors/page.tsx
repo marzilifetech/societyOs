@@ -27,7 +27,33 @@ type VendorOrder = {
   createdAt: string;
 };
 
-const CATEGORIES = ['Grocery', 'Pharmacy', 'Restaurant', 'Laundry', 'Cleaning', 'Plumber', 'Electrician', 'Other'];
+/**
+ * Value sent to the API, label shown to the operator.
+ *
+ * The dropdown used to send Title Case ("Grocery") straight into a
+ * `@IsEnum(VendorCategory)` field that only accepts UPPER_SNAKE, so every
+ * "Add Vendor" submit came back 400 and the button looked dead. The enum has
+ * also been widened to cover the categories this list always offered.
+ */
+const CATEGORIES: { value: string; label: string }[] = [
+  { value: 'GROCERY', label: 'Grocery' },
+  { value: 'PHARMACY', label: 'Pharmacy' },
+  { value: 'BAKERY', label: 'Bakery' },
+  { value: 'DAIRY', label: 'Dairy' },
+  { value: 'VEGETABLES', label: 'Vegetables' },
+  { value: 'RESTAURANT', label: 'Restaurant' },
+  { value: 'LAUNDRY', label: 'Laundry' },
+  { value: 'CLEANING', label: 'Cleaning' },
+  { value: 'PLUMBER', label: 'Plumber' },
+  { value: 'ELECTRICIAN', label: 'Electrician' },
+  { value: 'CARPENTER', label: 'Carpenter' },
+  { value: 'SECURITY', label: 'Security' },
+  { value: 'OTHER', label: 'Other' },
+];
+
+const CATEGORY_LABEL: Record<string, string> = Object.fromEntries(
+  CATEGORIES.map((c) => [c.value, c.label]),
+);
 
 const ORDER_STATUS_META: Record<string, { label: string; color: string }> = {
   PENDING:    { label: 'Pending',    color: 'bg-amber-100 text-amber-700' },
@@ -38,14 +64,19 @@ const ORDER_STATUS_META: Record<string, { label: string; color: string }> = {
 };
 
 const CATEGORY_COLORS: Record<string, string> = {
-  Grocery:      'bg-green-100 text-green-700',
-  Pharmacy:     'bg-blue-100 text-blue-700',
-  Restaurant:   'bg-orange-100 text-orange-700',
-  Laundry:      'bg-teal-100 text-teal-700',
-  Cleaning:     'bg-cyan-100 text-cyan-700',
-  Plumber:      'bg-violet-100 text-violet-700',
-  Electrician:  'bg-yellow-100 text-yellow-700',
-  Other:        'bg-gray-100 text-gray-600',
+  GROCERY:     'bg-green-100 text-green-700',
+  PHARMACY:    'bg-blue-100 text-blue-700',
+  BAKERY:      'bg-amber-100 text-amber-700',
+  DAIRY:       'bg-sky-100 text-sky-700',
+  VEGETABLES:  'bg-lime-100 text-lime-700',
+  RESTAURANT:  'bg-orange-100 text-orange-700',
+  LAUNDRY:     'bg-teal-100 text-teal-700',
+  CLEANING:    'bg-cyan-100 text-cyan-700',
+  PLUMBER:     'bg-violet-100 text-violet-700',
+  ELECTRICIAN: 'bg-yellow-100 text-yellow-700',
+  CARPENTER:   'bg-stone-100 text-stone-700',
+  SECURITY:    'bg-indigo-100 text-indigo-700',
+  OTHER:       'bg-gray-100 text-gray-600',
 };
 
 type ModalMode = 'add' | 'edit';
@@ -61,7 +92,7 @@ function VendorModal({
 }) {
   const qc = useQueryClient();
   const [name, setName] = useState(vendor?.name ?? '');
-  const [category, setCategory] = useState(vendor?.category ?? CATEGORIES[0]);
+  const [category, setCategory] = useState(vendor?.category ?? CATEGORIES[0].value);
   const [phone, setPhone] = useState(vendor?.phone ?? '');
   const [logoUrl, setLogoUrl] = useState(vendor?.logoUrl ?? '');
 
@@ -83,7 +114,8 @@ function VendorModal({
     mutation.mutate({
       name: name.trim(),
       category,
-      phone: phone.trim(),
+      // Send the field only when it has a value; '' is not a phone number.
+      ...(phone.trim() ? { phone: phone.trim() } : {}),
       ...(logoUrl.trim() ? { logoUrl: logoUrl.trim() } : {}),
     });
   };
@@ -111,7 +143,7 @@ function VendorModal({
               onChange={(e) => setCategory(e.target.value)}
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-primary-400"
             >
-              {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+              {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
             </select>
           </div>
           <div>
@@ -280,7 +312,7 @@ export default function VendorsPage() {
                       </td>
                       <td className="px-5 py-3">
                         <span className={cn('text-xs font-medium px-2.5 py-1 rounded-full', CATEGORY_COLORS[v.category] ?? 'bg-gray-100 text-gray-600')}>
-                          {v.category}
+                          {CATEGORY_LABEL[v.category] ?? v.category}
                         </span>
                       </td>
                       <td className="px-5 py-3 text-gray-600">{v.phone}</td>

@@ -5,7 +5,8 @@ import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ClipboardList, Trash2, Star } from 'lucide-react';
-import { api } from '@/lib/api';
+import { api, downloadAdminFile } from '@/lib/api';
+import { fromDateTimeLocalValue, formatDateTime } from '@/lib/datetime';
 import { cn } from '@/lib/cn';
 import { ErrorState } from '@/components/ui/ErrorState';
 
@@ -77,30 +78,32 @@ function AgeBadge({ createdAt }: { createdAt: string }) {
   return null;
 }
 
-function exportCSV(requests: any[]) {
-  const headers = ['ID', 'Category', 'Status', 'Resident', 'Unit', 'Tags', 'Paid', 'Rating', 'Created At', 'Age (hours)'];
-  const rows = requests.map((sr) => {
-    const ageH = getAgeHours(sr.createdAt).toFixed(1);
-    return [
-      sr.id,
-      sr.category,
-      sr.status,
-      sr.resident?.name ?? '',
-      sr.unit?.flatNumber ?? sr.resident?.flat?.flatNumber ?? '',
-      (sr.tags ?? []).join(';'),
-      sr.isPaid ? 'Paid' : 'Free',
-      sr.rating != null ? Number(sr.rating).toFixed(1) : '',
-      new Date(sr.createdAt).toISOString(),
-      ageH,
-    ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',');
-  });
-  const csv = [headers.join(','), ...rows].join('\n');
-  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `service-requests-${Date.now()}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
+/**
+ * Full export, produced server-side.
+ *
+ * This used to build the CSV in the browser from `displayRequests` — only the
+ * rows currently loaded AND currently filtered, across 10 columns that omitted
+ * the description, assigned staff, every timestamp past creation, the SLA
+ * deadline and the resolution. `GET /service-requests/export` returns the whole
+ * result set with the complete record and IST timestamps.
+ */
+/** Tab -> the statuses the server should include, so the file matches the view. */
+const TAB_EXPORT_STATUSES: Record<Tab, string | undefined> = {
+  ALL: undefined,
+  CREATED: 'PENDING',
+  SCHEDULED: 'ASSIGNED,IN_PROGRESS,ACCEPTED',
+  COMPLETED: 'COMPLETED,CLOSED',
+};
+
+async function exportCSV(tab: Tab) {
+  const params = new URLSearchParams();
+  const statuses = TAB_EXPORT_STATUSES[tab];
+  if (statuses) params.set('status', statuses);
+  const qs = params.toString();
+  await downloadAdminFile(
+    `/service-requests/export${qs ? `?${qs}` : ''}`,
+    `service-requests-${new Date().toISOString().slice(0, 10)}.csv`,
+  );
 }
 
 function isDisputed(sr: any): boolean {
@@ -263,7 +266,7 @@ function NewRequestModal({ onClose, onCreated }: { onClose: () => void; onCreate
       residentId: form.residentId,
       category: form.category,
       description: form.description,
-      ...(form.scheduledTime && { scheduledTime: form.scheduledTime }),
+      ...(form.scheduledTime && { scheduledTime: fromDateTimeLocalValue(form.scheduledTime) ?? undefined }),
       isPaid: form.isPaid,
       ...(form.reminderMinutes && { reminderMinutes: Number(form.reminderMinutes) }),
       ...(form.tags.length && { tags: form.tags }),
@@ -558,7 +561,9 @@ export default function ServiceRequestsPage() {
           </button>
           <button
             className="bg-white border border-gray-200 hover:border-gray-300 text-gray-700 text-sm font-medium px-4 py-2 rounded-xl transition-colors"
-            onClick={() => displayRequests.length && exportCSV(displayRequests)}
+            onClick={() =>
+              exportCSV(tab).catch(() => toast.error('Export failed. Please try again.'))
+            }
             disabled={!displayRequests.length}
           >
             Export CSV
@@ -688,7 +693,7 @@ export default function ServiceRequestsPage() {
                         <div>{new Date(sr.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</div>
                         {sr.scheduledTime && (
                           <div className="text-primary-600 font-medium mt-0.5">
-                            Sched: {new Date(sr.scheduledTime).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                            Sched: {formatDateTime(sr.scheduledTime)}
                           </div>
                         )}
                         {sr.preferredTime && !sr.scheduledTime && (
@@ -784,7 +789,14 @@ export default function ServiceRequestsPage() {
                                 className="flex-1 text-xs bg-primary-500 text-white py-1.5 rounded font-medium disabled:opacity-50"
                                 onClick={() => {
                                   if (selectedStaffIds.length) {
-                                    assignMutation.mutate({ id: sr.id, staffIds: selectedStaffIds, scheduledTime });
+                                    // Convert the local wall-clock value to a
+                                    // real instant. Sending "2026-09-05T16:30"
+                                    // as-is let the server parse it in ITS zone.
+                                    assignMutation.mutate({
+                                      id: sr.id,
+                                      staffIds: selectedStaffIds,
+                                      scheduledTime: fromDateTimeLocalValue(scheduledTime) ?? undefined,
+                                    });
                                   }
                                 }}
                                 disabled={!selectedStaffIds.length || assignMutation.isPending}

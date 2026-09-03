@@ -95,6 +95,17 @@ const defaultDishForm = {
   allergens: '',
 };
 
+/**
+ * `GET /canteen/menu?date=…` responds with every meal's menu for that date, as
+ * an array — the `mealType` query parameter is accepted but the payload still
+ * carries the whole day. Select the one this screen is showing.
+ */
+function pickMenu(res: Menu[] | Menu | null | undefined, mealType: string): Menu | null {
+  if (!res) return null;
+  const list = Array.isArray(res) ? res : [res];
+  return list.find((m) => m?.mealType === mealType) ?? null;
+}
+
 export default function CanteenPage() {
   const qc = useQueryClient();
   const [activeTab, setActiveTab] = useState<Tab>('menu');
@@ -110,7 +121,14 @@ export default function CanteenPage() {
   const { data: menu, isLoading, isError, refetch } = useQuery({
     queryKey: ['canteen-menu', selectedDate, selectedMealType],
     queryFn: () =>
-      api.get<Menu>(`/canteen/menu?date=${selectedDate}&mealType=${selectedMealType}`),
+      // The endpoint returns an ARRAY of menus for the date (one per meal).
+      // Typing it as a single Menu meant `menu.dishes` was always undefined, so
+      // the admin saw an empty menu while the resident app — which handles the
+      // array — showed the dishes. That is the "dish is visible on the resident
+      // app but not the admin dashboard" report.
+      api
+        .get<Menu[] | Menu>(`/canteen/menu?date=${selectedDate}&mealType=${selectedMealType}`)
+        .then((res) => pickMenu(res, selectedMealType)),
     enabled: activeTab === 'menu',
   });
 

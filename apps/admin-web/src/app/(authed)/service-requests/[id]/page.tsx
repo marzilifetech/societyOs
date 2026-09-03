@@ -6,6 +6,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowLeft, Star, UserCheck } from 'lucide-react';
 import { api } from '@/lib/api';
+import { toDateTimeLocalValue, fromDateTimeLocalValue, formatDateTime } from '@/lib/datetime';
 import { cn } from '@/lib/cn';
 import { ErrorState } from '@/components/ui/ErrorState';
 
@@ -230,16 +231,27 @@ export default function ServiceRequestDetailPage() {
 
           <div>
             <label className="text-xs font-medium text-gray-400 uppercase tracking-wide block mb-1">Scheduled</label>
+            {/*
+              The picker shows, and returns, SOCIETY time (IST). Reading the raw
+              ISO string with `.slice(0, 16)` put UTC wall-clock into a local
+              field, so the value displayed here disagreed with the list by the
+              5h30m offset and drifted by another 5h30m on every save.
+            */}
             <input
               type="datetime-local"
               className="w-full border border-gray-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary-400"
-              defaultValue={sr.scheduledTime ? sr.scheduledTime.slice(0, 16) : ''}
+              defaultValue={toDateTimeLocalValue(sr.scheduledTime)}
               onBlur={(e) => {
-                const val = e.target.value ? new Date(e.target.value).toISOString() : null;
+                const val = fromDateTimeLocalValue(e.target.value);
                 const prev = sr.scheduledTime ? new Date(sr.scheduledTime).toISOString() : null;
                 if (val !== prev) updateMutation.mutate({ scheduledTime: val ?? undefined });
               }}
             />
+            {sr.scheduledTime && (
+              <p className="mt-1 text-[11px] text-gray-400">
+                Scheduled for {formatDateTime(sr.scheduledTime)} IST
+              </p>
+            )}
           </div>
           <div>
             <label className="text-xs font-medium text-gray-400 uppercase tracking-wide block mb-1">Reminder (minutes before)</label>

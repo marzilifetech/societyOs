@@ -20,15 +20,18 @@ interface Poll {
   id: string;
   question: string;
   deadline: string;
-  totalVotes: number;
-  status: 'ACTIVE' | 'CLOSED';
+  /** Server-derived from the deadline. Optional so a cached older response still parses. */
+  totalVotes?: number;
+  voteCount?: number;
+  status?: 'ACTIVE' | 'CLOSED';
+  isClosed?: boolean;
 }
 
 interface PollResults {
   id: string;
   question: string;
   deadline: string;
-  status: 'ACTIVE' | 'CLOSED';
+  status?: 'ACTIVE' | 'CLOSED';
   options: PollOption[];
 }
 
@@ -38,6 +41,22 @@ const defaultForm = {
   deadline: '',
   isAnonymous: false,
 };
+
+/**
+ * A poll is closed when its deadline has passed — `Poll` has no status column,
+ * and `closePoll` works by setting the deadline to now. The server now derives
+ * `status`/`isClosed`; these helpers fall back to the deadline so a cached
+ * response from an older API still renders correctly.
+ */
+function pollIsClosed(poll: Poll): boolean {
+  if (typeof poll.isClosed === 'boolean') return poll.isClosed;
+  if (poll.status) return poll.status !== 'ACTIVE';
+  return new Date(poll.deadline).getTime() <= Date.now();
+}
+
+function pollVoteCount(poll: Poll): number {
+  return poll.totalVotes ?? poll.voteCount ?? 0;
+}
 
 export default function PollsPage() {
   const qc = useQueryClient();
@@ -106,9 +125,21 @@ export default function PollsPage() {
   }
 
   const selectedPoll = polls?.find((p) => p.id === selectedPollId);
+  // `status` is derived server-side from the deadline. It used to be absent
+  // entirely, so this was always false and the "Close Poll" button never
+  // rendered — an expired poll sat in the list looking live with no way to
+  // close it. The date check is kept as a fallback for a cached response.
   const isPollActive = selectedPoll
-    ? selectedPoll.status === 'ACTIVE' && new Date(selectedPoll.deadline) > new Date()
+    ? (selectedPoll.status ?? 'ACTIVE') === 'ACTIVE' && new Date(selectedPoll.deadline) > new Date()
     : false;
+
+  // Sort so live polls lead and closed ones fall to the bottom.
+  const sortedPolls = [...(polls ?? [])].sort((a, b) => {
+    const aClosed = pollIsClosed(a);
+    const bClosed = pollIsClosed(b);
+    if (aClosed !== bClosed) return aClosed ? 1 : -1;
+    return new Date(b.deadline).getTime() - new Date(a.deadline).getTime();
+  });
 
   const chartData = results?.options.map((o) => ({ name: o.text, votes: o.count })) ?? [];
 
@@ -212,7 +243,7 @@ export default function PollsPage() {
             </div>
           ) : (
             <div className="space-y-3">
-              {polls.map((poll) => (
+              {sortedPolls.map((poll) => (
                 <button
                   key={poll.id}
                   onClick={() => setSelectedPollId(poll.id)}
@@ -225,12 +256,13 @@ export default function PollsPage() {
                 >
                   <div className="flex items-start justify-between gap-2 mb-2">
                     <p className="text-sm font-medium text-gray-900 line-clamp-2">{poll.question}</p>
-                    <span className={cn('shrink-0 text-xs font-medium px-2 py-0.5 rounded-full', poll.status === 'ACTIVE' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500')}>
-                      {poll.status}
+                    <span className={cn('shrink-0 text-xs font-medium px-2 py-0.5 rounded-full', pollIsClosed(poll) ? 'bg-gray-100 text-gray-500' : 'bg-green-100 text-green-700')}>
+                      {pollIsClosed(poll) ? 'CLOSED' : 'ACTIVE'}
                     </span>
                   </div>
                   <p className="text-xs text-gray-400">
-                    {poll.totalVotes} vote{poll.totalVotes !== 1 ? 's' : ''} · Deadline{' '}
+                    {pollVoteCount(poll)} vote{pollVoteCount(poll) !== 1 ? 's' : ''} ·{' '}
+                    {pollIsClosed(poll) ? 'Closed' : 'Closes'}{' '}
                     {new Date(poll.deadline).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
                   </p>
                 </button>

@@ -37,7 +37,15 @@ async function downloadResidentsCSV() {
 }
 
 type TabType = 'All Residents' | 'Pending Approval';
-type StatusFilter = 'All' | 'ACTIVE' | 'PENDING' | 'INACTIVE';
+/**
+ * `REJECTED` is not part of the default view: once an entry is rejected the
+ * person is not a resident and must not appear in the resident list. It is
+ * still reachable through the explicit "Rejected" option, which asks the server
+ * for those rows — nothing is deleted, it is just not the default.
+ */
+type StatusFilter = 'All' | 'ACTIVE' | 'PENDING' | 'INACTIVE' | 'REJECTED';
+
+type AdminRoleOption = { id: string; key: string; name: string; description?: string | null };
 
 /** Small pill that turns green when a KYC document is uploaded, gray when not. */
 function DocPip({ label, present }: { label: string; present: boolean }) {
@@ -64,6 +72,8 @@ export default function ResidentsPage() {
   const [activeTab, setActiveTab] = useState<TabType>('All Residents');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('All');
   const [rejectTarget, setRejectTarget] = useState<{ id: string; name: string } | null>(null);
+  const [adminTarget, setAdminTarget] = useState<{ userId: string; phone: string; name: string } | null>(null);
+  const [adminRoleKey, setAdminRoleKey] = useState('');
   const [rejectReason, setRejectReason] = useState('');
   const [showBulkModal, setShowBulkModal] = useState(false);
   const [bulkMessage, setBulkMessage] = useState('');
@@ -158,8 +168,11 @@ export default function ResidentsPage() {
   }
 
   const { data: residents, isLoading, isError, refetch } = useQuery({
-    queryKey: ['residents'],
-    queryFn: () => api.get<any[]>('/admin/residents'),
+    queryKey: ['residents', statusFilter === 'REJECTED' ? 'REJECTED' : 'default'],
+    queryFn: () =>
+      api.get<any[]>(
+        statusFilter === 'REJECTED' ? '/admin/residents?status=REJECTED' : '/admin/residents',
+      ),
   });
 
   const { data: pendingResidents, isLoading: pendingLoading, isError: pendingError, refetch: refetchPending } = useQuery({
@@ -178,6 +191,53 @@ export default function ResidentsPage() {
     qc.invalidateQueries({ queryKey: ['residents'] });
     qc.invalidateQueries({ queryKey: ['residents-pending'] });
   };
+
+  /**
+   * Admin roles available to grant. Loaded lazily — only needed once the
+   * operator opens the "Make admin" dialog.
+   */
+  const { data: adminRoles } = useQuery({
+    queryKey: ['admin-roles'],
+    queryFn: () => api.get<AdminRoleOption[]>('/admin/roles').catch(() => [] as AdminRoleOption[]),
+    enabled: !!adminTarget,
+    staleTime: 5 * 60_000,
+  });
+
+  /**
+   * Committee members are residents too.
+   *
+   * Admin access used to be granted only from Settings > Admins, by typing a
+   * phone number — the operator had to leave the person's record, copy their
+   * number, and hope they matched it correctly. Granting from the resident row
+   * is the same underlying operation (POST /admin/admins upserts by phone) with
+   * the identity already resolved.
+   */
+  const grantAdminMutation = useMutation({
+    mutationFn: ({ phone, name, roleKey }: { phone: string; name?: string; roleKey: string }) =>
+      api.post('/admin/admins', { phone, name, roleKey, blocks: [] }),
+    onSuccess: () => {
+      toast.success('Society admin access granted. They keep full resident access.');
+      invalidateBoth();
+      qc.invalidateQueries({ queryKey: ['admins'] });
+      setAdminTarget(null);
+    },
+    onError: (err: Error) => toast.error(err.message ?? 'Could not grant admin access'),
+  });
+
+  const revokeAdminMutation = useMutation({
+    mutationFn: async (userId: string) => {
+      const admins = await api.get<Array<{ id: string; user: { id: string } }>>('/admin/admins');
+      const grant = admins.find((a) => a.user?.id === userId);
+      if (!grant) throw new Error('No active admin grant found for this resident');
+      return api.delete(`/admin/admins/${grant.id}`);
+    },
+    onSuccess: () => {
+      toast.success('Admin access removed. Their resident account is unaffected.');
+      invalidateBoth();
+      qc.invalidateQueries({ queryKey: ['admins'] });
+    },
+    onError: (err: Error) => toast.error(err.message ?? 'Could not remove admin access'),
+  });
 
   const approveMutation = useMutation({
     mutationFn: (id: string) => api.patch(`/admin/residents/${id}/approve`, {}),
@@ -207,13 +267,14 @@ export default function ResidentsPage() {
     const handler = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       if (showBulkModal) setShowBulkModal(false);
+      if (adminTarget) setAdminTarget(null);
       if (rejectTarget) { setRejectTarget(null); setRejectReason(''); }
       if (showAddModal) setShowAddModal(false);
       if (showImportModal) closeImportModal();
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [showBulkModal, rejectTarget, showAddModal, showImportModal]);
+  }, [showBulkModal, rejectTarget, adminTarget, showAddModal, showImportModal]);
 
   const pendingCount = residents?.filter(r => r.status === 'PENDING').length ?? 0;
 
@@ -320,6 +381,7 @@ export default function ResidentsPage() {
             <option value="ACTIVE">Active</option>
             <option value="PENDING">Pending</option>
             <option value="INACTIVE">Inactive</option>
+            <option value="REJECTED">Rejected (archived)</option>
           </select>
         )}
       </div>
@@ -345,7 +407,7 @@ export default function ResidentsPage() {
                   'Name', 'Phone', 'Flat', 'Tower', 'Status',
                   ...(activeTab === 'Pending Approval'
                     ? ['Type', 'Documents', 'Actions']
-                    : ['App', 'Joined']
+                    : ['App', 'Joined', 'Admin access']
                   ),
                 ].map((h) => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
@@ -388,6 +450,17 @@ export default function ResidentsPage() {
                           </span>
                         </div>
                         <span className="text-sm font-medium text-gray-900">{r.name}</span>
+                        {/* A resident can also be a society admin — committee
+                            members almost always are. Both capabilities are held
+                            at once; neither replaces the other. */}
+                        {r.isSocietyAdmin && (
+                          <span
+                            className="text-[11px] font-semibold px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700 shrink-0"
+                            title={r.adminRoleName ? `Society admin — ${r.adminRoleName}` : 'Society admin'}
+                          >
+                            {r.adminRoleName ?? 'Admin'}
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600">{r.phone}</td>
@@ -454,6 +527,30 @@ export default function ResidentsPage() {
                           {r.createdAt
                             ? new Date(r.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
                             : '—'}
+                        </td>
+                        <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                          {r.isSocietyAdmin ? (
+                            <button
+                              className="text-xs text-gray-600 border border-gray-200 hover:border-gray-300 px-2.5 py-1 rounded-lg transition-colors disabled:opacity-50"
+                              disabled={revokeAdminMutation.isPending}
+                              onClick={() => {
+                                if (!window.confirm(`Remove society-admin access from ${r.name}? They stay a resident.`)) return;
+                                revokeAdminMutation.mutate(r.userId);
+                              }}
+                            >
+                              Remove admin
+                            </button>
+                          ) : (
+                            <button
+                              className="text-xs text-indigo-600 border border-indigo-200 hover:bg-indigo-50 px-2.5 py-1 rounded-lg transition-colors"
+                              onClick={() => {
+                                setAdminRoleKey('');
+                                setAdminTarget({ userId: r.userId, phone: r.phone, name: r.name });
+                              }}
+                            >
+                              Make admin
+                            </button>
+                          )}
                         </td>
                       </>
                     )}
@@ -715,6 +812,55 @@ export default function ResidentsPage() {
                   {bulkMutation.isPending ? 'Sending…' : 'Send Push'}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Grant society-admin access to a resident, keeping both capabilities. */}
+      {adminTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setAdminTarget(null)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 p-6" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-semibold text-gray-900 mb-1">Make {adminTarget.name} a society admin</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              They keep their flat, bills, visitors and everything else in the resident app — admin
+              access is added alongside it, not instead of it.
+            </p>
+
+            <label className="block text-xs font-medium text-gray-700 mb-1">Admin role</label>
+            <select
+              value={adminRoleKey}
+              onChange={(e) => setAdminRoleKey(e.target.value)}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-primary-400 mb-1"
+            >
+              <option value="">Select a role…</option>
+              {(adminRoles ?? []).map((role) => (
+                <option key={role.id} value={role.key}>{role.name}</option>
+              ))}
+            </select>
+            {adminRoleKey && (
+              <p className="text-xs text-gray-400 mb-3">
+                {adminRoles?.find((r) => r.key === adminRoleKey)?.description ?? ''}
+              </p>
+            )}
+
+            <div className="flex gap-2 justify-end mt-5">
+              <button onClick={() => setAdminTarget(null)} className="text-sm text-gray-500 px-3 py-2">
+                Cancel
+              </button>
+              <button
+                disabled={!adminRoleKey || grantAdminMutation.isPending}
+                onClick={() =>
+                  grantAdminMutation.mutate({
+                    phone: adminTarget.phone,
+                    name: adminTarget.name,
+                    roleKey: adminRoleKey,
+                  })
+                }
+                className="bg-primary-500 hover:bg-primary-600 text-white text-sm px-4 py-2 rounded-xl disabled:opacity-50"
+              >
+                {grantAdminMutation.isPending ? 'Granting…' : 'Grant admin access'}
+              </button>
             </div>
           </div>
         </div>

@@ -34,8 +34,10 @@ interface SosLog {
   residentName: string;
   flat: string;
   alertTime: string;
+  /** Server-derived booleans; the table renders these directly. */
   acknowledged: boolean;
   resolved: boolean;
+  acknowledgedBy?: string | null;
   status: 'ACTIVE' | 'ACKNOWLEDGED' | 'RESOLVED';
 }
 
@@ -84,18 +86,37 @@ export default function MedicalPage() {
     enabled: activeTab === 'appointments',
   });
 
+  /**
+   * SOS alert log.
+   *
+   * Two things kept this looking empty. The `.catch()` swallowed any real
+   * failure and silently substituted `/sos/active`, which returns raw SosAlert
+   * rows with none of the fields this table reads (no residentName, no flat, no
+   * alertTime) — so a failure rendered as blank rows rather than an error. And
+   * with no polling, an alert raised while the tab was open never appeared.
+   */
   const { data: sosLog, isLoading: sosLoading, isError: sosError, refetch: refetchSos } = useQuery({
     queryKey: ['sos-log'],
-    queryFn: () => api.get<SosLog[]>('/medical/admin/sos/log').catch(() => api.get<SosLog[]>('/sos/active')),
+    queryFn: () => api.get<SosLog[]>('/medical/admin/sos/log'),
     enabled: activeTab === 'sos',
+    refetchInterval: activeTab === 'sos' ? 20_000 : false,
+    staleTime: 10_000,
+  });
+
+  /** Active alerts drive the banner, so they surface on every Medical tab. */
+  const { data: activeSos = [] } = useQuery({
+    queryKey: ['sos-log-active'],
+    queryFn: () => api.get<SosLog[]>('/medical/admin/sos/log').then((rows) => rows.filter((r) => r.status === 'ACTIVE')),
+    refetchInterval: 20_000,
+    staleTime: 10_000,
   });
 
   const addDoctorMutation = useMutation({
     mutationFn: () =>
       api.post('/medical/admin/medical/staff', {
-        ...doctorForm,
         name: doctorForm.name.trim(),
         designation: doctorForm.designation.trim(),
+        availableDays: doctorForm.availableDays,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['medical-staff'] });
@@ -107,11 +128,14 @@ export default function MedicalPage() {
   });
 
   const updateDoctorMutation = useMutation({
+    // `availableDays` is not a column — it lives inside the `schedule` JSON.
+    // The API used to pass this body straight to Prisma, which threw
+    // "Unknown argument `availableDays`" and made every edit fail.
     mutationFn: (id: string) =>
       api.patch(`/medical/admin/medical/staff/${id}`, {
-        ...doctorForm,
         name: doctorForm.name.trim(),
         designation: doctorForm.designation.trim(),
+        availableDays: doctorForm.availableDays,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['medical-staff'] });
@@ -156,11 +180,36 @@ export default function MedicalPage() {
   const TABS: { key: ActiveTab; label: string }[] = [
     { key: 'doctors', label: 'Doctors' },
     { key: 'appointments', label: 'Appointments' },
-    { key: 'sos', label: 'SOS Log' },
+    { key: 'sos', label: activeSos.length ? `SOS Log (${activeSos.length})` : 'SOS Log' },
   ];
 
   return (
     <div className="p-6 lg:p-8">
+      {/* An active medical SOS is the most urgent thing on this screen; it must
+          not be hidden behind a tab the operator has to know to open. */}
+      {activeSos.length > 0 && (
+        <div className="bg-red-500 text-white rounded-2xl px-5 py-4 mb-5 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Siren className="w-6 h-6 animate-pulse" />
+            <div>
+              <p className="font-bold">
+                {activeSos.length} active SOS alert{activeSos.length > 1 ? 's' : ''}
+              </p>
+              <p className="text-red-100 text-sm">
+                {activeSos.slice(0, 2).map((a) => `${a.residentName} (${a.flat})`).join(', ')}
+                {activeSos.length > 2 ? ` +${activeSos.length - 2} more` : ''}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setActiveTab('sos')}
+            className="bg-white text-red-600 font-semibold text-sm px-4 py-2 rounded-xl hover:bg-red-50 transition-colors"
+          >
+            View log
+          </button>
+        </div>
+      )}
+
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">Medical</h1>
         {activeTab === 'doctors' && (

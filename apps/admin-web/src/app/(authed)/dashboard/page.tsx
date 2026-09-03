@@ -60,6 +60,34 @@ interface EventItem {
   venue: string;
   registeredCount: number;
   maxAttendees: number;
+  status?: string;
+  /** Server-derived: PUBLISHED and still in the future. Cancelled is never upcoming. */
+  isUpcoming?: boolean;
+  isCancelled?: boolean;
+}
+
+/** Society-wide staff attendance for today (GET /admin/staff/attendance/today). */
+interface AttendanceSummary {
+  summary: {
+    date: string;
+    totalStaff: number;
+    onDuty: number;
+    checkedOut: number;
+    onLeave: number;
+    absent: number;
+    late: number;
+    present: number;
+    attendanceRate: number;
+  };
+  staff: Array<{
+    staffId: string;
+    name: string;
+    designation: string;
+    state: 'ON_DUTY' | 'CHECKED_OUT' | 'ON_LEAVE' | 'ABSENT';
+    checkInIst: string | null;
+    checkOutIst: string | null;
+    isLate: boolean;
+  }>;
 }
 
 interface ComplaintCategoryDatum {
@@ -150,6 +178,21 @@ export default function DashboardPage() {
     queryFn: () => api.get<EventItem[]>('/admin/events'),
   });
 
+  /**
+   * Staff on duty right now.
+   *
+   * Check-in wrote a StaffAttendance row correctly, but nothing on the
+   * dashboard ever READ it — there was no endpoint and no widget, so a staff
+   * member could check in and the dashboard looked identical. Polled on a short
+   * interval because "who is on site" is a live operational question.
+   */
+  const { data: attendance } = useQuery({
+    queryKey: ['staff-attendance-today', societyId],
+    queryFn: () => api.get<AttendanceSummary>('/admin/staff/attendance/today'),
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
+
   const { data: complaintChartData } = useQuery({
     queryKey: ['dashboard-complaints-by-category', societyId],
     queryFn: () =>
@@ -199,9 +242,16 @@ export default function DashboardPage() {
 
   const showSosBanner = (activeAlerts?.length ?? 0) > 0 && !sosDismissed;
 
-  // Upcoming events: future only, sorted ascending, top 3
+  // Upcoming events: PUBLISHED and in the future, soonest first, top 3.
+  //
+  // This filtered on the date alone, so cancelling an event left it sitting
+  // under "Upcoming Events" until its date passed. `isUpcoming` is derived
+  // server-side (see AdminService.getAdminEvents) so every surface agrees;
+  // the status fallback covers a cached response from an older API.
   const upcomingEvents = (events ?? [])
-    .filter((e) => new Date(e.startAt) > new Date())
+    .filter((e) =>
+      e.isUpcoming ?? (e.status !== 'CANCELLED' && e.status !== 'DRAFT' && new Date(e.startAt) > new Date()),
+    )
     .sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime())
     .slice(0, 3);
 
@@ -399,6 +449,81 @@ export default function DashboardPage() {
             </ResponsiveContainer>
           )}
         </div>
+      </div>
+
+      {/* Staff on duty — reflects check-ins from the staff app in near real time */}
+      <div className="rounded-2xl p-5 border border-gray-200 bg-white shadow-sm mt-4">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="font-semibold text-gray-900">Staff On Duty</h3>
+            <p className="text-xs text-gray-400 mt-0.5">
+              Live from staff app check-ins{attendance ? ` · ${attendance.summary.date}` : ''}
+            </p>
+          </div>
+          <Link href="/staff" className="text-xs text-primary-600 hover:text-primary-700 font-medium">
+            View staff
+          </Link>
+        </div>
+
+        {!attendance ? (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="h-16 bg-gray-100 animate-pulse rounded-xl" />
+            ))}
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              {[
+                { label: 'On duty', value: attendance.summary.onDuty, tone: 'bg-green-50 text-green-700' },
+                { label: 'Checked out', value: attendance.summary.checkedOut, tone: 'bg-gray-50 text-gray-600' },
+                { label: 'On leave', value: attendance.summary.onLeave, tone: 'bg-blue-50 text-blue-700' },
+                { label: 'Absent', value: attendance.summary.absent, tone: 'bg-red-50 text-red-700' },
+              ].map((card) => (
+                <div key={card.label} className={cn('rounded-xl px-4 py-3', card.tone)}>
+                  <p className="text-2xl font-bold leading-tight">{card.value}</p>
+                  <p className="text-xs font-medium mt-0.5">{card.label}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-3 flex items-center gap-4 text-xs text-gray-500">
+              <span>
+                <span className="font-semibold text-gray-900">{attendance.summary.present}</span>
+                {' of '}
+                {attendance.summary.totalStaff} present ({attendance.summary.attendanceRate}%)
+              </span>
+              {attendance.summary.late > 0 && (
+                <span className="text-amber-600 font-medium">{attendance.summary.late} late</span>
+              )}
+            </div>
+
+            {attendance.staff.filter((s) => s.state === 'ON_DUTY').length > 0 && (
+              <ul className="mt-3 divide-y divide-gray-50 max-h-44 overflow-y-auto">
+                {attendance.staff
+                  .filter((s) => s.state === 'ON_DUTY')
+                  .map((s) => (
+                    <li key={s.staffId} className="flex items-center justify-between py-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-gray-900 truncate">{s.name}</p>
+                        <p className="text-xs text-gray-400 truncate">{s.designation}</p>
+                      </div>
+                      <div className="text-right shrink-0 ml-3">
+                        <p className="text-xs text-gray-500">
+                          In {s.checkInIst?.slice(11) ?? '—'}
+                        </p>
+                        {s.isLate && <p className="text-[11px] text-amber-600 font-medium">Late</p>}
+                      </div>
+                    </li>
+                  ))}
+              </ul>
+            )}
+
+            {attendance.summary.totalStaff === 0 && (
+              <p className="mt-3 text-sm text-gray-400">No staff on record yet.</p>
+            )}
+          </>
+        )}
       </div>
 
       {/* Activity Feed + Upcoming Events */}

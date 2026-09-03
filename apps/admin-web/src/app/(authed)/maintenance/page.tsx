@@ -8,7 +8,42 @@ import { cn } from '@/lib/cn';
 import type { MaintenanceBill } from '@societyos/api-client';
 import { ErrorState } from '@/components/ui/ErrorState';
 import Link from 'next/link';
-import { Receipt, ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { Receipt, ChevronLeft, ChevronRight, X, AlertTriangle, Settings2 } from 'lucide-react';
+
+/** Society maintenance rate card (GET/PUT /admin/maintenance/rate-config). */
+type MaintenanceRate = {
+  mode: 'FLAT' | 'PER_SQFT';
+  flatRate: number;
+  ratePerSqft: number;
+  dueDay: number;
+  overrides: Record<string, number>;
+};
+
+/** Dry-run result (POST /admin/maintenance/bills/preview). */
+type BillPreview = {
+  period: string;
+  dueDate: string;
+  rate: MaintenanceRate;
+  billCount: number;
+  totalAmount: number;
+  totalTravelPauseCredit: number;
+  lines: Array<{
+    flatId: string;
+    flat: string;
+    residentName: string | null;
+    base: number;
+    travelPauseCredit: number;
+    total: number;
+  }>;
+  skipped: Array<{ flatId: string; flat: string; reason: 'already_billed' | 'no_resident' | 'missing_area' }>;
+  warnings: string[];
+};
+
+const SKIP_REASON_LABEL: Record<BillPreview['skipped'][number]['reason'], string> = {
+  already_billed: 'Already billed for this period',
+  no_resident: 'No resident on record',
+  missing_area: 'No area on record (needed for per-sqft)',
+};
 
 type MaintenanceRemindResult = {
   sent: boolean;
@@ -59,6 +94,9 @@ export default function MaintenancePage() {
   const [genYear, setGenYear] = useState(String(currentDate.getFullYear()));
   const [genMonth, setGenMonth] = useState(String(currentDate.getMonth() + 1));
   const [genMessage, setGenMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [preview, setPreview] = useState<BillPreview | null>(null);
+  const [showRateForm, setShowRateForm] = useState(false);
+  const [rateDraft, setRateDraft] = useState<MaintenanceRate | null>(null);
 
   // Update status modal
   const [statusModalBill, setStatusModalBill] = useState<BillWithResident | null>(null);
@@ -112,29 +150,85 @@ export default function MaintenancePage() {
     onError: (err: Error) => toast.error(err?.message ?? 'Failed to update status.'),
   });
 
+  /**
+   * The society's maintenance rate card.
+   *
+   * Bill generation used to read a hardcoded base amount of zero, so it created
+   * a full month of ₹0 bills and reported success. The rate now lives in
+   * configuration and is editable here.
+   */
+  const { data: rateConfig } = useQuery({
+    queryKey: ['maintenance-rate-config'],
+    queryFn: () => api.get<MaintenanceRate>('/admin/maintenance/rate-config'),
+  });
+
+  const saveRateMutation = useMutation({
+    mutationFn: (body: Partial<MaintenanceRate>) =>
+      api.put<MaintenanceRate>('/admin/maintenance/rate-config', body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['maintenance-rate-config'] });
+      setShowRateForm(false);
+      setPreview(null);
+      toast.success('Maintenance rate saved.');
+    },
+    onError: (err: Error) => toast.error(err.message ?? 'Could not save the rate.'),
+  });
+
+  /**
+   * Dry run. Generation is a one-shot, irreversible, society-wide financial
+   * write; the operator used to click Generate and find out afterwards.
+   */
+  const previewBillsMutation = useMutation({
+    mutationFn: ({ year, month }: { year: number; month: number }) =>
+      api.post<BillPreview>('/admin/maintenance/bills/preview', { year, month }),
+    onSuccess: (data) => setPreview(data),
+    onError: (err: Error) => toast.error(err.message ?? 'Could not build the preview.'),
+  });
+
   const generateBillsMutation = useMutation({
     mutationFn: ({ year, month }: { year: number; month: number }) =>
       api.post('/admin/maintenance/bills/generate', { year, month }),
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       qc.invalidateQueries({ queryKey: ['admin-maintenance'] });
-      toast.success('Bills generated successfully.');
+      toast.success(
+        `Generated ${data?.created ?? 0} bill(s)` +
+          (data?.totalAmount ? ` totalling ₹${Number(data.totalAmount).toLocaleString('en-IN')}.` : '.'),
+      );
       setShowGenerateForm(false);
       setGenMessage(null);
+      setPreview(null);
     },
     onError: (err: Error) => {
       toast.error(err.message ?? 'Failed to generate bills. Please try again.');
     },
   });
 
-  function handleGenerate() {
+  function handlePreview() {
     const year = Number(genYear);
     const month = Number(genMonth);
     if (!year || month < 1 || month > 12) {
       toast.error('Please enter a valid year and month (1–12).');
       return;
     }
-    if (!window.confirm(`Generate maintenance bills for ${MONTHS[month - 1]} ${year}? This will create bills for every active unit.`)) return;
-    generateBillsMutation.mutate({ year, month });
+    setPreview(null);
+    previewBillsMutation.mutate({ year, month });
+  }
+
+  function handleGenerate() {
+    if (!preview) { handlePreview(); return; }
+    if (preview.billCount === 0) {
+      toast.error('Nothing to generate for this period.');
+      return;
+    }
+    const total = `₹${preview.totalAmount.toLocaleString('en-IN')}`;
+    if (
+      !window.confirm(
+        `Generate ${preview.billCount} bill(s) totalling ${total} for ${preview.period}?\n\n` +
+          'This cannot be undone.',
+      )
+    ) return;
+    const [y, m] = preview.period.split('-').map(Number);
+    generateBillsMutation.mutate({ year: y, month: m });
   }
 
   function openStatusModal(bill: BillWithResident) {
@@ -207,13 +301,167 @@ export default function MaintenancePage() {
               />
             </div>
             <button
+              className="border border-gray-200 hover:border-gray-300 text-gray-700 px-5 py-2 rounded-xl text-sm font-semibold disabled:opacity-40 transition-colors"
+              disabled={previewBillsMutation.isPending}
+              onClick={handlePreview}
+            >
+              {previewBillsMutation.isPending ? 'Checking…' : 'Preview'}
+            </button>
+            <button
               className="bg-primary-500 text-white px-5 py-2 rounded-xl text-sm font-semibold disabled:opacity-40 hover:bg-primary-600 transition-colors"
-              disabled={generateBillsMutation.isPending}
+              disabled={generateBillsMutation.isPending || !preview || preview.billCount === 0}
               onClick={handleGenerate}
+              title={!preview ? 'Run a preview first' : undefined}
             >
               {generateBillsMutation.isPending ? 'Generating…' : 'Generate'}
             </button>
+            <button
+              className="ml-auto text-sm text-gray-500 hover:text-gray-700 inline-flex items-center gap-1.5"
+              onClick={() => { setRateDraft(rateConfig ?? null); setShowRateForm((v) => !v); }}
+            >
+              <Settings2 className="w-4 h-4" />
+              {rateConfig
+                ? rateConfig.mode === 'FLAT'
+                  ? `₹${rateConfig.flatRate.toLocaleString('en-IN')} / unit`
+                  : `₹${rateConfig.ratePerSqft} / sqft`
+                : 'Set rate'}
+            </button>
           </div>
+
+          {/* Rate card. Without this, generation silently produced ₹0 bills. */}
+          {showRateForm && rateDraft && (
+            <div className="mt-4 border-t border-gray-100 pt-4">
+              <div className="flex items-end gap-3 flex-wrap">
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Charge by</label>
+                  <select
+                    className="border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-primary-400"
+                    value={rateDraft.mode}
+                    onChange={(e) => setRateDraft({ ...rateDraft, mode: e.target.value as MaintenanceRate['mode'] })}
+                  >
+                    <option value="FLAT">Flat rate per unit</option>
+                    <option value="PER_SQFT">Rate per sq ft</option>
+                  </select>
+                </div>
+                {rateDraft.mode === 'FLAT' ? (
+                  <div>
+                    <label className="text-xs text-gray-500 mb-1 block">Amount per unit (₹)</label>
+                    <input
+                      type="number" min={0} step="0.01"
+                      className="border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-primary-400 w-32"
+                      value={rateDraft.flatRate}
+                      onChange={(e) => setRateDraft({ ...rateDraft, flatRate: Number(e.target.value) })}
+                    />
+                  </div>
+                ) : (
+                  <div>
+                    <label className="text-xs text-gray-500 mb-1 block">Rate per sq ft (₹)</label>
+                    <input
+                      type="number" min={0} step="0.01"
+                      className="border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-primary-400 w-32"
+                      value={rateDraft.ratePerSqft}
+                      onChange={(e) => setRateDraft({ ...rateDraft, ratePerSqft: Number(e.target.value) })}
+                    />
+                  </div>
+                )}
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Due day (1–28)</label>
+                  <input
+                    type="number" min={1} max={28}
+                    className="border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-primary-400 w-24"
+                    value={rateDraft.dueDay}
+                    onChange={(e) => setRateDraft({ ...rateDraft, dueDay: Number(e.target.value) })}
+                  />
+                </div>
+                <button
+                  className="bg-gray-900 text-white px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-40"
+                  disabled={saveRateMutation.isPending}
+                  onClick={() => saveRateMutation.mutate(rateDraft)}
+                >
+                  {saveRateMutation.isPending ? 'Saving…' : 'Save rate'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Dry run: exactly what will be written, before it is written. */}
+          {preview && (
+            <div className="mt-4 border-t border-gray-100 pt-4">
+              {preview.warnings.map((w) => (
+                <div key={w} className="mb-3 flex items-start gap-2 rounded-xl bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-800">
+                  <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                  <span>{w}</span>
+                </div>
+              ))}
+
+              <div className="flex items-center gap-6 flex-wrap mb-3">
+                <div>
+                  <p className="text-xs text-gray-500">Bills to create</p>
+                  <p className="text-xl font-bold text-gray-900">{preview.billCount}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Total value</p>
+                  <p className="text-xl font-bold text-gray-900">₹{preview.totalAmount.toLocaleString('en-IN')}</p>
+                </div>
+                {preview.totalTravelPauseCredit > 0 && (
+                  <div>
+                    <p className="text-xs text-gray-500">Travel-pause credit</p>
+                    <p className="text-xl font-bold text-green-600">−₹{preview.totalTravelPauseCredit.toLocaleString('en-IN')}</p>
+                  </div>
+                )}
+                <div>
+                  <p className="text-xs text-gray-500">Skipped</p>
+                  <p className="text-xl font-bold text-gray-500">{preview.skipped.length}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Period</p>
+                  <p className="text-xl font-bold text-gray-900">{preview.period}</p>
+                </div>
+              </div>
+
+              {preview.lines.length > 0 && (
+                <div className="max-h-56 overflow-y-auto border border-gray-100 rounded-xl">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 sticky top-0">
+                      <tr>
+                        {['Unit', 'Billed to', 'Base', 'Credit', 'Total'].map((h) => (
+                          <th key={h} className="text-left px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {preview.lines.map((line) => (
+                        <tr key={line.flatId}>
+                          <td className="px-3 py-2 font-medium text-gray-900">{line.flat}</td>
+                          <td className="px-3 py-2 text-gray-600">{line.residentName ?? '—'}</td>
+                          <td className="px-3 py-2 text-gray-600">₹{line.base.toLocaleString('en-IN')}</td>
+                          <td className="px-3 py-2 text-green-600">
+                            {line.travelPauseCredit ? `−₹${line.travelPauseCredit.toLocaleString('en-IN')}` : '—'}
+                          </td>
+                          <td className="px-3 py-2 font-semibold text-gray-900">₹{line.total.toLocaleString('en-IN')}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {preview.skipped.length > 0 && (
+                <details className="mt-3">
+                  <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-700">
+                    {preview.skipped.length} unit(s) will be skipped — why?
+                  </summary>
+                  <ul className="mt-2 space-y-1">
+                    {preview.skipped.map((sk) => (
+                      <li key={sk.flatId} className="text-xs text-gray-500">
+                        <span className="font-medium text-gray-700">{sk.flat}</span> — {SKIP_REASON_LABEL[sk.reason]}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </div>
+          )}
         </div>
       )}
 

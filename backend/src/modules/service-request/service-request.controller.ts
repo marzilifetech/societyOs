@@ -85,7 +85,7 @@ export class ServiceRequestController {
   async exportCsv(
     @SocietyId() societyId: string,
     @CurrentUser() user: JwtPayload,
-    @Query('status') status?: ServiceRequestStatus,
+    @Query('status') status?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
   ): Promise<StreamableFile> {
