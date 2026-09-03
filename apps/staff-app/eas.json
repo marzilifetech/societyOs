@@ -43,7 +43,8 @@
         "buildType": "app-bundle"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://api.societyos.app/v1"
+        "_comment": "Was https://api.societyos.app/v1, which has no DNS record at all (verified 2026-09-03) - a signed production build shipped against a host that does not resolve, so the app was dead on launch. society-dev.marzitech.in is the only deployed backend and is what the resident app's production profile already targets. Repoint this the day a real production API exists.",
+        "EXPO_PUBLIC_API_URL": "https://society-dev.marzitech.in/v1"
       }
     }
   },
