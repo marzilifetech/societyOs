@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { IsString, IsOptional, IsEnum, IsDateString, IsNumber, IsInt, Min, Max, IsBoolean, IsObject } from 'class-validator';
+import { IsString, IsOptional, IsEnum, IsDateString, IsNumber, IsInt, Min, Max, MaxLength, IsBoolean, IsObject } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 
@@ -290,6 +290,15 @@ export class EmergencyContactDto {
   relation?: string;
 }
 
+/**
+ * Request an upload slot for a staff document (ID proof, certificate, contract).
+ *
+ * `fileName` was not declared here, but the app has always sent it — and the
+ * global ValidationPipe runs with `forbidNonWhitelisted: true`, so every
+ * document upload was rejected at the first step with
+ * `400 property fileName should not exist`. Staff could not upload a document
+ * at all.
+ */
 export class DocumentUploadDto {
   @ApiProperty()
   @IsString()
@@ -299,6 +308,12 @@ export class DocumentUploadDto {
   @IsOptional()
   @IsString()
   contentType?: string;
+
+  @ApiPropertyOptional({ description: 'Original file name, kept for display' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  fileName?: string;
 }
 
 export enum LeaderboardPeriod {

@@ -331,31 +331,79 @@ export async function updateNotificationPreferences(
 
 /**
  * Handle a lockscreen action-button tap. Each action is idempotent server-side,
- * so duplicate taps and multi-device fan-out collapse safely. Failures are
- * swallowed — the user can retry from the detail screen.
+ * so duplicate taps and multi-device fan-out collapse safely.
+ *
+ * WHY THE PATHS LOOK THE WAY THEY DO
+ * ----------------------------------
+ * Every one of these was previously wrong, and the failures were invisible:
+ *
+ *   task accept/reject   → called PATCH /tasks/:id/accept|reject. There is no
+ *                          `/tasks` controller in the API at all.
+ *   help accept          → called PATCH /help-requests/:id/accept. The route is
+ *                          POST, and it lives under /staff/help-requests.
+ *   help decline         → called PATCH /help-requests/:id/decline, which did
+ *                          not exist as a route anywhere.
+ *
+ * All four 404'd. The old implementation caught the error and logged it only
+ * under __DEV__, so in a release build the staff member tapped "Accept", the
+ * notification dismissed itself, and nothing whatsoever happened — no error,
+ * no retry, no trace. That silence is why this went unnoticed.
+ *
+ * Failures now surface: a local notification tells the user the action did not
+ * go through and to open the app. Anything that can fail on a lockscreen and
+ * leave no evidence WILL eventually be relied upon and quietly lose work.
  */
 async function handleActionButton(actionId: string, data: Record<string, any>): Promise<void> {
   const entityId = data.entityId ?? data.visitId ?? data.id;
   if (!entityId) return;
+
+  let label = 'action';
   try {
     if (data.type === 'VISITOR_APPROVAL_REQUEST' || data.actionGroup === 'visitor_approval') {
+      label = actionId === 'APPROVE' ? 'approval' : 'rejection';
       await api.post(`/visitors/${entityId}/decision`, {
         action: actionId === 'APPROVE' ? 'APPROVE' : 'REJECT',
       });
       return;
     }
     if (data.actionGroup === 'help_request' || data.type === 'HELP_REQUEST') {
-      if (actionId === 'ACCEPT') await api.patch(`/help-requests/${entityId}/accept`, {});
-      else if (actionId === 'DECLINE') await api.patch(`/help-requests/${entityId}/decline`, {});
+      label = actionId === 'ACCEPT' ? 'accept' : 'decline';
+      if (actionId === 'ACCEPT') await api.post(`/staff/help-requests/${entityId}/accept`, {});
+      else if (actionId === 'DECLINE') await api.post(`/staff/help-requests/${entityId}/decline`, {});
       return;
     }
     if (data.actionGroup === 'task_assignment' || data.type === 'TASK_ASSIGNED') {
-      if (actionId === 'ACCEPT') await api.patch(`/tasks/${entityId}/accept`, {});
-      else if (actionId === 'REJECT') await api.patch(`/tasks/${entityId}/reject`, {});
+      label = actionId === 'ACCEPT' ? 'accept' : 'decline';
+      if (actionId === 'ACCEPT') await api.post(`/service-requests/${entityId}/accept`, {});
+      else if (actionId === 'REJECT') await api.post(`/service-requests/${entityId}/reject`, {});
       return;
     }
   } catch (err: any) {
     if (__DEV__) console.warn('[notifications] action failed', actionId, err?.message);
+    await notifyActionFailed(label, err?.message);
+  }
+}
+
+/**
+ * Tell the user their lockscreen action did not land.
+ *
+ * Presented as a local notification rather than an in-app alert because the
+ * app is very often backgrounded when an action button is tapped — an Alert
+ * would queue up invisibly and be dismissed on next launch without ever being
+ * read.
+ */
+async function notifyActionFailed(label: string, detail?: string): Promise<void> {
+  try {
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: "That didn't go through",
+        body: `Your ${label} could not be saved${detail ? ` (${detail})` : ''}. Open the app to try again.`,
+        data: { type: 'ACTION_FAILED' },
+      },
+      trigger: null,
+    });
+  } catch {
+    // A failure to report a failure is not worth crashing over.
   }
 }
 

@@ -40,7 +40,20 @@ export class LaundryService {
     );
   }
 
-  async markPickedUp(id: string, societyId: string) {
+  /**
+   * Mark a booking picked up.
+   *
+   * `dto` used to not exist: the endpoint declared no `@Body()`, so the pickup
+   * photo and the garment count the staff app sends were accepted by HTTP and
+   * silently discarded — the staff member photographed the load and counted
+   * the garments, and none of it was stored. It also never stamped
+   * `pickedUpAt`, so "when was this collected" was unanswerable.
+   */
+  async markPickedUp(
+    id: string,
+    societyId: string,
+    dto?: { photoUrl?: string; garmentCount?: number },
+  ) {
     await requireOwnedById(
       () => this.prisma.laundryBooking.findUnique({ where: { id } }),
       societyId,
@@ -48,7 +61,16 @@ export class LaundryService {
     );
     const updated = await this.prisma.laundryBooking.update({
       where: { id },
-      data: { status: LaundryBookingStatus.PICKED_UP },
+      data: {
+        status: LaundryBookingStatus.PICKED_UP,
+        pickedUpAt: new Date(),
+        ...(dto?.photoUrl ? { pickupPhotoUrl: dto.photoUrl } : {}),
+        // The count at pickup is the authoritative one — it is what was
+        // physically collected, versus what the resident estimated when booking.
+        ...(Number.isFinite(dto?.garmentCount) && (dto!.garmentCount as number) > 0
+          ? { itemCount: Math.round(dto!.garmentCount as number) }
+          : {}),
+      },
     });
     this.notifyResident(updated, 'LAUNDRY_PICKED_UP', 'Your laundry has been picked up.');
     return updated;

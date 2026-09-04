@@ -2,6 +2,7 @@ import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards } from '@ne
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { LaundryBookingStatus, LaundryType, UserRole } from '@prisma/client';
 import { LaundryService } from './laundry.service';
+import { MarkPickedUpDto } from './dto/laundry.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
@@ -70,8 +71,12 @@ export class LaundryController {
 
   @Patch(':id/pickup')
   @Roles(UserRole.STAFF, UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  markPickedUp(@Param('id') id: string, @SocietyId() societyId: string) {
-    return this.laundryService.markPickedUp(id, societyId);
+  markPickedUp(
+    @Param('id') id: string,
+    @SocietyId() societyId: string,
+    @Body() dto: MarkPickedUpDto,
+  ) {
+    return this.laundryService.markPickedUp(id, societyId, dto);
   }
 
   @Get(':id/photo-upload-url')

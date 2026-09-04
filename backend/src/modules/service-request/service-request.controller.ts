@@ -13,6 +13,7 @@ import {
   ProofServiceRequestDto,
   RaiseDisputeDto,
   AssignWithScheduleDto,
+  RejectTaskDto,
 } from './dto/service-request.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -137,6 +138,35 @@ export class ServiceRequestController {
     return user.role === UserRole.RESIDENT
       ? this.srService.findOne(id, { residentUserId: user.sub, societyId: user.societyId })
       : this.srService.findOne(id, { societyId: user.societyId });
+  }
+
+  /**
+   * Accept / decline an assigned task.
+   *
+   * These back the "Accept" and "Decline" buttons on the task-assignment push.
+   * The app previously called `/tasks/:id/accept` and `/tasks/:id/reject`,
+   * which do not exist on any controller — there is no `/tasks` prefix in this
+   * API — so every lockscreen action was a silent 404.
+   */
+  @Post(':id/accept')
+  @Roles(UserRole.STAFF)
+  acceptTask(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @SocietyId() societyId: string,
+  ) {
+    return this.srService.acceptTask(id, user.sub, societyId);
+  }
+
+  @Post(':id/reject')
+  @Roles(UserRole.STAFF)
+  rejectTask(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @SocietyId() societyId: string,
+    @Body() dto: RejectTaskDto,
+  ) {
+    return this.srService.rejectTask(id, user.sub, societyId, dto?.reason);
   }
 
   @Post(':id/photos')

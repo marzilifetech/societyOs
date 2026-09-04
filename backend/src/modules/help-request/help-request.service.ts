@@ -141,6 +141,46 @@ export class HelpRequestService {
     });
   }
 
+  /**
+   * Staff declines an open help request.
+   *
+   * The help-request push carries a "Decline" action button, and the app had
+   * nothing to call — `/help-requests/:id/decline` is not a route on any
+   * controller, so every decline was a silent 404. Declining leaves the
+   * request unassigned and PENDING so it goes back into the pool for someone
+   * else, rather than sitting against a staff member who is not going to take
+   * it.
+   *
+   * Idempotent: declining something you are not on is a no-op, because the
+   * same push reaches every device the staff member is signed in on.
+   */
+  async declineHelpRequest(userId: string, requestId: string, societyId: string) {
+    const staffId = await this.resolveStaffId(userId);
+    const sr = await requireOwnedById(
+      () => this.prisma.serviceRequest.findUnique({ where: { id: requestId } }),
+      societyId,
+      'Help request',
+    );
+
+    const assigned = sr.assignedToIds ?? [];
+    if (!assigned.includes(staffId)) {
+      // Not ours to decline — already reassigned, or accepted on another
+      // device. Return the current state rather than erroring at a user who
+      // just tapped a button on their lockscreen.
+      return sr;
+    }
+
+    const remaining = assigned.filter((x) => x !== staffId);
+    return this.prisma.serviceRequest.update({
+      where: { id: requestId },
+      data: {
+        assignedToIds: remaining,
+        status: remaining.length ? 'ASSIGNED' : 'PENDING',
+        acceptedAt: remaining.length ? sr.acceptedAt : null,
+      },
+    });
+  }
+
   async updateHelpRequestStatus(
     userId: string,
     requestId: string,

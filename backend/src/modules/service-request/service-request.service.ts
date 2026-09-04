@@ -389,6 +389,104 @@ export class ServiceRequestService {
     return [toCsvRow(header), ...lines].join('\n') + '\n';
   }
 
+  /**
+   * Staff accepts an assigned task.
+   *
+   * Exists because the push notification for a new assignment carries an
+   * "Accept" action button, and the app had nothing to call: it posted to
+   * `/tasks/:id/accept`, which is not a route on any controller — there is no
+   * `/tasks` prefix in the API at all. Every lockscreen Accept was a silent
+   * 404 (the app swallowed the error), so the guard tapped Accept, the
+   * notification dismissed, and nothing happened.
+   *
+   * Idempotent: a second accept returns the same result rather than erroring,
+   * because a push can be delivered to several of the staff member's devices
+   * and each one shows the button.
+   */
+  async acceptTask(id: string, userId: string, societyId: string) {
+    const staffId = await this.resolveStaffId(userId);
+    const sr = await this.prisma.serviceRequest.findUnique({ where: { id } });
+    if (!sr || sr.deletedAt) throw new NotFoundException('Service request not found');
+    this.assertStaffCanAccessTask(sr, staffId, societyId);
+
+    if (sr.acceptedAt) {
+      return this.enrichWithAssignedStaff(sr);
+    }
+    if (sr.status !== ServiceRequestStatus.ASSIGNED) {
+      throw new ConflictException({
+        code: 'NOT_ACCEPTABLE_STATE',
+        message: `A task can only be accepted while it is ASSIGNED (currently ${sr.status})`,
+      });
+    }
+
+    const updated = await this.prisma.serviceRequest.update({
+      where: { id },
+      data: { acceptedAt: new Date(), rejectedReason: null },
+    });
+
+    // Tell the resident their request has been picked up. This is the whole
+    // point of the accept button — before it existed, the resident saw
+    // "assigned" indefinitely with no sign anyone had actually taken it.
+    void this.notifyResidentOfAcceptance(updated).catch((e) =>
+      this.logger.warn(`accept notify failed request=${id}: ${(e as Error).message}`),
+    );
+
+    return this.enrichWithAssignedStaff(updated);
+  }
+
+  /**
+   * Staff declines an assigned task, returning it to the admin queue.
+   *
+   * Sends the request back to PENDING and clears the assignment, so it shows
+   * up again on the dashboard for reassignment rather than sitting ASSIGNED
+   * against someone who is not going to do it.
+   */
+  async rejectTask(id: string, userId: string, societyId: string, reason?: string) {
+    const staffId = await this.resolveStaffId(userId);
+    const sr = await this.prisma.serviceRequest.findUnique({ where: { id } });
+    if (!sr || sr.deletedAt) throw new NotFoundException('Service request not found');
+    this.assertStaffCanAccessTask(sr, staffId, societyId);
+
+    if (sr.status !== ServiceRequestStatus.ASSIGNED) {
+      throw new ConflictException({
+        code: 'NOT_REJECTABLE_STATE',
+        message: `A task can only be declined while it is ASSIGNED (currently ${sr.status})`,
+      });
+    }
+
+    const remaining = (sr.assignedToIds ?? []).filter((x) => x !== staffId);
+    const updated = await this.prisma.serviceRequest.update({
+      where: { id },
+      data: {
+        assignedToIds: remaining,
+        // Only fall back to the admin queue when nobody is left on it.
+        status: remaining.length ? ServiceRequestStatus.ASSIGNED : ServiceRequestStatus.PENDING,
+        acceptedAt: null,
+        rejectedReason: reason?.trim() || 'Declined by staff',
+      },
+    });
+
+    return this.enrichWithAssignedStaff(updated);
+  }
+
+  private async notifyResidentOfAcceptance(sr: { id: string; residentId: string; category: string }) {
+    const resident = await this.prisma.resident.findUnique({
+      where: { id: sr.residentId },
+      select: { userId: true },
+    });
+    if (!resident?.userId) return;
+    await this.push.send(
+      resident.userId,
+      {
+        title: 'Your request was accepted',
+        body: `A staff member has accepted your ${sr.category} request and will be on the way.`,
+        category: 'service_requests',
+        collapseKey: `service-request:${sr.id}`,
+      },
+      { type: 'SERVICE_REQUEST_ACCEPTED', entityId: sr.id, serviceRequestId: sr.id },
+    );
+  }
+
   async findByStaff(userId: string, societyId: string) {
     const staffId = await this.resolveStaffId(userId);
     const staff = await this.prisma.staffMember.findUnique({ where: { id: staffId } });
@@ -571,8 +669,25 @@ export class ServiceRequestService {
               body: `New task assigned: ${category}`,
               category: 'staff_tasks',
               collapseKey: `service-request:${requestId}`,
+              // Accept / Decline straight from the lockscreen. Without these
+              // the push was informational only: the staff app registers an
+              // iOS category called 'task_assignment' with these exact action
+              // ids, but nothing ever sent them, so no buttons rendered.
+              actions: [
+                { id: 'ACCEPT', title: 'Accept' },
+                { id: 'REJECT', title: 'Decline', destructive: true },
+              ],
             },
-            { type: 'TASK_ASSIGNED', entityId: requestId, serviceRequestId: requestId },
+            {
+              type: 'TASK_ASSIGNED',
+              entityId: requestId,
+              serviceRequestId: requestId,
+              // Mirrored to aps.category by buildMessage. MUST match the
+              // identifier the app passes to setNotificationCategoryAsync —
+              // it fell back to the preference key 'staff_tasks', which is not
+              // a registered category, so iOS rendered a plain notification.
+              actionGroup: 'task_assignment',
+            },
           )
           .catch((e) => this.logger.warn(`push failed: ${e?.message ?? e}`));
       }

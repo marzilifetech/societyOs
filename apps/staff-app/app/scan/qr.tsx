@@ -10,6 +10,7 @@ import {
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Camera } from 'expo-camera';
+import { checkPermission, ensurePermission } from '../../src/lib/permissions';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
@@ -48,11 +49,25 @@ export default function QrScanScreen() {
   const [torch, setTorch] = useState(false);
   const [token, setToken] = useState<string | null>(null);
 
+  // Check on mount without prompting — the "Allow camera" button below owns
+  // the ask, so the OS dialog appears on a deliberate tap rather than the
+  // instant the screen opens.
   useEffect(() => {
-    Camera.requestCameraPermissionsAsync().then(({ status }) => {
-      setHasPermission(status === 'granted');
-    });
+    void checkPermission('camera').then((r) => setHasPermission(r.granted));
   }, []);
+
+  /**
+   * Ask for the camera, and take the user to settings if the refusal is
+   * permanent. Re-requesting a blocked permission shows no dialog at all on
+   * Android 13+, so the old "Allow camera" button became inert after the first
+   * refusal — it looked broken rather than blocked.
+   */
+  const requestCamera = async () => {
+    const r = await ensurePermission('camera', {
+      blockedMessage: 'Scanning a gate pass needs the camera.',
+    });
+    setHasPermission(r.granted);
+  };
 
   const invalidateVisitors = () => {
     qc.invalidateQueries({ queryKey: ['staff-visitors-pending'] });
@@ -152,11 +167,7 @@ export default function QrScanScreen() {
           <TouchableOpacity
             className="bg-primary-500 rounded-2xl px-7 py-3.5 mt-7"
             accessibilityRole="button"
-            onPress={() =>
-              Camera.requestCameraPermissionsAsync().then(({ status }) =>
-                setHasPermission(status === 'granted'),
-              )
-            }
+            onPress={requestCamera}
           >
             <Text className="text-white font-heading">Allow camera</Text>
           </TouchableOpacity>

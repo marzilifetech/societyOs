@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsEnum, IsInt, Min, Max, IsArray, IsNumber, IsDateString, IsIn, IsBoolean } from 'class-validator';
+import { IsString, IsOptional, IsEnum, IsInt, Min, Max, MaxLength, IsArray, IsNumber, IsDateString, IsIn, IsBoolean } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ServiceRequestStatus } from '@prisma/client';
 
@@ -262,4 +262,20 @@ export class ProofServiceRequestDto {
   @IsOptional()
   @IsIn(['BEFORE'])
   phase?: 'BEFORE';
+}
+
+/**
+ * Optional reason when staff declines an assigned task.
+ *
+ * Optional because the primary caller is a lockscreen "Decline" button, which
+ * has no way to collect free text — requiring a reason there would make the
+ * action impossible to perform from the notification, which is the whole point
+ * of having it.
+ */
+export class RejectTaskDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  reason?: string;
 }

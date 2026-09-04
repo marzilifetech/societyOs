@@ -1993,18 +1993,22 @@ model WalletTransaction {
 // ─── Laundry Bookings ─────────────────────────────────────────────────────────
 
 model LaundryBooking {
-  id          String               @id @default(cuid())
-  societyId   String
-  residentId  String
-  scheduledAt DateTime
-  type        LaundryType          @default(WASH_AND_FOLD)
-  itemCount   Int                  @default(1)
-  notes       String?
-  status      LaundryBookingStatus @default(SCHEDULED)
-  pickedUpAt  DateTime?
-  deliveredAt DateTime?
-  createdAt   DateTime             @default(now())
-  updatedAt   DateTime             @updatedAt
+  id             String               @id @default(cuid())
+  societyId      String
+  residentId     String
+  scheduledAt    DateTime
+  type           LaundryType          @default(WASH_AND_FOLD)
+  itemCount      Int                  @default(1)
+  notes          String?
+  status         LaundryBookingStatus @default(SCHEDULED)
+  pickedUpAt     DateTime?
+  deliveredAt    DateTime?
+  /// Photo the staff member takes at pickup, as proof of what was collected.
+  /// The app has always captured it and a garment count; the pickup endpoint
+  /// accepted no body at all, so both were silently discarded.
+  pickupPhotoUrl String?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
 
   society  Society  @relation(fields: [societyId], references: [id])
   resident Resident @relation(fields: [residentId], references: [id])
@@ -2070,20 +2074,28 @@ model PostLike {
 // ─── Housekeeping Requests ────────────────────────────────────────────────────
 
 model HousekeepingRequest {
-  id          String   @id @default(cuid())
-  residentId  String
-  resident    Resident @relation(fields: [residentId], references: [id])
-  societyId   String
-  society     Society  @relation(fields: [societyId], references: [id])
-  type        String // DEEP_CLEAN | REGULAR | BATHROOM | KITCHEN | WINDOWS
-  scheduledAt DateTime
-  notes       String?
-  status      String   @default("PENDING") // PENDING | CONFIRMED | IN_PROGRESS | COMPLETED | CANCELLED
-  staffId     String?
-  rating      Int?
-  review      String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id              String    @id @default(cuid())
+  residentId      String
+  resident        Resident  @relation(fields: [residentId], references: [id])
+  societyId       String
+  society         Society   @relation(fields: [societyId], references: [id])
+  type            String // DEEP_CLEAN | REGULAR | BATHROOM | KITCHEN | WINDOWS
+  scheduledAt     DateTime
+  notes           String?
+  status          String    @default("PENDING") // PENDING | CONFIRMED | IN_PROGRESS | COMPLETED | CANCELLED
+  staffId         String?
+  rating          Int?
+  review          String?
+  /// Before/after evidence captured by housekeeping staff on completion. The
+  /// app has always taken both photos and a note; the status DTO declared only
+  /// `status`, so with forbidNonWhitelisted the whole request 400'd and the
+  /// photos were lost along with the completion.
+  beforePhotoUrl  String?
+  afterPhotoUrl   String?
+  completionNotes String?
+  completedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   @@index([residentId])
   @@index([societyId, status])

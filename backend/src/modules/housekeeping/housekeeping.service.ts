@@ -142,9 +142,19 @@ export class HousekeepingService {
 
   async updateStatus(id: string, societyId: string, dto: UpdateHousekeepingStatusDto) {
     const request = await this.findOneAsAdmin(id, societyId);
+    const isCompleting = String(dto.status) === 'COMPLETED';
     const updated = await this.prisma.housekeepingRequest.update({
       where: { id: request.id },
-      data: { status: dto.status as any },
+      data: {
+        status: dto.status as any,
+        // Persist the evidence the staff app has always sent. Only overwrite
+        // when a value is supplied, so a later status change cannot wipe the
+        // photos captured at completion.
+        ...(dto.beforePhotoUrl ? { beforePhotoUrl: dto.beforePhotoUrl } : {}),
+        ...(dto.afterPhotoUrl ? { afterPhotoUrl: dto.afterPhotoUrl } : {}),
+        ...(dto.notes ? { completionNotes: dto.notes } : {}),
+        ...(isCompleting && !request.completedAt ? { completedAt: new Date() } : {}),
+      },
     });
 
     const bodyByStatus: Record<string, { type: string; body: string }> = {

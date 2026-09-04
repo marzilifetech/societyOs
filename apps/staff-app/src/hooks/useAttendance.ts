@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Alert, Platform } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
@@ -10,11 +10,13 @@ import i18nInstance from '../lib/i18n';
 import { api } from '../lib/api';
 import { useAuthStore } from '../store/auth.store';
 import { getUnwrapped, getUnwrappedArray } from '../lib/unwrapped-get';
+import { ensurePermission } from '../lib/permissions';
 import {
-  getCurrentPosition,
+  getPosition,
   pointInPolygon,
   distanceToPolygon,
   type LatLng,
+  type PositionFailure,
 } from '../lib/geo';
 
 type TodayAttendance = {
@@ -42,6 +44,8 @@ export function useAttendance(month: number, year: number, monthCalendarOpen: bo
   const [position, setPosition] = useState<LatLng | null>(null);
   const [distance, setDistance] = useState<number | null>(null);
   const [insideGeofence, setInsideGeofence] = useState<boolean>(true);
+  /** Why we have no fix, or null when we do. Drives the attendance UI. */
+  const [locationIssue, setLocationIssue] = useState<PositionFailure | null>(null);
   const submitting = useRef(false);
 
   const { data: todayRecord, isPending: todayPending } = useQuery({
@@ -66,23 +70,52 @@ export function useAttendance(month: number, year: number, monthCalendarOpen: bo
     staleTime: 1000 * 60 * 10,
   });
 
-  useEffect(() => {
-    (async () => {
-      const pos = await getCurrentPosition();
-      setPosition(pos);
-    })();
+  /**
+   * Acquire a fix, remembering WHY if we cannot.
+   *
+   * Prompting is deliberate here rather than passive: attendance is the first
+   * thing a staff member does, and location is the point of the geofence, so
+   * the ask is self-evident in context.
+   */
+  const refreshPosition = useCallback(async () => {
+    const r = await getPosition();
+    if (r.ok) {
+      setPosition(r.position);
+      setLocationIssue(null);
+    } else {
+      setPosition(null);
+      setLocationIssue(r.reason);
+    }
   }, []);
 
   useEffect(() => {
+    void refreshPosition();
+  }, [refreshPosition]);
+
+  useEffect(() => {
     const polygon: LatLng[] | undefined = society?.geofence;
-    if (position && polygon?.length) {
-      const inside = pointInPolygon(position, polygon);
-      setInsideGeofence(inside);
-      setDistance(inside ? 0 : distanceToPolygon(position, polygon));
-    } else {
+
+    // No geofence configured for this society: presence cannot be checked, so
+    // allowing the check-in is correct rather than permissive.
+    if (!polygon?.length) {
       setInsideGeofence(true);
       setDistance(null);
+      return;
     }
+
+    // A geofence IS configured but we have no fix. This used to fall into the
+    // same branch as "no geofence" and set insideGeofence = true — so a staff
+    // member who denied location could check in from anywhere and the geofence
+    // silently did not run. Withhold the check-in and say why instead.
+    if (!position) {
+      setInsideGeofence(false);
+      setDistance(null);
+      return;
+    }
+
+    const inside = pointInPolygon(position, polygon);
+    setInsideGeofence(inside);
+    setDistance(inside ? 0 : distanceToPolygon(position, polygon));
   }, [position, society]);
 
   const checkInMutation = useMutation({
@@ -122,6 +155,32 @@ export function useAttendance(month: number, year: number, monthCalendarOpen: bo
 
   const checkIn = async () => {
     if (submitting.current) return;
+
+    // "We cannot tell where you are" is a different problem from "you are not
+    // here", and needs a different fix. Telling a staff member standing in the
+    // lobby that they are outside the society is how you get them to stop
+    // trusting the app.
+    if (locationIssue) {
+      const retry = { text: t('common.retry') ?? 'Retry', onPress: () => void refreshPosition() };
+      if (locationIssue === 'blocked' || locationIssue === 'permission') {
+        await ensurePermission('location', {
+          withRationale: locationIssue === 'permission',
+          blockedMessage:
+            'Check-in confirms you are on society premises, so it needs your location.',
+        });
+        await refreshPosition();
+        return;
+      }
+      Alert.alert(
+        t('duty.locationOffTitle'),
+        locationIssue === 'timeout'
+          ? 'Could not get a GPS fix. Step outside or near a window and try again.'
+          : t('duty.locationOffBody'),
+        [{ text: t('duty.later') ?? 'Later', style: 'cancel' }, retry],
+      );
+      return;
+    }
+
     if (!insideGeofence) {
       Alert.alert(t('duty.outsideSocietyTitle'), t('duty.outsideSocietyBody'));
       return;
@@ -194,6 +253,9 @@ export function useAttendance(month: number, year: number, monthCalendarOpen: bo
     position,
     distance,
     insideGeofence,
+    /** Non-null when the fix failed; the attendance screen explains and retries. */
+    locationIssue,
+    refreshPosition,
     checkedIn,
     checkedOut,
     checkIn,

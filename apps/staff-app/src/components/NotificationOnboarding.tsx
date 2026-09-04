@@ -28,7 +28,7 @@ const ASKED_KEY = 'notif_permission_asked_v1';
  * The replacement is the OS's own dialog, asked once, at the moment it makes
  * sense (right after sign-in, when the app has just become useful and the ask
  * is self-evidently relevant). Everything after that lives in
- * `app/settings/notification-setup.tsx`, which the user opens deliberately
+ * `app/settings/notifications.tsx`, which the user opens deliberately
  * instead of having it pushed at them.
  *
  * ORDERING MATTERS

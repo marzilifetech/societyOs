@@ -22,6 +22,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { unwrapApiEnvelope } from '@societyos/api-client';
 import { api } from '../../src/lib/api';
+import { ensurePermission } from '../../src/lib/permissions';
 import { uploadViaMedia } from '../../src/lib/photo-upload';
 import { DELIVERY_PARTNERS } from '../../src/constants/delivery-partners';
 
@@ -188,14 +189,15 @@ export default function AddEntryScreen() {
   // ── Photo capture ──────────────────────────────────────────────────────
   const takePhoto = async () => {
     if (photoBusy) return;
-    const perm = await ImagePicker.requestCameraPermissionsAsync();
-    if (perm.status !== 'granted') {
-      Alert.alert(
-        'Camera permission required',
-        'Open Settings → Permissions → Camera to allow photos.',
-      );
-      return;
-    }
+    // Told the user to "Open Settings → Permissions → Camera" and then left
+    // them to find it. ensurePermission takes them there, and knows the
+    // difference between a refusal it can re-ask and one only settings can fix
+    // (re-requesting the latter shows nothing at all on Android 13+).
+    const perm = await ensurePermission('camera', {
+      blockedMessage:
+        'A photo of the visitor is required before an entry can be logged at the gate.',
+    });
+    if (!perm.granted) return;
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 0.75,

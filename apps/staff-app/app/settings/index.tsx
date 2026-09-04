@@ -22,6 +22,7 @@ export default function SettingsScreen() {
       <ScrollView className="flex-1" contentContainerClassName="p-5 gap-3 bg-gray-50 dark:bg-gray-950">
         <Group>
           <Row icon="notifications-outline" label={t('settings.notifications')} onPress={() => router.push('/settings/notifications' as any)} />
+          <Row icon="shield-checkmark-outline" label="Permissions" onPress={() => router.push('/settings/permissions' as any)} />
           <Row icon="globe-outline" label={t('settings.language')} onPress={() => router.push('/settings/language' as any)} />
         </Group>
 

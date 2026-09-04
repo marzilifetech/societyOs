@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Animated,
   Image,
@@ -78,8 +78,14 @@ export function InAppBanner() {
   const { current, dismiss } = useNotificationBanner();
   const insets = useSafeAreaInsets();
   const translateY = useRef(new Animated.Value(-200)).current;
+  /** Which action is in flight, so its button can show progress. */
+  const [acting, setActing] = useState<string | null>(null);
+  /** Set when an action fails, so the banner says so instead of vanishing. */
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
+    setActing(null);
+    setActionError(null);
     if (current) {
       translateY.setValue(-200);
       Animated.spring(translateY, {
@@ -141,23 +147,44 @@ export function InAppBanner() {
   const actions = actionsForGroup(current.actionGroup);
   const visual = visualFor(current);
 
+  /**
+   * Act on the banner's buttons.
+   *
+   * Paths must stay identical to `handleActionButton` in lib/notifications.ts
+   * — the same logical action is reachable from the lockscreen and from this
+   * banner, and they previously drifted: both pointed at `/tasks/:id/accept`
+   * and `PATCH /help-requests/:id/accept|decline`, none of which are routes
+   * (there is no `/tasks` controller; help accept is a POST under
+   * `/staff/help-requests`; decline did not exist). All four 404'd, and the
+   * empty catch below meant the banner slid away as though it had worked.
+   *
+   * The banner is dismissed only AFTER the call succeeds, so a failure leaves
+   * it on screen with an error instead of pretending the action landed.
+   */
   const handleAction = async (actionId: string) => {
-    dismiss();
-    if (!current.entityId) return;
+    if (!current.entityId) {
+      dismiss();
+      return;
+    }
+    setActionError(null);
+    setActing(actionId);
     try {
       if (current.actionGroup === 'visitor_approval') {
         await api.post(`/visitors/${current.entityId}/decision`, {
           action: actionId === 'APPROVE' ? 'APPROVE' : 'REJECT',
         });
       } else if (current.actionGroup === 'help_request') {
-        if (actionId === 'ACCEPT') await api.patch(`/help-requests/${current.entityId}/accept`, {});
-        else await api.patch(`/help-requests/${current.entityId}/decline`, {});
+        if (actionId === 'ACCEPT') await api.post(`/staff/help-requests/${current.entityId}/accept`, {});
+        else await api.post(`/staff/help-requests/${current.entityId}/decline`, {});
       } else if (current.actionGroup === 'task_assignment') {
-        if (actionId === 'ACCEPT') await api.patch(`/tasks/${current.entityId}/accept`, {});
-        else await api.patch(`/tasks/${current.entityId}/reject`, {});
+        if (actionId === 'ACCEPT') await api.post(`/service-requests/${current.entityId}/accept`, {});
+        else await api.post(`/service-requests/${current.entityId}/reject`, {});
       }
-    } catch {
-      /* server is the source of truth */
+      dismiss();
+    } catch (err: any) {
+      setActionError(err?.message ?? 'Could not save that. Tap to open.');
+    } finally {
+      setActing(null);
     }
   };
 
@@ -193,21 +220,30 @@ export function InAppBanner() {
           </View>
         </View>
 
+        {actionError ? (
+          <Text style={styles.actionError} accessibilityLiveRegion="polite">
+            {actionError}
+          </Text>
+        ) : null}
+
         {actions ? (
           <View style={styles.actions}>
             {actions.map((a) => (
               <TouchableOpacity
                 key={a.id}
                 onPress={() => handleAction(a.id)}
+                disabled={acting !== null}
                 accessibilityRole="button"
                 accessibilityLabel={a.label}
+                accessibilityState={{ disabled: acting !== null, busy: acting === a.id }}
                 style={[
                   styles.btn,
                   a.destructive ? styles.btnSecondary : styles.btnPrimary,
+                  acting !== null && acting !== a.id ? styles.btnDimmed : null,
                 ]}
               >
                 <Text style={a.destructive ? styles.btnSecondaryText : styles.btnPrimaryText}>
-                  {a.label}
+                  {acting === a.id ? 'Saving…' : a.label}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -329,4 +365,11 @@ const styles = StyleSheet.create({
   btnPrimaryText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
   btnSecondary: { backgroundColor: '#FFFFFF', borderWidth: 1.5, borderColor: DESTRUCTIVE },
   btnSecondaryText: { color: DESTRUCTIVE, fontSize: 16, fontWeight: '700' },
+  btnDimmed: { opacity: 0.45 },
+  actionError: {
+    color: DESTRUCTIVE,
+    fontSize: 13,
+    marginTop: 8,
+    marginHorizontal: 4,
+  },
 });

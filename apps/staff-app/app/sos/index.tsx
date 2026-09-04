@@ -19,6 +19,7 @@ import { useTranslation } from 'react-i18next';
 import i18nInstance from '../../src/lib/i18n';
 import { unwrapApiEnvelope } from '@societyos/api-client';
 import { api } from '../../src/lib/api';
+import { getPosition } from '../../src/lib/geo';
 
 /**
  * Emergency / SOS — moved out of the Home tab FAB (which is now "Add Entry")
@@ -48,18 +49,19 @@ export default function SosScreen() {
     try {
       let lat: number | undefined;
       let lng: number | undefined;
-      try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status === 'granted') {
-          const loc = await Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.Balanced,
-          });
-          lat = loc.coords.latitude;
-          lng = loc.coords.longitude;
-        }
-      } catch {
-        // Continue without coordinates — the SOS itself must not fail on a
-        // GPS hiccup.
+      // Coordinates are best-effort and STRICTLY time-boxed. Two rules here:
+      //
+      //   prompt: false — never put a permission dialog between a person in
+      //   trouble and the alert. If location was not granted earlier (check-in
+      //   asks for it), the SOS still goes out without coordinates.
+      //
+      //   timeoutMs: 4000 — getCurrentPositionAsync can hang indefinitely
+      //   indoors, which is exactly where an SOS is likely to be raised. A
+      //   late alert with a location is worse than a fast one without.
+      const fix = await getPosition({ prompt: false, timeoutMs: 4000 });
+      if (fix.ok) {
+        lat = fix.position.lat;
+        lng = fix.position.lng;
       }
       const body: { lat?: number; lng?: number } = {};
       if (lat != null) body.lat = lat;

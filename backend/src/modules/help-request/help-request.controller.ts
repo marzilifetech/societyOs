@@ -107,6 +107,16 @@ export class StaffHelpRequestController {
     return this.helpService.acceptHelpRequest(user.sub, id, societyId);
   }
 
+  @Post(':id/decline')
+  @Roles(UserRole.STAFF)
+  decline(
+    @CurrentUser() user: JwtPayload,
+    @SocietyId() societyId: string,
+    @Param('id') id: string,
+  ) {
+    return this.helpService.declineHelpRequest(user.sub, id, societyId);
+  }
+
   @Patch(':id/status')
   @Roles(UserRole.STAFF)
   updateStatus(

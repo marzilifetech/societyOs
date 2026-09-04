@@ -40,6 +40,8 @@ export default function AttendanceScreen() {
     historyLoading,
     distance,
     insideGeofence,
+    locationIssue,
+    refreshPosition,
     checkedIn,
     checkedOut,
     checkIn,
@@ -135,11 +137,41 @@ export default function AttendanceScreen() {
 
               {!checkedIn && (
                 <View className="gap-3">
-                  <DistanceChip meters={distance} inside={insideGeofence} />
+                  {/*
+                    A disabled button with no explanation reads as a broken app.
+                    When the geofence cannot be evaluated we now say so and give
+                    the one action that fixes it, instead of silently treating
+                    the staff member as on-site (which is what used to happen).
+                  */}
+                  {locationIssue ? (
+                    <View className="rounded-2xl bg-amber-50 dark:bg-amber-900/30 px-4 py-3">
+                      <Text className="text-sm font-semibold text-amber-900 dark:text-amber-200">
+                        {locationIssue === 'blocked' || locationIssue === 'permission'
+                          ? 'Location access is needed to check in'
+                          : "Couldn't confirm your location"}
+                      </Text>
+                      <Text className="text-xs text-amber-800 dark:text-amber-300 mt-0.5">
+                        {locationIssue === 'blocked'
+                          ? 'Turn Location on for this app in your phone settings, then try again.'
+                          : locationIssue === 'permission'
+                            ? 'Check-in confirms you are on society premises.'
+                            : locationIssue === 'timeout'
+                              ? 'No GPS fix yet. Step outside or near a window.'
+                              : 'Turn on location services and try again.'}
+                      </Text>
+                      <TouchableOpacity onPress={refreshPosition} className="mt-2 self-start">
+                        <Text className="text-xs font-bold text-amber-900 dark:text-amber-200">
+                          Try again
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    <DistanceChip meters={distance} inside={insideGeofence} />
+                  )}
                   <TouchableOpacity
-                    className={`rounded-2xl py-4 items-center ${insideGeofence ? 'bg-primary-500 dark:bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'}`}
+                    className={`rounded-2xl py-4 items-center ${insideGeofence && !locationIssue ? 'bg-primary-500 dark:bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'}`}
                     onPress={checkIn}
-                    disabled={isCheckingIn || !insideGeofence}
+                    disabled={isCheckingIn}
                   >
                     {isCheckingIn ? (
                       <ActivityIndicator color="#fff" />
