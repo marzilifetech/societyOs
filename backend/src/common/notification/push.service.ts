@@ -690,6 +690,25 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
     return false;
   }
 
+  /**
+   * Whether push delivery is actually possible right now.
+   *
+   * Exposed because there was no way to tell from outside whether
+   * notifications worked at all: FCM init failures are logged once at boot and
+   * then swallowed, `/health` returned a bare `{status:'ok'}`, and every
+   * `send()` returns `{ok:false}` just as it would for an opted-out user. A
+   * system whose primary delivery mechanism can be silently absent needs to
+   * say so.
+   */
+  isConfigured(): boolean {
+    return this.initialized;
+  }
+
+  /** True when quiet-hours deferral can actually hold a push for later. */
+  hasDeferQueue(): boolean {
+    return this.deferQueue !== null;
+  }
+
   async send(
     userId: string,
     notification: PushNotification,
