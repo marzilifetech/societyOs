@@ -82,6 +82,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // hangs the app on the splash forever on Android 15 / edge-to-edge /
       // New Arch. Reproduced and fixed in the resident app first. See the
       // plugin for the full rationale.
+      // Keeps the fmt C++17 workaround in the Podfile across `expo prebuild`.
+      // Without it every iOS build dies in fmt/format-inl.h on Xcode 26 — see
+      // the plugin. Same fix as the resident app.
+      './plugins/withIosFmtCxx17',
       './plugins/withAndroidNoSystemSplash',
       // Release signing lives here rather than hand-edited into the gitignored
       // android/ folder, where every `expo prebuild` silently reverted it to
