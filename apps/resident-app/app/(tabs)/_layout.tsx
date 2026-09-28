@@ -70,17 +70,6 @@ export default function TabsLayout() {
   return (
     <>
     <ResidentProfileGuard />
-    {/*
-      Guard-logged entry requests need an in-app surface.
-
-      When security logs a visitor at the gate the row is created PENDING and a
-      push goes out — but the push is the ONLY notification, so a resident with
-      push disabled, no token, or the app already open saw nothing at all: the
-      "entry request is not shown in the resident app" report. This component
-      polls for pending approvals and shows an approve/deny card. It existed and
-      was fully written, but was never mounted anywhere.
-    */}
-    <PendingVisitorsPill />
     <Tabs
       screenOptions={{
         headerShown: false,
@@ -137,6 +126,21 @@ export default function TabsLayout() {
       {/* Visitors moved out of the tab bar per the Figma nav (still routable at /visitors). */}
       <Tabs.Screen name="visitors" options={{ href: null }} />
     </Tabs>
+    {/*
+      Guard-logged entry requests need an in-app surface.
+
+      When security logs a visitor at the gate the row is created PENDING and a
+      push goes out — but the push is the ONLY notification, so a resident with
+      push disabled, no token, or the app already open saw nothing at all: the
+      "entry request is not shown in the resident app" report. This component
+      polls for pending approvals and shows an approve/deny card. It existed and
+      was fully written, but was never mounted anywhere.
+
+      It must come AFTER <Tabs>. Mounted before it, zIndex still drew the card on
+      top, but iOS hit-testing went to the full-screen Tabs sibling mounted later
+      — the card was visible and Approve/Reject silently did nothing.
+    */}
+    <PendingVisitorsPill />
     </>
   );
 }
