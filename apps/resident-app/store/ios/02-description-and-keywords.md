@@ -3,42 +3,45 @@
 Every field below is inside Apple's limit; the count is shown so you can see the
 headroom before editing.
 
-## Promotional Text (170 max)
+## Promotional Text (170 max — this one is 158)
+
 Can be changed any time WITHOUT a new build or review — use it for
 announcements.
 
 ```
-Approve visitors before they reach your door, pay maintenance, book amenities and raise a request — everything your society needs, in one place.
+Approve visitors before they reach your door, pay maintenance, raise a service request and read society notices — everything your society needs, in one place.
 ```
 
-## Description (4000 max)
+## Description (4000 max — this one is 1421)
+
+Describes only what a reviewer can reach in this build. Amenity booking,
+laundry, parking, AGM, budget, the community feed and the health module exist
+in the codebase but are not reachable on iOS 1.0 — advertising them is a
+Guideline 2.3.1 (inaccurate metadata) rejection. Add each back when it ships.
 
 ```
-One Community brings everything your residential society does into a single app.
+One Community brings the everyday running of your residential society into a single app.
 
 VISITORS & DELIVERIES
-Approve or deny a visitor from your phone before they reach your door. Security logs the guest at the gate and you decide — no intercom, no waiting. Pre-approve expected guests with a shareable pass, and keep a record of who came and when.
+Approve or reject a visitor from your phone before they reach your door. Security logs the guest at the gate and you decide — no intercom, no waiting. Pre-approve expected guests with a shareable pass, and keep a record of who came and when.
 
 MAINTENANCE & PAYMENTS
-See your maintenance bill, its breakdown and its due date. Pay from the app and keep every receipt in one place. Your wallet balance and past transactions are always visible.
+See your maintenance bill and its due date, pay from the app, and keep your payment history in one place. Your wallet balance and past transactions are always visible.
 
-SERVICE REQUESTS
-Raise a plumbing, electrical or housekeeping request with a photo, track it as staff pick it up and complete it, and rate the work when it is done.
+SERVICES & REQUESTS
+Book a plumber, electrician, carpenter or painter, or raise a request with the society office. Track it as staff pick it up and complete it.
 
-AMENITIES & EVENTS
-Book the clubhouse, courts or common facilities. See what the community has planned and register in a tap.
+NOTICES, POLLS & EVENTS
+Read notices from the society office the moment they are posted, vote in society polls, and see what is planned in your community.
 
-COMMUNITY
-Read notices from the society office, vote in polls, follow AGM resolutions and see the society budget. Share and discuss in the community feed.
+CANTEEN
+See today's breakfast, lunch and dinner menus from the society canteen, with calories and dietary information, and pre-order your meal.
 
-DAILY LIFE
-Order from the society canteen, book laundry, manage domestic help and their attendance, track packages waiting at the gate, and register your vehicles and parking.
-
-HEALTH & SAFETY
-Raise an emergency SOS that reaches the security desk and society administrators immediately, with your location attached. Book a consultation with a visiting doctor and keep your medical records and vitals to hand.
+SAFETY
+Raise an emergency SOS that reaches the security desk and society administrators immediately, with your location attached.
 
 FOR YOUR HOUSEHOLD
-Add family members, manage their access, and keep documents like your ID proofs in one secure place.
+Add family members, manage domestic help, register your vehicles, and keep documents like your ID proofs in one secure place.
 
 One Community is provided to residents by their society. You will need a mobile number registered with your society office to sign in.
 ```
@@ -49,50 +52,52 @@ One Community is provided to residents by their society. You will need a mobile 
 society,apartment,visitor,gate,maintenance,amenity,resident,community,housing,rwa,flat,society app
 ```
 
-## What's New in This Version (4000 max)
+## What's New in This Version
 
-```
-This release fixes a number of issues reported by residents:
-
-• Request Help now works — concierge requests were failing to send.
-• Service history updates as soon as staff progress your request, and pulls to refresh.
-• Canteen shows each meal separately, so you see only the menu you picked.
-• Gate entry requests now appear in the app with an approve/deny prompt, instead of relying on a push notification arriving.
-• Visitors awaiting your approval move to the top of the list.
-• Cancelled events no longer show as upcoming.
-• Polls close properly once their deadline passes.
-
-Thank you for the reports — please keep them coming.
-```
+Not shown for the first App Store version — App Store Connect only asks for it
+from the second version onward. Leave it empty for this submission.
 
 ## Support & Contact (App Review Information)
-| Field | Value |
-|---|---|
-| Contact first/last name | *(your name)* |
-| Phone | *(a number Apple can reach)* |
-| Email | `support@marzi.in` |
 
-### Sign-in required — Apple MUST be given a working account
-The app is OTP-only: sign-in sends a one-time password to a mobile number
-registered with a society. A reviewer cannot get past the first screen without
-one. Provide a demo account under **App Review Information → Sign-In Required**:
+| Field                   | Value                        |
+| ----------------------- | ---------------------------- |
+| Contact first/last name | _(your name)_                |
+| Phone                   | _(a number Apple can reach)_ |
+| Email                   | `support@marzi.in`           |
+
+### Sign-in required — the demo account
+
+Tick **Sign-in required** and enter:
+
+| Field     | Value        |
+| --------- | ------------ |
+| User name | `9999999001` |
+| Password  | `0000`       |
+
+Then paste this into **Notes**:
 
 ```
-Notes for Apple:
+One Community is used by residents of a registered residential society.
+Sign-in is by mobile number and one-time password (OTP), so a self-service
+account cannot be created. We have set up a demo society for review:
 
-This app is used by residents of a specific residential society and requires a
-mobile number that the society office has registered. Sign-in is by one-time
-password sent to that number, so a self-service account cannot be created.
+1. On the first screen, choose "Marzi Demo Residency (App Review)".
+2. Enter the mobile number 9999999001 and tap "Send code".
+3. Enter the code 0000. (This demo number never receives an SMS; the code
+   is fixed.)
 
-Demo account:
-  Society : <society name to pick on the first screen>
-  Phone   : <demo number>
-  OTP     : <fixed OTP for this account, or the number where it is received>
+After sign-in you will see a visitor waiting at the gate with Approve /
+Reject buttons — this is the app's core feature: security logs a guest at
+the gate and the resident decides from their phone.
 
-The Emergency SOS button on the Medical screen raises a real alert to the
-society's security desk. Please use the demo society only.
+Location is requested only to attach the resident's position to an
+Emergency SOS; it is never used in the background. The demo society has no
+security staff, so pressing SOS alerts no one.
+
+The PLUS tile opens our Care portal (our own website) inside the app.
 ```
 
-⚠️ **This is the single most common rejection cause for an app like this.**
-A reviewer who cannot sign in gets Guideline 2.1 rejected. Arrange a demo
-society and a fixed-OTP demo number before submitting.
+⚠️ Before submitting, run the demo-society script on **production** — see
+`06-build-and-submit.md`. Then sign in once yourself with the steps above.
+A reviewer who cannot sign in is a Guideline 2.1 rejection, the most common
+one for an app like this.

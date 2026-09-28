@@ -1,61 +1,136 @@
-# Getting the build to App Store Connect
+# Getting One Community onto the App Store (Marzi account)
 
-## What is NOT done yet, and why
-An App Store Connect app record could not be created for you: it requires
-signing in to Apple with your account. Handling those credentials is not
-something I will do — you need to create the record yourself. Everything else
-(all metadata, privacy answers, screenshots) is prepared in this folder to paste
-in.
+The release is built and uploaded from this Mac with Xcode, signed by the
+**Marzi** Apple Developer team. The only App Store distribution certificate
+currently in this Mac's keychain belongs to a different team (KLUKLU VENTURES,
+5JDUG85ST9), so it must not be used.
 
-Also missing locally:
-- No App Store Connect API key (`~/.appstoreconnect/private_keys/` is empty)
-- `APPLE_ID`, `ASC_APP_ID`, `APPLE_TEAM_ID` are unset
-- EAS is not logged in (`eas whoami` → Not logged in)
+## Status
 
-## Order of operations
-1. **Apple Developer portal** → Identifiers → register `com.societyos.resident`
-   with Push Notifications enabled.
-2. **App Store Connect** → My Apps → + → New App, using `01-app-information.md`.
-3. Fill Version Information from `02-description-and-keywords.md`.
-4. Fill App Privacy from `03-app-privacy.md`.
-5. Answer Age Rating from `04-age-rating.md`.
-6. Upload screenshots per `05-screenshots.md`.
-7. Upload a build (below).
-8. Add the demo account under App Review Information — see the warning in
-   `02-description-and-keywords.md`. This is the top rejection cause here.
+| Step                                                     | State                                       |
+| -------------------------------------------------------- | ------------------------------------------- |
+| Store text, privacy and age-rating answers (01–04)       | Ready                                       |
+| Screenshots, 6.9" and 6.5" (05, `screenshots/`)          | Ready                                       |
+| iOS permission strings, push entitlement, encryption key | Fixed in `app.json`                         |
+| Community feed hidden on iOS (Guideline 1.2)             | Done (`UGC_ENABLED`)                        |
+| Demo account for Apple's reviewer                        | Script ready, **not yet run on production** |
+| Marzi team signed in to Xcode                            | **You**                                     |
+| Bundle ID registered, App Store Connect record created   | **You**                                     |
+| Archive + upload                                         | After the above                             |
 
-## Producing the build
-The Android release was built locally with Gradle because the signing material
-was already on this machine. iOS cannot work the same way: it needs a
-Distribution certificate and an App Store provisioning profile from your Apple
-account.
+## 1. Sign in to the Marzi team in Xcode (you)
 
-Once `eas login` is done:
+Xcode → Settings → Accounts → **+** → Apple ID → the Apple ID that belongs to
+the Marzi developer team. Note the **Team ID** it shows (10 characters).
+
+## 2. Register the app (you, in the browser)
+
+1. developer.apple.com → Certificates, Identifiers & Profiles → Identifiers
+   → **+** → App IDs → App → Bundle ID `com.societyos.resident`, with the
+   **Push Notifications** capability ticked.
+   - This ID is permanent once submitted. Android uses `com.marzi.resident`;
+     if you want iOS to match, change `ios.bundleIdentifier` in `app.json`
+     **now**, before the first upload.
+2. appstoreconnect.apple.com → Apps → **+** → New App, using
+   `01-app-information.md`.
+3. Push: create an APNs key (Keys → **+** → Apple Push Notifications service)
+   and upload it to the Firebase project (Project settings → Cloud Messaging
+   → Apple app configuration). See the push warning under "Open items" —
+   the key alone is not enough.
+
+## 3. Create the reviewer's demo society on production
+
+`backend/prisma/seed-app-review.ts` creates _Marzi Demo Residency (App
+Review)_ with resident `9999999001` (fixed OTP `0000`, already hardcoded in
+`auth.service.ts`) and enough data that no screen is empty. It changes only
+rows inside that demo society.
+
+```bash
+cd backend
+# 1) Dry run: prints the target database host and writes nothing.
+DATABASE_URL='<production url>' npx ts-node prisma/seed-app-review.ts
+# 2) Apply.
+DATABASE_URL='<production url>' APP_REVIEW_CONFIRM=yes npx ts-node prisma/seed-app-review.ts
+```
+
+Then sign in on a phone with the steps in `02-description-and-keywords.md` to
+prove it works. Re-run the script before every future review; it refreshes
+the dates. The society appears in the public society list while it is
+visible; after approval, hide it with the super-admin "Show in directory"
+toggle.
+
+The canteen fix (`fix(canteen): show today's menu…`) is a backend change.
+Deploy the backend before review, or the reviewer sees an empty canteen.
+
+## 4. Archive and upload
+
+Replace `MARZI_TEAM_ID` in `ExportOptions.plist` with the Team ID from step 1,
+then:
 
 ```bash
 cd apps/resident-app
-eas build --platform ios --profile production
-eas submit --platform ios --profile production
+
+# Regenerate ios/ in production mode: aps-environment=production and the
+# permission strings from app.json. Building without APP_VARIANT=production
+# ships a development push entitlement, and push silently fails on App Store
+# builds while TestFlight still works.
+APP_VARIANT=production npx expo prebuild --platform ios --clean
+
+# The release bundle takes EXPO_PUBLIC_API_URL from .env (the production
+# API). Make sure it is not overridden in your shell.
+unset EXPO_PUBLIC_API_URL
+
+APP_VARIANT=production SENTRY_DISABLE_AUTO_UPLOAD=true \
+xcodebuild -workspace ios/OneCommunity.xcworkspace -scheme OneCommunity \
+  -configuration Release -destination 'generic/platform=iOS' \
+  -archivePath build/OneCommunity.xcarchive \
+  DEVELOPMENT_TEAM=<MARZI_TEAM_ID> CODE_SIGN_STYLE=Automatic \
+  -allowProvisioningUpdates archive
+
+xcodebuild -exportArchive -archivePath build/OneCommunity.xcarchive \
+  -exportOptionsPlist store/ios/ExportOptions.plist \
+  -exportPath build/export -allowProvisioningUpdates
 ```
 
-EAS will offer to create the Distribution certificate and profile for you; let
-it, unless your team already manages them.
+`-allowProvisioningUpdates` lets Xcode create the Marzi distribution
+certificate and App Store profile the first time. The export step uploads
+straight to App Store Connect (`destination = upload`). To do it by hand
+instead: Xcode → Window → Organizer → the archive → Distribute App → App Store
+Connect.
 
-Set `APP_VARIANT=production` — `app.config.ts` uses it to set
-`aps-environment=production`. Building without it ships a development APNs
-entitlement and **push silently stops working on App Store builds** (TestFlight
-still works, which is what makes this so easy to miss).
+Version `1.0.14`, build `1`. Every later upload needs a higher build number:
+set `ios.buildNumber` in `app.json`.
 
-## Before you submit — open items
-- [ ] Bundle ID differs across platforms (iOS `com.societyos.resident`,
-      Android `com.marzi.resident`). Confirm this is intended; iOS cannot be
-      changed after first submission.
-- [ ] `https://marzitech.in/privacy-policy` 404s. Fix it or use the
-      amplifyapp.com URL in the listing.
-- [ ] Community feed needs report + block to satisfy Guideline 1.2 (UGC).
-- [ ] In-app account deletion must exist, not just the web page
-      (Guideline 5.1.1(v)).
-- [ ] The app's display name is "One Community" but the privacy policy calls it
-      "Resident App - Marzi". Align them; a reviewer comparing the two will ask.
-- [ ] Sentry has no org/project configured, so no iOS source maps will upload
-      either. Set SENTRY_ORG / SENTRY_PROJECT / SENTRY_AUTH_TOKEN.
+## 5. Submit (App Store Connect)
+
+1. Wait for the build to finish processing (email, about 10–30 minutes). Add
+   it to version 1.0.14.
+2. Fill in the version page from `02-description-and-keywords.md`. Leave
+   What's New empty; it does not exist for a first version.
+3. App Privacy: `03-app-privacy.md`. Age Rating: `04-age-rating.md`.
+4. Screenshots: `screenshots/6.9/` in numbered order.
+5. App Review Information: the demo account and notes from `02-…`.
+6. Export compliance should not be asked (`ITSAppUsesNonExemptEncryption =
+false`). If it is, answer "None of the algorithms mentioned above".
+7. Submit for Review. Choose manual release if you want to pick the launch
+   moment.
+
+## Open items that do not block this submission
+
+- ⚠️ **Push notifications do not reach iOS yet.** The app registers the raw
+  APNs device token (`getDevicePushTokenAsync` in `src/lib/push.ts`), but the
+  backend sends only through Firebase Admin (FCM), which rejects APNs tokens.
+  There is also no iOS Firebase app (`GoogleService-Info.plist`). Review
+  does not test push, and the in-app gate card covers visitors while the app
+  is open, but residents get no alert when it is closed. The fix: register an
+  iOS app in Firebase, add `GoogleService-Info.plist`, upload the APNs key,
+  and have iOS register an FCM token (via `@react-native-firebase/messaging`)
+  instead of the APNs token. Ship it in 1.0.1, or hold the launch for it.
+- Report + block for the community feed. Needed before `UGC_ENABLED` can
+  be turned on for iOS.
+- `https://marzitech.in/privacy-policy` still returns 404. The listing uses
+  the amplifyapp.com URL, which works.
+- The privacy policy calls the app "Resident App - Marzi"; the store name is
+  "One Community". Align them when convenient.
+- Sentry has no org/project configured, so builds skip symbol upload
+  (`SENTRY_DISABLE_AUTO_UPLOAD=true`).

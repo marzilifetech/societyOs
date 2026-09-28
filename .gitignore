@@ -86,3 +86,6 @@ dump.rdb
 
 # Expo-generated iOS project (mirrors the existing apps/*/android/ rule).
 apps/*/ios/
+
+# Local xcodebuild archives/exports (store/ios/06-build-and-submit.md).
+apps/*/build/
