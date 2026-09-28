@@ -13,30 +13,7 @@ import { UserRole } from '@prisma/client';
 import { IsNumber, IsOptional, IsString, IsPositive, IsNotEmpty, IsInt, MaxLength, Min } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-
-class TopUpOrderDto {
-  @ApiProperty({ description: 'Amount in rupees' })
-  @IsNumber()
-  @IsPositive()
-  amount: number;
-}
-
-class TopUpVerifyDto {
-  @ApiProperty()
-  @IsString()
-  @IsNotEmpty()
-  razorpayOrderId: string;
-
-  @ApiProperty()
-  @IsString()
-  @IsNotEmpty()
-  razorpayPaymentId: string;
-
-  @ApiProperty()
-  @IsString()
-  @IsNotEmpty()
-  razorpaySignature: string;
-}
+import { onlinePaymentDisabled } from '../../common/utils/online-payment.util';
 
 class TransactionPageDto {
   @ApiPropertyOptional({ default: 1 })
@@ -114,17 +91,19 @@ export class WalletController {
     return this.walletService.getTransactionsPaginated(user.sub, query.page ?? 1, query.limit ?? 20);
   }
 
+  // Wallet top-up was Razorpay; online payment is switched off, so both routes
+  // answer 410. See onlinePaymentDisabled().
   @Post('topup')
   @Roles(UserRole.RESIDENT)
   @Throttle({ default: { limit: 5, ttl: 60000 } })
-  createTopupOrder(@CurrentUser() user: JwtPayload, @Body() dto: TopUpOrderDto) {
-    return this.walletService.createTopupOrder(user.sub, dto.amount);
+  createTopupOrder() {
+    onlinePaymentDisabled();
   }
 
   @Post('topup/verify')
   @Roles(UserRole.RESIDENT)
-  verifyTopup(@CurrentUser() user: JwtPayload, @Body() dto: TopUpVerifyDto) {
-    return this.walletService.verifyTopupAndCredit(user.sub, dto);
+  verifyTopup() {
+    onlinePaymentDisabled();
   }
 }
 

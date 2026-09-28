@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Param, Body, UseGuards, ForbiddenException, Headers, RawBodyRequest, Req, Query, Header, StreamableFile } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { MaintenanceService } from './maintenance.service';
-import { VerifyPaymentDto } from './dto/maintenance.dto';
+import { onlinePaymentDisabled } from '../../common/utils/online-payment.util';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { ActiveUserGuard } from '../../common/guards/active-user.guard';
@@ -10,14 +10,6 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { UserRole } from '@prisma/client';
 import { IsString, IsOptional, IsBoolean } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-
-class PaymentOrderBodyDto {
-  @ApiProperty()
-  @IsString()
-  billId: string;
-}
-
-class VerifyPaymentBodyDto extends VerifyPaymentDto {}
 
 class WebhookBodyDto {
   @ApiProperty()
@@ -91,48 +83,31 @@ export class MaintenanceController {
     return this.maintenanceService.getReceipt(id, user.sub);
   }
 
+  // Resident online payment is switched off — maintenance is paid at the society
+  // office. These four routes answer 410; see onlinePaymentDisabled(). No @Body,
+  // so an old client's payload cannot turn the 410 into a validation 400.
   @Post('bills/:id/pay')
   @Roles(UserRole.RESIDENT)
-  createOrderByParam(@Param('id') billId: string, @CurrentUser() user: JwtPayload) {
-    return this.maintenanceService.createPaymentOrder(billId, user.sub);
+  createOrderByParam() {
+    onlinePaymentDisabled();
   }
 
-  // Flat body variant used by resident-app: POST /maintenance/payment-order {billId}
   @Post('payment-order')
   @Roles(UserRole.RESIDENT)
-  createOrder(@Body() dto: PaymentOrderBodyDto, @CurrentUser() user: JwtPayload) {
-    return this.maintenanceService.createPaymentOrder(dto.billId, user.sub);
+  createOrder() {
+    onlinePaymentDisabled();
   }
 
   @Post('payments/:id/verify')
   @Roles(UserRole.RESIDENT)
-  verifyPaymentByParam(
-    @Param('id') paymentId: string,
-    @CurrentUser() user: JwtPayload,
-    @Body() dto: VerifyPaymentBodyDto,
-  ) {
-    return this.maintenanceService.verifyPayment(
-      paymentId,
-      user.sub,
-      dto.gatewayRef,
-      dto.receiptUrl,
-      dto.razorpayOrderId,
-      dto.razorpaySignature,
-    );
+  verifyPaymentByParam() {
+    onlinePaymentDisabled();
   }
 
-  // Flat body variant used by resident-app: POST /maintenance/verify-payment {paymentId, gatewayRef}
   @Post('verify-payment')
   @Roles(UserRole.RESIDENT)
-  verifyPayment(@CurrentUser() user: JwtPayload, @Body() dto: VerifyPaymentBodyDto) {
-    return this.maintenanceService.verifyPayment(
-      dto.paymentId,
-      user.sub,
-      dto.gatewayRef,
-      dto.receiptUrl,
-      dto.razorpayOrderId,
-      dto.razorpaySignature,
-    );
+  verifyPayment() {
+    onlinePaymentDisabled();
   }
 
   /**
