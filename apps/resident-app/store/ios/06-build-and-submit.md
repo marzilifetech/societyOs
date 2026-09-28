@@ -169,7 +169,7 @@ false`). If it is, answer "None of the algorithms mentioned above".
 - Report + block for the community feed. Needed before `UGC_ENABLED` can
   be turned on for iOS.
 - `https://marzitech.in/privacy-policy` still returns 404. The listing uses
-  the amplifyapp.com URL, which works.
+  society-admin-dev.marzitech.in/privacy-policy, which works.
 - The privacy policy calls the app "Resident App - Marzi"; the store name is
   "One Community". Align them when convenient.
 - Sentry has no org/project configured, so builds skip symbol upload

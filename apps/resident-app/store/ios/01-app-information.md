@@ -51,8 +51,6 @@ want permanently: it cannot be changed after the first submission.
 | Marketing URL      | _(leave blank)_                                         |
 | Copyright          | `2026 Marzi Agetech Private Limited`                    |
 
-⚠️ `https://marzitech.in/privacy-policy` returns **404** — only the
-amplifyapp.com URL resolves. Apple checks these links during review, so either
-fix the custom-domain route first or submit the amplifyapp.com URL.
-A dedicated support page (not the privacy policy) would be better; Apple accepts
-a page with a contact route, and the policy lists support@marzi.in.
+The listing uses `https://society-admin-dev.marzitech.in/privacy-policy` for both
+URLs (200, with a Contact us section). `https://marzitech.in/privacy-policy`
+still returns 404, so don't use that one.
