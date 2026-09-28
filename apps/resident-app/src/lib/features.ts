@@ -39,3 +39,14 @@ export const HEALTH_ENABLED = false;
  * Android is unchanged. Turn it on for iOS only once report + block ship.
  */
 export const UGC_ENABLED = Platform.OS !== 'ios';
+
+/**
+ * CARE_PORTAL_ENABLED gates the "PLUS" tile, which opens the web Care portal
+ * (vitals, health records) in an in-app WebView — see src/lib/care-portal.ts.
+ *
+ * It ships OFF on iOS for App Review: the portal is the only route to health
+ * features in the iOS build (HEALTH_ENABLED is off), and its content lives on
+ * the web, outside the reviewed binary. With it off, the tile is hidden, /plus
+ * redirects home, and the App Privacy answers need not declare Health data.
+ */
+export const CARE_PORTAL_ENABLED = Platform.OS !== 'ios';

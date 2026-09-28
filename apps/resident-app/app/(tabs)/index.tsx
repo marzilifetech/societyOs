@@ -10,7 +10,7 @@ import { useAuthStore } from '../../src/store/auth.store';
 import { useTheme } from '../../src/hooks/useTheme';
 import { api } from '../../src/lib/api';
 import { Display, RoundCard, IconCircle, PillButton, StatusPill, rd, type RdStatusTone } from '../../src/components/ui';
-import { HEALTH_ENABLED } from '../../src/lib/features';
+import { CARE_PORTAL_ENABLED, HEALTH_ENABLED } from '../../src/lib/features';
 import { openCarePortal } from '../../src/lib/care-portal';
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
@@ -47,7 +47,10 @@ const QUICK_ACTIONS: QuickAction[] = [
   { icon: 'people', label: 'Visitor', route: '/visitor/new', bg: '#FCEBD8', tint: '#B26B2E' },
   // Opens the web Care portal (doctors, appointments & more) already signed-in
   // via a one-time handoff — see openCarePortal(). Neutrally named on purpose.
-  { icon: 'add-circle', label: 'PLUS', route: 'care-portal', bg: '#F3E8FF', tint: '#7C3AED' },
+  // 'PLUS' is gated by CARE_PORTAL_ENABLED (off on iOS) — see src/lib/features.ts.
+  ...(CARE_PORTAL_ENABLED
+    ? [{ icon: 'add-circle', label: 'PLUS', route: 'care-portal', bg: '#F3E8FF', tint: '#7C3AED' } as QuickAction]
+    : []),
   // 'Medical' is gated by HEALTH_ENABLED (Play health-policy) — see src/lib/features.ts.
   ...(HEALTH_ENABLED
     ? [{ icon: 'medkit', label: 'Medical', route: '/medical', bg: '#FCE4E6', tint: '#DC2626' } as QuickAction]

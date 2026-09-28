@@ -7,9 +7,10 @@ import {
   StyleSheet,
   View,
 } from 'react-native';
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { Redirect, Stack, useLocalSearchParams } from 'expo-router';
 import { WebView, type WebViewNavigation } from 'react-native-webview';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { CARE_PORTAL_ENABLED } from '../src/lib/features';
 
 /**
  * Full-screen in-app WebView host for the "PLUS" / Care portal. Chosen over an
@@ -19,7 +20,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
  * one-time handoff token for seamless sign-in) is passed via the `url` param by
  * openCarePortal().
  */
-export default function PlusWebView() {
+export default function PlusScreen() {
+  // Gated off on iOS (App Review) — any deep link lands on Home. See src/lib/features.ts.
+  if (!CARE_PORTAL_ENABLED) return <Redirect href={'/(tabs)' as any} />;
+  return <PlusWebView />;
+}
+
+function PlusWebView() {
   const { url } = useLocalSearchParams<{ url?: string }>();
   const insets = useSafeAreaInsets();
   const webRef = useRef<WebView>(null);
