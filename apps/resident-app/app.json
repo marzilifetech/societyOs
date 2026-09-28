@@ -16,9 +16,7 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.societyos.resident",
       "infoPlist": {
-        "NSCameraUsageDescription": "Used for visitor photo and proof of work",
-        "NSLocationWhenInUseUsageDescription": "Used for SOS location and geofencing",
-        "NSPhotoLibraryUsageDescription": "Used to upload photos"
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -52,7 +50,38 @@
       ],
       "@sentry/react-native",
       "expo-web-browser",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "One Community uses the camera to photograph a visitor you are pre-approving, to scan visitor QR passes, and to capture your ID documents for society verification.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "One Community uses the camera to photograph a visitor you are pre-approving, to scan visitor QR passes, and to capture your ID documents for society verification.",
+          "photosPermission": "One Community lets you choose photos from your library to attach to a complaint, a visitor pass or your ID documents.",
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "When you raise an Emergency SOS, One Community shares your location with your society's security team so they can reach you quickly.",
+          "locationAlwaysPermission": false,
+          "locationAlwaysAndWhenInUsePermission": false,
+          "isIosBackgroundLocationEnabled": false
+        }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "One Community uses Face ID so you can sign back in quickly and securely."
+        }
+      ]
     ],
     "scheme": "societyos",
     "extra": {},
