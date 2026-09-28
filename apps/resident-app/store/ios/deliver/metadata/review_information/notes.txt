@@ -1,0 +1,19 @@
+One Community is used by residents of a registered residential society.
+Sign-in is by mobile number and one-time password (OTP), so a self-service
+account cannot be created. We have set up a demo society for review:
+
+1. On the first screen, choose "Marzi Demo Residency (App Review)".
+2. Enter the mobile number 9999999001 and tap "Send code".
+3. Enter the code 0000. (This demo number never receives an SMS; the code
+   is fixed.)
+
+After sign-in you will see a visitor waiting at the gate with Approve /
+Reject buttons — this is the app's core feature: security logs a guest at
+the gate and the resident decides from their phone.
+
+Maintenance bills are shown for information only. Residents pay at their
+society office, and the app has no payment feature.
+
+Location is requested only to attach the resident's position to an
+Emergency SOS; it is never used in the background. The demo society has no
+security staff, so pressing SOS alerts no one.

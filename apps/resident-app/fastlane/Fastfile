@@ -1,0 +1,118 @@
+# App Store Connect listing for One Community (iOS). See store/ios/06-build-and-submit.md.
+#
+# Auth: an App Store Connect API key JSON (never commit it):
+#   {"key_id": "...", "issuer_id": "...", "key_filepath": "/abs/path/AuthKey_XXXX.p8"}
+#   ASC_API_KEY_PATH=/path/to/key.json fastlane ios listing
+#
+# Nothing here submits for review; that stays a deliberate click in App Store Connect.
+
+require "fileutils"
+require "tmpdir"
+
+APP_ID = "com.societyos.resident"
+VERSION = "1.0.14"
+STORE_DIR = File.expand_path("../store/ios", __dir__)
+
+def api_key_path!
+  path = ENV["ASC_API_KEY_PATH"]
+  UI.user_error!("Set ASC_API_KEY_PATH to the App Store Connect API key JSON") unless path && File.exist?(path)
+  path
+end
+
+def connect!
+  Spaceship::ConnectAPI.token = Spaceship::ConnectAPI::Token.from(filepath: api_key_path!)
+  app = Spaceship::ConnectAPI::App.find(APP_ID)
+  UI.user_error!("No App Store Connect app for #{APP_ID}") unless app
+  app
+end
+
+platform :ios do
+  desc "Upload listing text, categories, age rating, review info and screenshots (no binary, no submission)"
+  lane :listing do
+    app = connect!
+    locale = app.primary_locale
+    UI.message("App: #{app.name} (#{app.id}), primary locale #{locale}")
+
+    Dir.mktmpdir do |tmp|
+      # Metadata: the repo keeps localized files under metadata/LOCALE; stage them
+      # under the app's real primary locale.
+      meta = File.join(tmp, "metadata")
+      FileUtils.cp_r(File.join(STORE_DIR, "deliver/metadata"), meta)
+      FileUtils.mv(File.join(meta, "LOCALE"), File.join(meta, locale))
+
+      # Screenshots: 6.9" (1320x2868) and 6.5" (1242x2688), in listing order.
+      shots = File.join(tmp, "screenshots", locale)
+      FileUtils.mkdir_p(shots)
+      { "6.9" => "a69", "6.5" => "b65" }.each do |size, prefix|
+        Dir[File.join(STORE_DIR, "screenshots", size, "*.jpg")].sort.each do |f|
+          FileUtils.cp(f, File.join(shots, "#{prefix}-#{File.basename(f)}"))
+        end
+      end
+
+      deliver(
+        api_key_path: api_key_path!,
+        app_identifier: APP_ID,
+        platform: "ios",
+        app_version: VERSION,
+        metadata_path: meta,
+        screenshots_path: File.join(tmp, "screenshots"),
+        app_rating_config_path: File.join(STORE_DIR, "deliver/age_rating.json"),
+        skip_binary_upload: true,
+        skip_app_version_update: false,
+        overwrite_screenshots: true,
+        submit_for_review: false,
+        automatic_release: false,
+        run_precheck_before_submit: false,
+        force: true
+      )
+    end
+  end
+
+  desc "Free, India only"
+  lane :availability do
+    app = connect!
+    client = Spaceship::ConnectAPI.client.tunes_request_client
+
+    # Price: the free price point for India as the base territory.
+    free = client.get("v1/apps/#{app.id}/appPricePoints", { "filter[territory]" => "IND", "limit" => 200 })
+                 .body["data"].find { |p| p.dig("attributes", "customerPrice").to_f.zero? }
+    UI.user_error!("No free price point found") unless free
+    client.post("v1/appPriceSchedules", {
+      data: {
+        type: "appPriceSchedules",
+        relationships: {
+          app: { data: { type: "apps", id: app.id } },
+          baseTerritory: { data: { type: "territories", id: "IND" } },
+          manualPrices: { data: [{ type: "appPrices", id: "${price-ind}" }] }
+        }
+      },
+      included: [{
+        type: "appPrices", id: "${price-ind}",
+        attributes: { startDate: nil },
+        relationships: { appPricePoint: { data: { type: "appPricePoints", id: free["id"] } } }
+      }]
+    })
+    UI.success("Price: Free")
+
+    # Availability: India only, not added automatically to new territories.
+    territories = client.get("v1/territories", { "limit" => 200 }).body["data"].map { |t| t["id"] }
+    client.post("v2/appAvailabilities", {
+      data: {
+        type: "appAvailabilities",
+        attributes: { availableInNewTerritories: false },
+        relationships: {
+          app: { data: { type: "apps", id: app.id } },
+          territoryAvailabilities: { data: territories.map { |t| { type: "territoryAvailabilities", id: "${ta-#{t}}" } } }
+        }
+      },
+      included: territories.map do |t|
+        {
+          type: "territoryAvailabilities", id: "${ta-#{t}}",
+          attributes: { available: t == "IND" },
+          relationships: { territory: { data: { type: "territories", id: t } } }
+        }
+      end
+    })
+    UI.success("Availability: India only")
+  end
+end

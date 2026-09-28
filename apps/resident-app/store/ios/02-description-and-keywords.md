@@ -51,7 +51,7 @@ One Community is provided to residents by their society. You will need a mobile 
 ## Keywords (100 max, comma separated, NO spaces after commas)
 
 ```
-society,apartment,visitor,gate,maintenance,amenity,resident,community,housing,rwa,flat,society app
+society,apartment,visitor,gate pass,maintenance,resident,housing,rwa,flat,notice,sos,canteen,guard
 ```
 
 ## What's New in This Version
