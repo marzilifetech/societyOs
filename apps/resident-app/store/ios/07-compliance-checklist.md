@@ -1,0 +1,48 @@
+# App Review compliance checklist: One Community 1.0.14 (iOS)
+
+Each line is an App Store Review Guideline that commonly rejects an app like
+this one, with what the build does about it and where. "Verified" means it was
+exercised in a Release build on the iOS 26 simulator on 2026-09-28.
+
+## Must be true before you press Submit
+
+- [ ] Demo society seeded on **production** (`backend/prisma/seed-app-review.ts`),
+      and you have signed in once with 9999999001 / 0000.
+- [ ] Backend deployed with this release's server fixes: canteen "today's menu"
+      and `GET /notices/:id`. Without them the reviewer sees an empty canteen
+      and notices that will not open.
+- [ ] App Privacy, Age Rating and the listing text entered exactly as in
+      01–04. They are written to match this build.
+
+## Guidelines
+
+| Guideline                                       | Risk for this app                                                                                                               | Status                                                                                                                                                                   |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 2.1 App completeness: reviewer must sign in     | OTP-only login                                                                                                                  | ✅ Demo account with fixed OTP; review notes walk through it (02)                                                                                                        |
+| 2.1 Features must work                          | Gate approve/reject did nothing; notice detail 404; canteen empty; bill export pointed at localhost; subscription resume failed | ✅ All fixed. Verified in the simulator: approve 201, notice 200, menu shown, CSV share sheet. Resume now sends POST as the API expects (not exercised in the simulator) |
+| 2.1 / 2.2 No placeholders or "coming soon"      | Travel and Property "SOON" tiles; My property row                                                                               | ✅ Hidden on iOS (`UNFINISHED_SCREENS_ENABLED`). Verified: Home shows 9 real tiles                                                                                       |
+| 2.1 Controls must do something                  | Language picker saved a value nothing read                                                                                      | ✅ Hidden on iOS                                                                                                                                                         |
+| 2.1 No debug/test UI                            | "Send a test notification" showed the push token and failed on iOS                                                              | ✅ Hidden on iOS                                                                                                                                                         |
+| 2.1 No dead ends                                | Domestic help "Attendance" went to a missing route; unknown links showed "Unmatched Route"                                      | ✅ Button removed; `app/+not-found.tsx` redirects                                                                                                                        |
+| 2.3.1 Accurate metadata                         | Old description advertised payments, wallet, amenities, laundry, parking, AGM, health, community feed                           | ✅ Description lists only reachable features (02)                                                                                                                        |
+| 2.3.3 Screenshots show the real app             | —                                                                                                                               | ✅ Captured from this build (05), no device frames, fictional data                                                                                                       |
+| 2.3.10 No other-platform references             | "Google Play services" string on the push test screen                                                                           | ✅ Screen hidden on iOS                                                                                                                                                  |
+| 1.2 User-generated content needs report + block | Community feed; others' review comments                                                                                         | ✅ Hidden on iOS (`UGC_ENABLED`); age rating UGC = No                                                                                                                    |
+| 3.1.1 In-app purchase                           | Razorpay for maintenance and wallet top-up                                                                                      | ✅ No payments at all: Pay Now, Auto-Pay and Wallet removed, and the Razorpay SDK is removed from the app. Bills are informational                                       |
+| 4.2 Minimum functionality / web wrapper         | PLUS opened a web portal                                                                                                        | ✅ PLUS hidden on iOS (`CARE_PORTAL_ENABLED`)                                                                                                                            |
+| 4.8 Sign in with Apple                          | Required only with third-party social login                                                                                     | ✅ N/A: phone OTP only                                                                                                                                                   |
+| 5.1.1(v) Account deletion in-app                | Was an email draft                                                                                                              | ✅ Settings → Delete account calls `POST /auth/delete`. Verified: 201, user anonymised and suspended, signed out                                                         |
+| 5.1.1 Purpose strings accurate                  | "Geofencing", unused Always-location and microphone                                                                             | ✅ Exact strings; unused keys removed                                                                                                                                    |
+| 5.1.2 Privacy labels match behaviour            | Health via PLUS; tracking                                                                                                       | ✅ Health not collected on iOS; tracking = No, no IDFA (03)                                                                                                              |
+| 5.1.1 Privacy policy URL reachable              | marzitech.in/privacy-policy 404s                                                                                                | ✅ Listing uses the amplifyapp.com URL (200)                                                                                                                             |
+| Export compliance                               | Upload blocked on the encryption question                                                                                       | ✅ `ITSAppUsesNonExemptEncryption = false`                                                                                                                               |
+| Privacy manifest (required-reason APIs)         | Missing manifest is flagged at upload                                                                                           | ✅ `PrivacyInfo.xcprivacy` declares UserDefaults, FileTimestamp, DiskSpace and SystemBootTime reasons                                                                    |
+| App icon                                        | Alpha channel rejected                                                                                                          | ✅ 1024×1024, no alpha                                                                                                                                                   |
+| Push entitlement                                | Development APNs on a store build                                                                                               | ✅ `aps-environment = production` via `APP_VARIANT=production`                                                                                                           |
+
+## Known, not a rejection risk, fix after launch
+
+- iOS push is not delivered (APNs token sent to FCM). See 06, "Open items".
+- The SOS screen never receives the live "acknowledged" update. It uses the
+  wrong socket namespace and never joins the society room. The alert itself is
+  sent correctly.

@@ -24,9 +24,9 @@ JPEG with no alpha channel (App Store Connect rejects PNGs with alpha).
 
 | #   | File                      | Shows                                                    |
 | --- | ------------------------- | -------------------------------------------------------- |
-| 1   | `01-home.jpg`             | Home: pinned notice, Emergency SOS, quick actions        |
+| 1   | `01-home.jpg`             | Home: Emergency SOS, quick actions, active requests      |
 | 2   | `02-visitor-approval.jpg` | Guest at the gate with Approve entry / Reject            |
-| 3   | `03-maintenance.jpg`      | Maintenance bill, due date, Pay Now, payment history     |
+| 3   | `03-maintenance.jpg`      | Maintenance dues, due date, pay-at-office note, history  |
 | 4   | `04-services.jpg`         | Book a plumber / carpenter / electrician; active request |
 | 5   | `05-canteen.jpg`          | Today's breakfast menu with calories and veg tags        |
 | 6   | `06-notices.jpg`          | Notice board                                             |

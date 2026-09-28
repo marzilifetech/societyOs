@@ -3,21 +3,23 @@
 Every field below is inside Apple's limit; the count is shown so you can see the
 headroom before editing.
 
-## Promotional Text (170 max — this one is 158)
+## Promotional Text (170 max — this one is 156)
 
 Can be changed any time WITHOUT a new build or review — use it for
 announcements.
 
 ```
-Approve visitors before they reach your door, pay maintenance, raise a service request and read society notices — everything your society needs, in one place.
+Approve visitors before they reach your door, track maintenance dues, book a service and read society notices — everything your society needs, in one place.
 ```
 
-## Description (4000 max — this one is 1421)
+## Description (4000 max — this one is 1377)
 
 Describes only what a reviewer can reach in this build. Amenity booking,
-laundry, parking, AGM, budget, the community feed and the health module exist
-in the codebase but are not reachable on iOS 1.0 — advertising them is a
-Guideline 2.3.1 (inaccurate metadata) rejection. Add each back when it ships.
+laundry, parking, AGM, budget, the community feed, the health module, travel
+and property exist in the codebase but are not reachable on iOS 1.0, and
+advertising them is a Guideline 2.3.1 (inaccurate metadata) rejection. There
+is no in-app payment: maintenance is paid at the society office. Add each
+feature back to the text when it ships.
 
 ```
 One Community brings the everyday running of your residential society into a single app.
@@ -25,8 +27,8 @@ One Community brings the everyday running of your residential society into a sin
 VISITORS & DELIVERIES
 Approve or reject a visitor from your phone before they reach your door. Security logs the guest at the gate and you decide — no intercom, no waiting. Pre-approve expected guests with a shareable pass, and keep a record of who came and when.
 
-MAINTENANCE & PAYMENTS
-See your maintenance bill and its due date, pay from the app, and keep your payment history in one place. Your wallet balance and past transactions are always visible.
+MAINTENANCE DUES
+See your maintenance bill, the amount due and the due date, and every payment your society office has recorded against your flat.
 
 SERVICES & REQUESTS
 Book a plumber, electrician, carpenter or painter, or raise a request with the society office. Track it as staff pick it up and complete it.
@@ -90,11 +92,12 @@ After sign-in you will see a visitor waiting at the gate with Approve /
 Reject buttons — this is the app's core feature: security logs a guest at
 the gate and the resident decides from their phone.
 
+Maintenance bills are shown for information only. Residents pay at their
+society office, and the app has no payment feature.
+
 Location is requested only to attach the resident's position to an
 Emergency SOS; it is never used in the background. The demo society has no
 security staff, so pressing SOS alerts no one.
-
-The PLUS tile opens our Care portal (our own website) inside the app.
 ```
 
 ⚠️ Before submitting, run the demo-society script on **production** — see

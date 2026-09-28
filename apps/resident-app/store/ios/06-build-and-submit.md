@@ -101,6 +101,35 @@ Connect.
 Version `1.0.14`, build `1`. Every later upload needs a higher build number:
 set `ios.buildNumber` in `app.json`.
 
+## 4b. TestFlight (internal testers)
+
+Once the upload finishes processing (App Store Connect emails you, usually
+10–30 minutes):
+
+1. App Store Connect → the app → **TestFlight**. If the build shows
+   "Missing Compliance", answer "None of the algorithms mentioned above". It
+   should not appear, because the build declares
+   `ITSAppUsesNonExemptEncryption = false`.
+2. **Internal Testing → +** → create a group (e.g. "Marzi team") and add
+   people from Users and Access. Internal testers must be App Store Connect
+   users. No Beta App Review is needed.
+3. Add the build to the group. Testers get an email and install through the
+   TestFlight app.
+4. **Test Information → What to Test** (shown to testers):
+
+```
+First iOS build of One Community. Please check:
+- Sign in with your society and mobile number.
+- A visitor logged at the gate shows Approve / Reject on Home — approve one.
+- Maintenance dues, Canteen menu, Services, Notices (open one) and Polls.
+- Settings → Delete account (use a throwaway account).
+- Emergency SOS: test only in a demo society.
+Known: push notifications are not delivered on iOS yet.
+```
+
+External testers (anyone by email or public link) need a one-time Beta App
+Review using the same demo account as the App Store review.
+
 ## 5. Submit (App Store Connect)
 
 1. Wait for the build to finish processing (email, about 10–30 minutes). Add

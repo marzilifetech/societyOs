@@ -68,16 +68,13 @@ advertising and no cross-app tracking. So:
 - Collected: Yes · Linked: **Yes** · Tracking: No
 - Purposes: **App Functionality** (Sentry)
 
-### Health & Fitness → Health
+## Do NOT declare Health
 
-- Collected: Yes · Linked: **Yes** · Tracking: No
-- Purposes: **App Functionality**
-- The native health module is off in this build (`HEALTH_ENABLED = false`), but
-  the **PLUS** tile on Home opens the Care portal in an in-app WebView
-  (`app/plus.tsx` → `/care` on admin-web), and the portal logs vitals and keeps
-  health records. Data collected inside a WebView the app hosts counts as
-  collected by the app. Declare it; omitting a real collection is far worse
-  than over-declaring.
+Not collected by the iOS build: the native health module is off
+(`HEALTH_ENABLED = false`) and the PLUS Care portal, the web route to vitals
+and records, is hidden on iOS (`CARE_PORTAL_ENABLED = false`). If either is
+turned on for iOS, add **Health & Fitness → Health** (Linked, App
+Functionality, not tracking) in the same release.
 
 ## Account deletion (required since 2022)
 
