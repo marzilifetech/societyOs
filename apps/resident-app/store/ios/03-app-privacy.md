@@ -16,65 +16,38 @@ advertising and no cross-app tracking. So:
 - Do NOT add the AppTrackingTransparency prompt.
 - Every data type below is "Not used for tracking".
 
-## Data collected — declare each of these
+## Data collected — tick exactly these (verified against build 1.0.14 (1))
 
-### Contact Info → Phone Number
+For EVERY type below: **Linked to the user: Yes · Used for tracking: No ·
+Purpose: App Functionality only.**
 
-- Collected: Yes · Linked to the user: **Yes** · Tracking: No
-- Purposes: **App Functionality** (it is the sign-in identifier)
+| Category     | Data type               | What it is in this app                                             |
+| ------------ | ----------------------- | ------------------------------------------------------------------ |
+| Contact Info | Name                    | Resident's name (profile)                                          |
+| Contact Info | Email Address           | Optional email on the profile                                      |
+| Contact Info | Phone Number            | Sign-in number                                                     |
+| Contact Info | Physical Address        | Society, block and flat                                            |
+| Contact Info | Other User Contact Info | Names/phones of visitors, family, domestic help, emergency contact |
+| Location     | Precise Location        | Attached to an Emergency SOS only, foreground                      |
+| User Content | Photos or Videos        | Visitor photos, ID-document images, complaint photos               |
+| User Content | Customer Support        | Complaints, concierge requests, feedback                           |
+| User Content | Other User Content      | Service-request text, vehicle numbers                              |
+| Identifiers  | User ID                 | Account id                                                         |
+| Identifiers  | Device ID               | Push-notification token                                            |
+| Other Data   | Other Data Types        | Government ID numbers (Aadhaar, PAN) for residency verification    |
 
-### Identifiers → User ID
+## Not collected — leave unticked
 
-- Collected: Yes · Linked: **Yes** · Tracking: No
-- Purposes: **App Functionality**
-- (Account id, and the device push-notification token.)
+Health & Fitness · Financial Info · Sensitive Info (Apple's definition covers
+race, religion, biometrics etc., not ID numbers) · Contacts · Emails or Text
+Messages · Audio · Gameplay · Browsing/Search History · Purchases · Usage Data ·
+**Diagnostics** · Surroundings · Body.
 
-### User Content → Photos or Videos
-
-- Collected: Yes · Linked: **Yes** · Tracking: No
-- Purposes: **App Functionality**
-- (Visitor photos, service-request proof, profile photo.)
-
-### User Content → Other User Content
-
-- Collected: Yes · Linked: **Yes** · Tracking: No
-- Purposes: **App Functionality**
-- (Community posts and comments, complaint and request text.)
-
-### Sensitive Info
-
-- Collected: Yes · Linked: **Yes** · Tracking: No
-- Purposes: **App Functionality**
-- KYC identity documents — Aadhaar, PAN, ID proof, address proof — uploaded for
-  the society office to verify residency. Apple classes government ID as
-  Sensitive Info.
-
-### Location → Precise Location
-
-- Collected: Yes · Linked: **Yes** · Tracking: No
-- Purposes: **App Functionality**
-- ⚠️ In the RESIDENT app, location is captured **only when the user raises an
-  Emergency SOS**, in the foreground. It is not background location and there is
-  no continuous tracking. Say exactly this in the review notes — a Precise
-  Location declaration invites a question about background use.
-
-### Diagnostics → Crash Data
-
-- Collected: Yes · Linked: **Yes** · Tracking: No
-- Purposes: **App Functionality** (Sentry; carries a non-identifying user ref)
-
-### Diagnostics → Performance Data
-
-- Collected: Yes · Linked: **Yes** · Tracking: No
-- Purposes: **App Functionality** (Sentry)
-
-## Do NOT declare Health
-
-Not collected by the iOS build: the native health module is off
-(`HEALTH_ENABLED = false`) and the PLUS Care portal, the web route to vitals
-and records, is hidden on iOS (`CARE_PORTAL_ENABLED = false`). If either is
-turned on for iOS, add **Health & Fitness → Health** (Linked, App
-Functionality, not tracking) in the same release.
+Diagnostics is correct only while Sentry is off: `EXPO_PUBLIC_SENTRY_DSN_RESIDENT`
+is unset for production, so no crash or performance data leaves the device.
+Setting a DSN in a later build means adding Diagnostics → Crash Data and
+Performance Data in the same release. There are no payments (office-only) and no
+analytics SDKs.
 
 ## Account deletion (required since 2022)
 
