@@ -81,5 +81,5 @@ Functionality, not tracking) in the same release.
 Apple requires an in-app route to delete the account for any app that creates
 one. Covered: Settings → **Delete account** exists in the app
 (`app/settings/index.tsx`), and the web page
-`https://main.demjupsqzi02t.amplifyapp.com/account-deletion` also resolves
+`https://society-admin-dev.marzitech.in/account-deletion` also resolves
 (checked 2026-09-28).

@@ -44,12 +44,12 @@ want permanently: it cannot be changed after the first submission.
 
 ## General
 
-| Field              | Value                                                      |
-| ------------------ | ---------------------------------------------------------- |
-| Privacy Policy URL | `https://main.demjupsqzi02t.amplifyapp.com/privacy-policy` |
-| Support URL        | `https://main.demjupsqzi02t.amplifyapp.com/privacy-policy` |
-| Marketing URL      | _(leave blank)_                                            |
-| Copyright          | `2026 Marzi Agetech Private Limited`                       |
+| Field              | Value                                                   |
+| ------------------ | ------------------------------------------------------- |
+| Privacy Policy URL | `https://society-admin-dev.marzitech.in/privacy-policy` |
+| Support URL        | `https://society-admin-dev.marzitech.in/privacy-policy` |
+| Marketing URL      | _(leave blank)_                                         |
+| Copyright          | `2026 Marzi Agetech Private Limited`                    |
 
 ⚠️ `https://marzitech.in/privacy-policy` returns **404** — only the
 amplifyapp.com URL resolves. Apple checks these links during review, so either
