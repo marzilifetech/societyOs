@@ -93,3 +93,7 @@ apps/*/build/
 # fastlane run output (the API key JSON must live outside the repo).
 apps/*/fastlane/report.xml
 apps/*/fastlane/README.md
+
+# App Store Connect API keys: never commit these.
+apps/*/fastlane/keys/
+*.p8

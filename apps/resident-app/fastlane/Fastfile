@@ -1,32 +1,128 @@
 # App Store Connect listing for One Community (iOS). See store/ios/06-build-and-submit.md.
 #
-# Auth: an App Store Connect API key JSON (never commit it):
-#   {"key_id": "...", "issuer_id": "...", "key_filepath": "/abs/path/AuthKey_XXXX.p8"}
-#   ASC_API_KEY_PATH=/path/to/key.json fastlane ios listing
+# Auth: an App Store Connect API key, kept in the git-ignored fastlane/keys/:
+#   fastlane/keys/AuthKey_XXXXXXXXXX.p8
+#   fastlane/keys/asc_api_key.json  {"key_id": "...", "issuer_id": "...", "key_filepath": "/abs/.../AuthKey_XXXX.p8"}
+# issuer_id is omitted for an individual key. Override the JSON path with ASC_API_KEY_PATH.
+#   fastlane ios check | listing | availability
 #
 # Nothing here submits for review; that stays a deliberate click in App Store Connect.
 
 require "fileutils"
+require "json"
 require "tmpdir"
 
 APP_ID = "com.societyos.resident"
 VERSION = "1.0.14"
 STORE_DIR = File.expand_path("../store/ios", __dir__)
 
-def api_key_path!
-  path = ENV["ASC_API_KEY_PATH"]
-  UI.user_error!("Set ASC_API_KEY_PATH to the App Store Connect API key JSON") unless path && File.exist?(path)
-  path
+# Returns the api_key hash fastlane actions accept, and sets the Spaceship token.
+def api_key!
+  path = ENV["ASC_API_KEY_PATH"] || File.expand_path("keys/asc_api_key.json", __dir__)
+  UI.user_error!("App Store Connect API key JSON not found at #{path}") unless File.exist?(path)
+  cfg = JSON.parse(File.read(path))
+  @api_key ||= app_store_connect_api_key(
+    key_id: cfg["key_id"],
+    issuer_id: cfg["issuer_id"],
+    key_filepath: cfg["key_filepath"],
+    in_house: false
+  )
 end
 
 def connect!
-  Spaceship::ConnectAPI.token = Spaceship::ConnectAPI::Token.from(filepath: api_key_path!)
+  api_key!
   app = Spaceship::ConnectAPI::App.find(APP_ID)
   UI.user_error!("No App Store Connect app for #{APP_ID}") unless app
   app
 end
 
 platform :ios do
+  desc "Read-only: confirm the key works and show the app, its versions and builds"
+  lane :check do
+    app = connect!
+    UI.message("App: #{app.name} · #{app.bundle_id} · id #{app.id} · primary locale #{app.primary_locale}")
+    app.get_app_store_versions.each do |v|
+      UI.message("Version #{v.version_string} (#{v.platform}) — #{v.app_store_state}")
+    end
+    Spaceship::ConnectAPI::Build.all(app_id: app.id, sort: "-uploadedDate", limit: 5).each do |b|
+      UI.message("Build #{b.app_version} (#{b.version}) — processing #{b.processing_state}, uploaded #{b.uploaded_date}")
+    end
+  end
+
+  desc "Read-only: print back what App Store Connect holds for the version"
+  lane :verify do
+    app = connect!
+    client = Spaceship::ConnectAPI.client.tunes_request_client
+    v = app.get_edit_app_store_version(platform: Spaceship::ConnectAPI::Platform::IOS)
+    UI.user_error!("No editable iOS version") unless v
+    UI.message("Version #{v.version_string} — #{v.app_store_state} · copyright: #{v.copyright}")
+
+    info = app.fetch_edit_app_info
+    info.get_app_info_localizations.each do |l|
+      UI.message("[#{l.locale}] name=#{l.name.inspect} subtitle=#{l.subtitle.inspect} privacy=#{l.privacy_policy_url}")
+    end
+    cats = client.get("v1/appInfos/#{info.id}", { "include" => "primaryCategory,secondaryCategory" }).body.dig("data", "relationships")
+    UI.message("Categories: #{cats.dig('primaryCategory', 'data', 'id')} / #{cats.dig('secondaryCategory', 'data', 'id')}")
+
+    v.get_app_store_version_localizations.each do |l|
+      UI.message("[#{l.locale}] description=#{l.description.to_s.length} chars · keywords=#{l.keywords.inspect}")
+      UI.message("[#{l.locale}] support=#{l.support_url} · promo=#{l.promotional_text.to_s.length} chars")
+      l.get_app_screenshot_sets.each do |set|
+        names = set.app_screenshots.map(&:file_name)
+        UI.message("Screenshots #{set.screenshot_display_type}: #{names.length} → #{names.join(', ')}")
+      end
+    end
+
+    rd = client.get("v1/appStoreVersions/#{v.id}/appStoreReviewDetail").body["data"]
+    a = rd && rd["attributes"]
+    UI.message(a ? "Review: #{a['contactFirstName']} #{a['contactLastName']} · #{a['contactPhone']} · #{a['contactEmail']} · demo required=#{a['demoAccountRequired']} user=#{a['demoAccountName']} · notes=#{a['notes'].to_s.length} chars" : "Review: none")
+
+    age = client.get("v1/appInfos/#{info.id}/ageRatingDeclaration").body.dig("data", "attributes")
+    UI.message("Age rating answers set: #{age.compact.length} · UGC=#{age['userGeneratedContent']} webAccess=#{age['unrestrictedWebAccess']} medical=#{age['medicalOrTreatmentInformation']}")
+    UI.message("App Store age rating: #{info.app_store_age_rating}")
+
+    bd = client.get("v1/appStoreVersions/#{v.id}/build").body["data"]
+    UI.message("Attached build: #{bd ? "build #{bd.dig('attributes', 'version')} · #{bd.dig('attributes', 'processingState')}" : 'none'}")
+
+    avail = client.get("v1/apps/#{app.id}/appAvailabilityV2").body["data"] rescue nil
+    if avail
+      tas = client.get("v2/appAvailabilities/#{avail['id']}/territoryAvailabilities", { "limit" => 200, "include" => "territory" }).body["data"]
+      on = tas.select { |t| t.dig("attributes", "available") }.map { |t| t.dig("relationships", "territory", "data", "id") }
+      UI.message("Available in: #{on.join(', ')} (#{on.length} of #{tas.length} territories)")
+    end
+    UI.message("Content rights: #{client.get("v1/apps/#{app.id}").body.dig('data', 'attributes', 'contentRightsDeclaration')}")
+  end
+
+  desc "Remove duplicate screenshots (same file name) that an upload retry can leave behind"
+  lane :dedupe_screenshots do
+    app = connect!
+    v = app.get_edit_app_store_version(platform: Spaceship::ConnectAPI::Platform::IOS)
+    v.get_app_store_version_localizations.each do |l|
+      l.get_app_screenshot_sets.each do |set|
+        seen = {}
+        set.app_screenshots.each do |shot|
+          if seen[shot.file_name]
+            shot.delete!
+            UI.message("Deleted duplicate #{shot.file_name} from #{set.screenshot_display_type}")
+          else
+            seen[shot.file_name] = true
+          end
+        end
+      end
+    end
+  end
+
+  desc "Attach the processed build matching VERSION to the editable App Store version"
+  lane :attach_build do
+    app = connect!
+    v = app.get_edit_app_store_version(platform: Spaceship::ConnectAPI::Platform::IOS)
+    build = Spaceship::ConnectAPI::Build.all(app_id: app.id, version: VERSION, sort: "-uploadedDate", limit: 10)
+                                      .find { |b| b.processing_state == "VALID" }
+    UI.user_error!("No processed (VALID) build #{VERSION} yet") unless build
+    v.select_build(build_id: build.id)
+    UI.success("Attached build #{build.app_version} (#{build.version}) to version #{v.version_string}")
+  end
+
   desc "Upload listing text, categories, age rating, review info and screenshots (no binary, no submission)"
   lane :listing do
     app = connect!
@@ -50,7 +146,7 @@ platform :ios do
       end
 
       deliver(
-        api_key_path: api_key_path!,
+        api_key: api_key!,
         app_identifier: APP_ID,
         platform: "ios",
         app_version: VERSION,
@@ -96,6 +192,10 @@ platform :ios do
 
     # Availability: India only, not added automatically to new territories.
     territories = client.get("v1/territories", { "limit" => 200 }).body["data"].map { |t| t["id"] }
+    existing = client.get("v1/apps/#{app.id}/appAvailabilityV2").body["data"] rescue nil
+    if existing
+      UI.message("Availability already set on App Store Connect; leaving it (change it there if needed)")
+    else
     client.post("v2/appAvailabilities", {
       data: {
         type: "appAvailabilities",
@@ -114,5 +214,21 @@ platform :ios do
       end
     })
     UI.success("Availability: India only")
+    end
+
+    # Content rights must be answered before submission. All content comes from
+    # the society office and its residents — no third-party licensed content.
+    client.patch("v1/apps/#{app.id}", {
+      data: { type: "apps", id: app.id, attributes: { contentRightsDeclaration: "DOES_NOT_USE_THIRD_PARTY_CONTENT" } }
+    })
+    UI.success("Content rights: does not use third-party content")
+  end
+
+  desc "Read-only: dump the app's attributes (content rights, kids flag, etc.)"
+  lane :app_attributes do
+    app = connect!
+    client = Spaceship::ConnectAPI.client.tunes_request_client
+    attrs = client.get("v1/apps/#{app.id}").body.dig("data", "attributes")
+    attrs.each { |k, val| UI.message("#{k} = #{val.inspect}") unless val.is_a?(Hash) || val.is_a?(Array) }
   end
 end
