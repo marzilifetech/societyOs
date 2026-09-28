@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '../../src/lib/api';
 import { useTheme } from '../../src/hooks/useTheme';
+import { UGC_ENABLED } from '../../src/lib/features';
 import {
   ScreenHeader,
   Display,
@@ -255,7 +256,8 @@ export default function DishDetailScreen() {
                       </Text>
                       <StarRow rating={r.rating} size={14} />
                     </View>
-                    {r.comment ? (
+                    {/* Other residents' free text is UGC — hidden where UGC_ENABLED is off. */}
+                    {UGC_ENABLED && r.comment ? (
                       <Text style={{ fontSize: t.fontSm, color: t.textSecondary, lineHeight: t.fontSm * 1.5 }}>
                         {r.comment}
                       </Text>

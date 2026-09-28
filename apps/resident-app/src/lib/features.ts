@@ -1,3 +1,5 @@
+import { Platform } from 'react-native';
+
 /**
  * Build-time feature flags.
  *
@@ -21,3 +23,19 @@
  * completed and the Data Safety form declares health-data collection.
  */
 export const HEALTH_ENABLED = false;
+
+/**
+ * UGC_ENABLED gates content one resident writes that other residents can read:
+ * the community feed (posts, comments, reactions) and the free-text comments on
+ * canteen dish reviews. Star ratings are not affected.
+ *
+ * It ships OFF on iOS because App Store Guideline 1.2 requires any app showing
+ * user-generated content to let users report objectionable content and block
+ * abusive users, and neither exists yet. While it is `false` the /community
+ * routes redirect home (see app/community/_layout.tsx) and other residents'
+ * review comments are not rendered, so the App Store "User Generated Content"
+ * age-rating answer can truthfully be No.
+ *
+ * Android is unchanged. Turn it on for iOS only once report + block ship.
+ */
+export const UGC_ENABLED = Platform.OS !== 'ios';
