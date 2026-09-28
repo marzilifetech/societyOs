@@ -248,4 +248,12 @@ export class NoticeController {
   ) {
     return this.noticeService.expressPropertyInterest(user.sub, societyId, id);
   }
+
+  // The resident app's notice detail screen calls this; it was missing, so
+  // every notice opened to "Notice not found". Declared LAST so the static
+  // single-segment routes above (`polls`, `broadcasts`) are matched first.
+  @Get(':id')
+  getNotice(@Param('id', ParseUUIDPipe) id: string, @SocietyId() societyId: string) {
+    return this.noticeService.getNotice(id, societyId);
+  }
 }

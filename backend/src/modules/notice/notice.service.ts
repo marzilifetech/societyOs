@@ -31,6 +31,19 @@ export class NoticeService {
     });
   }
 
+  /** One notice, with the same visibility rules as getNotices (own society, not expired). */
+  async getNotice(id: string, societyId: string) {
+    const notice = await this.prisma.notice.findFirst({
+      where: {
+        id,
+        societyId,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+      },
+    });
+    if (!notice) throw new NotFoundException('Notice not found');
+    return notice;
+  }
+
   async createNotice(societyId: string, data: any) {
     const { category, ...rest } = data;
 
