@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundEx
 import { PrismaService } from '../../prisma/prisma.service';
 import { PushService } from '../../common/notification/push.service';
 import { requireResidentByUserId } from '../../common/utils/resident-context';
+import { formatIstDate } from '../../common/utils/ist-time.util';
 import { CreatePreOrderDto, UpdatePreOrderStatusDto } from './dto/pre-order.dto';
 
 @Injectable()
@@ -91,9 +92,12 @@ export class CanteenService {
   }
 
   async getWeekMenu(societyId: string) {
-    const today = new Date();
-    const nextWeek = new Date();
-    nextWeek.setDate(today.getDate() + 7);
+    // `date` is a @db.Date (midnight UTC). Comparing it to `new Date()` — now,
+    // with a time of day — excluded today's menu for the whole day, so the app
+    // showed "No items today" even when the canteen had published one.
+    const today = new Date(formatIstDate(new Date()));
+    const nextWeek = new Date(today);
+    nextWeek.setUTCDate(today.getUTCDate() + 7);
 
     return this.prisma.canteenMenu.findMany({
       where: { societyId, date: { gte: today, lte: nextWeek } },
