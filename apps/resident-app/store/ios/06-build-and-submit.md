@@ -77,8 +77,11 @@ cd apps/resident-app
 APP_VARIANT=production npx expo prebuild --platform ios --clean
 
 # The release bundle takes EXPO_PUBLIC_API_URL from .env (the production
-# API). Make sure it is not overridden in your shell.
+# API). Make sure it is not overridden in your shell, and clear Metro's cache:
+# it keys cached modules without the env value, so a previous local or
+# simulator build can leak its API URL into the release bundle.
 unset EXPO_PUBLIC_API_URL
+rm -rf "$TMPDIR/metro-cache" "$TMPDIR"/metro-file-map-*
 
 APP_VARIANT=production SENTRY_DISABLE_AUTO_UPLOAD=true \
 xcodebuild -workspace ios/OneCommunity.xcworkspace -scheme OneCommunity \
@@ -90,6 +93,14 @@ xcodebuild -workspace ios/OneCommunity.xcworkspace -scheme OneCommunity \
 xcodebuild -exportArchive -archivePath build/OneCommunity.xcarchive \
   -exportOptionsPlist store/ios/ExportOptions.plist \
   -exportPath build/export -allowProvisioningUpdates
+```
+
+Before uploading, confirm the bundle talks only to production. This should
+print only `https://society-dev.marzitech.in/v1`:
+
+```bash
+strings build/OneCommunity.xcarchive/Products/Applications/OneCommunity.app/main.jsbundle \
+  | grep -oE 'https://[a-z.-]*marzitech\.in/v1|localhost:300[0-9]/v1' | sort -u
 ```
 
 `-allowProvisioningUpdates` lets Xcode create the Marzi distribution

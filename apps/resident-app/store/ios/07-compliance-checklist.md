@@ -43,6 +43,3 @@ exercised in a Release build on the iOS 26 simulator on 2026-09-28.
 ## Known, not a rejection risk, fix after launch
 
 - iOS push is not delivered (APNs token sent to FCM). See 06, "Open items".
-- The SOS screen never receives the live "acknowledged" update. It uses the
-  wrong socket namespace and never joins the society room. The alert itself is
-  sent correctly.

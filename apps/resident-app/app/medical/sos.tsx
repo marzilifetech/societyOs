@@ -53,8 +53,12 @@ import { ErrorBoundary } from '../../src/components/ErrorBoundary';
 let socket: Socket | null = null;
 function getSocket(): Socket {
   if (!socket) {
-    const API_BASE = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
-    socket = io(API_BASE, { transports: ['websocket'], autoConnect: false } as any);
+    // The SOS gateway is the `/sos` namespace at the server root. Connecting to
+    // the API URL itself put the socket in a non-existent `/v1` namespace, so
+    // the acknowledgement never arrived.
+    const apiUrl = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000/v1';
+    const serverUrl = apiUrl.replace(/\/api\/v\d+$/, '').replace(/\/v\d+$/, '');
+    socket = io(`${serverUrl}/sos`, { path: '/socket.io', transports: ['websocket'], autoConnect: false } as any);
   }
   return socket;
 }
@@ -237,17 +241,25 @@ function SosScreenInner() {
   useEffect(() => {
     if (phase !== 'active' || !alertId) return;
     const s = getSocket();
-    const token = useAuthStore.getState().token;
-    if (!token) return;
+    const { token, societyId } = useAuthStore.getState();
+    if (!token || !societyId) return;
     s.auth = { token };
-    s.connect();
+    // The gateway emits acknowledgements to the `society:<id>` room, which a
+    // client only receives after joining. Re-join on every (re)connect.
+    const join = () => s.emit('join-society', societyId);
+    s.on('connect', join);
+    if (s.connected) join();
+    else s.connect();
     const onAck = () => {
       setAcknowledged(true);
       times.current.ackAt = Date.now();
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     };
     s.on(`sos:${alertId}:acknowledged`, onAck);
-    return () => s.off(`sos:${alertId}:acknowledged`, onAck);
+    return () => {
+      s.off('connect', join);
+      s.off(`sos:${alertId}:acknowledged`, onAck);
+    };
   }, [phase, alertId]);
 
   useEffect(
