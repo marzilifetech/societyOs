@@ -55,8 +55,11 @@ export default function SubscriptionsScreen() {
   });
 
   const actionMutation = useMutation({
+    // The API takes PATCH for pause/cancel but POST for resume.
     mutationFn: ({ id, action }: { id: string; action: string }) =>
-      api.patch(`/subscriptions/${id}/${action}`, {}),
+      action === 'resume'
+        ? api.post(`/subscriptions/${id}/resume`, {})
+        : api.patch(`/subscriptions/${id}/${action}`, {}),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['subscriptions'] }),
     onError: () => Alert.alert('Error', 'Action failed. Please try again.'),
   });

@@ -220,15 +220,9 @@ export default function DomesticHelpDetailScreen() {
             </View>
 
             {/* Actions */}
+            {/* Attendance is marked from the list screen; the detail screen had an
+                "Attendance" button pointing at a route that never existed. */}
             <View className="flex-row gap-3">
-              <TouchableOpacity
-                onPress={() => router.push(`/domestic-help/${id}/attendance` as any)}
-                className="flex-1 bg-gray-50 border border-gray-200 rounded-xl py-4 items-center flex-row justify-center gap-2"
-                style={{ minHeight: 56 }}
-              >
-                <Ionicons name="checkmark-circle" size={18} color="#374151" />
-                <Text className="text-gray-700 font-semibold">Attendance</Text>
-              </TouchableOpacity>
               <TouchableOpacity
                 onPress={() =>
                   Alert.alert('Remove', 'Remove this helper?', [

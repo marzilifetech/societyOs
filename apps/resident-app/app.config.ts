@@ -17,8 +17,8 @@ import { ExpoConfig, ConfigContext } from '@expo/config';
  */
 
 // R8 strips classes invoked reflectively unless explicitly kept. These keeps
-// were established in production; removing any of them risks silent payment
-// failures (Razorpay) or broken crash reporting (Sentry).
+// were established in production; removing any of them risks broken crash
+// reporting (Sentry).
 const extraProguardRules = `
 # ─── react-native-reanimated ────────────────────────────────────────────────
 -keep class com.swmansion.reanimated.** { *; }
@@ -37,28 +37,6 @@ const extraProguardRules = `
 -dontwarn io.sentry.android.core.FileIO
 -dontwarn io.sentry.android.core.AnrV2Detector
 -dontwarn io.sentry.core.protocol.SentryNanotrace
-
-# ─── react-native-razorpay (CRITICAL — payment callbacks via reflection) ────
-# Razorpay's PaymentResult listener is invoked reflectively from the native
-# Checkout activity. If R8 renames the method, every payment silently fails
-# at the callback.
--keep class com.razorpay.** { *; }
--keep class com.razorpay.rn.** { *; }
--keepclassmembers class com.razorpay.PaymentResultWithDataListener { *; }
--keepclassmembers class com.razorpay.ExternalWalletListener { *; }
--keepclassmembers class com.razorpay.rn.RazorpayModule {
-  public <init>(com.facebook.react.bridge.ReactApplicationContext);
-  public void open(com.facebook.react.bridge.ReadableMap);
-  public void onActivityResult(int, int, android.content.Intent);
-  public void onPaymentSuccess(java.lang.String, com.razorpay.PaymentData);
-  public void onPaymentError(int, java.lang.String, com.razorpay.PaymentData);
-  public void onExternalWalletSelected(java.lang.String, com.razorpay.PaymentData);
-}
--keep class com.razorpay.CheckoutActivity { *; }
--keep class com.razorpay.PaymentData { *; }
--keep class com.razorpay.Checkout { *; }
--keepclasseswithmembers class com.razorpay.** { public <init>(...); }
--dontwarn com.razorpay.**
 
 # ─── react-native-gesture-handler ───────────────────────────────────────────
 -keep class com.swmansion.gesturehandler.** { *; }

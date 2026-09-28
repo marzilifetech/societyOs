@@ -10,7 +10,7 @@ import { useAuthStore } from '../../src/store/auth.store';
 import { useTheme } from '../../src/hooks/useTheme';
 import { api } from '../../src/lib/api';
 import { Display, RoundCard, IconCircle, PillButton, StatusPill, rd, type RdStatusTone } from '../../src/components/ui';
-import { CARE_PORTAL_ENABLED, HEALTH_ENABLED } from '../../src/lib/features';
+import { CARE_PORTAL_ENABLED, HEALTH_ENABLED, UNFINISHED_SCREENS_ENABLED } from '../../src/lib/features';
 import { openCarePortal } from '../../src/lib/care-portal';
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
@@ -43,7 +43,7 @@ type QuickAction = {
   tint: string;
   soon?: boolean;
 };
-const QUICK_ACTIONS: QuickAction[] = [
+const ALL_QUICK_ACTIONS: QuickAction[] = [
   { icon: 'people', label: 'Visitor', route: '/visitor/new', bg: '#FCEBD8', tint: '#B26B2E' },
   // Opens the web Care portal (doctors, appointments & more) already signed-in
   // via a one-time handoff — see openCarePortal(). Neutrally named on purpose.
@@ -56,7 +56,8 @@ const QUICK_ACTIONS: QuickAction[] = [
     ? [{ icon: 'medkit', label: 'Medical', route: '/medical', bg: '#FCE4E6', tint: '#DC2626' } as QuickAction]
     : []),
   { icon: 'restaurant', label: 'Canteen', route: '/canteen', bg: '#E5EDFB', tint: '#1D4ED8' },
-  { icon: 'card', label: 'Payments', route: '/maintenance', bg: '#E5EDFB', tint: '#2563EB' },
+  // Bills and dues only — maintenance is paid at the society office.
+  { icon: 'receipt', label: 'Maintenance', route: '/maintenance', bg: '#E5EDFB', tint: '#2563EB' },
   { icon: 'chatbubble-ellipses', label: 'Complaints', route: '/complaints', bg: '#FBF1D9', tint: '#B45309' },
   { icon: 'airplane', label: 'Travel', route: '/travel', bg: '#D9F2EA', tint: '#0F9D77', soon: true },
   { icon: 'home', label: 'Property', route: '/property', bg: '#FCE4EC', tint: '#C2185B', soon: true },
@@ -66,6 +67,8 @@ const QUICK_ACTIONS: QuickAction[] = [
   { icon: 'megaphone', label: 'Notices', route: '/(tabs)/notices', bg: '#D9F0F5', tint: '#0E8DA8' },
   { icon: 'stats-chart', label: 'Polls', route: '/(tabs)/notices?tab=polls', bg: '#FBE7EF', tint: '#B0185C' },
 ];
+// "SOON" placeholder tiles are gated by UNFINISHED_SCREENS_ENABLED (off on iOS).
+const QUICK_ACTIONS = ALL_QUICK_ACTIONS.filter((a) => UNFINISHED_SCREENS_ENABLED || !a.soon);
 
 const SR_STATUS: Record<string, { label: string; tone: RdStatusTone }> = {
   PENDING: { label: 'Under Review', tone: 'pending' },

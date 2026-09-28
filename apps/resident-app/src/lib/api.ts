@@ -111,3 +111,20 @@ export const api = {
     return withTimeout(_base.delete<T>(path)).catch(mapError);
   },
 };
+
+/**
+ * Authenticated GET that returns the raw response body, for non-JSON endpoints
+ * such as CSV exports. Opening such a URL in the browser does not work: it
+ * cannot carry the bearer token, so the API answers 401. Callers reach this
+ * from a screen whose JSON queries have already run, so the cached access
+ * token has been refreshed if it needed to be.
+ */
+export async function getText(path: string): Promise<string> {
+  const res = await withTimeout(
+    fetch(`${BASE_URL}${path}`, {
+      headers: _cachedAccess ? { Authorization: `Bearer ${_cachedAccess}` } : {},
+    }),
+  );
+  if (!res.ok) throw new Error(`Request failed (${res.status})`);
+  return res.text();
+}

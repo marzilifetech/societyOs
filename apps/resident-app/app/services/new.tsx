@@ -19,7 +19,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { filterPastAmPmSlots } from '../../src/lib/time-slots';
 import { api } from '../../src/lib/api';
 import { useTheme } from '../../src/hooks/useTheme';
-import { pickImageFromLibrary, uploadToPresignedUrl } from '../../src/lib/photo-upload';
 import {
   ScreenHeader,
   Display,
@@ -86,8 +85,6 @@ export default function NewServiceRequestScreen() {
   const [selectedDayIdx, setSelectedDayIdx] = useState(0);
   const [selectedTime, setSelectedTime] = useState('');
   const [description, setDescription] = useState('');
-  const [photoUri, setPhotoUri] = useState<string | null>(null);
-  const [photoUploading, setPhotoUploading] = useState(false);
   const [createdId, setCreatedId] = useState<string | null>(null);
 
   const category = initialCategory ?? '';
@@ -104,19 +101,6 @@ export default function NewServiceRequestScreen() {
         description: description.trim() || `${category} service request`,
         preferredTime,
       });
-      if (photoUri) {
-        try {
-          setPhotoUploading(true);
-          const presign = await api.post<{ url: string; key: string }>(
-            `/service-requests/${sr.id}/photos/presign`,
-            { contentType: 'image/jpeg' },
-          );
-          await uploadToPresignedUrl(photoUri, presign.url, 'image/jpeg');
-          await api.post(`/service-requests/${sr.id}/photos`, { key: presign.key });
-        } finally {
-          setPhotoUploading(false);
-        }
-      }
       return sr;
     },
     onSuccess: (data) => {
@@ -321,16 +305,12 @@ export default function NewServiceRequestScreen() {
         >
           <PillButton
             label={
-              mutation.isPending
-                ? photoUploading
-                  ? 'Uploading...'
-                  : 'Confirming...'
-                : 'Confirm Booking'
+              mutation.isPending ? 'Confirming...' : 'Confirm Booking'
             }
             tone="dark"
             onPress={() => mutation.mutate()}
-            loading={mutation.isPending || photoUploading}
-            disabled={!isValid || mutation.isPending || photoUploading}
+            loading={mutation.isPending}
+            disabled={!isValid || mutation.isPending}
             accessibilityLabel="Submit service request"
           />
         </View>

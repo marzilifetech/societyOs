@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Platform, Pressable, ScrollView, View } from 'react-native';
 import { Tappable } from '../../src/components/ui/Tappable';
-import { router } from 'expo-router';
+import { Redirect, router } from 'expo-router';
+import { UNFINISHED_SCREENS_ENABLED } from '../../src/lib/features';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Notifications from 'expo-notifications';
@@ -43,7 +44,13 @@ function permMeta(status: string): PermMeta {
   }
 }
 
-export default function NotificationTestScreen() {
+// Gated off on iOS (App Review: placeholder / developer screen) — see src/lib/features.ts.
+export default function NotificationTestScreenGate() {
+  if (!UNFINISHED_SCREENS_ENABLED) return <Redirect href={'/(tabs)' as any} />;
+  return <NotificationTestScreen />;
+}
+
+function NotificationTestScreen() {
   const t = useTheme();
   const { status, refresh } = useNotificationPermission();
   const [note, setNote] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);

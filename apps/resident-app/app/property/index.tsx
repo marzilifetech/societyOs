@@ -1,6 +1,14 @@
+import { Redirect } from 'expo-router';
+import { UNFINISHED_SCREENS_ENABLED } from '../../src/lib/features';
 import { ComingSoonScreen } from '../../src/components/ComingSoonScreen';
 
-export default function PropertyScreen() {
+// Gated off on iOS (App Review: placeholder / developer screen) — see src/lib/features.ts.
+export default function PropertyScreenGate() {
+  if (!UNFINISHED_SCREENS_ENABLED) return <Redirect href={'/(tabs)' as any} />;
+  return <PropertyScreen />;
+}
+
+function PropertyScreen() {
   return (
     <ComingSoonScreen
       title="Property"

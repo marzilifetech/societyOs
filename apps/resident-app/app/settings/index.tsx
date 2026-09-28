@@ -1,11 +1,13 @@
 import { useMemo } from 'react';
-import { ScrollView, View, Text, Pressable, Alert, StyleSheet, Linking } from 'react-native';
+import { ScrollView, View, Text, Pressable, Alert, StyleSheet } from 'react-native';
 import { Tappable } from '../../src/components/ui/Tappable';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useAuthStore } from '../../src/store/auth.store';
+import { api } from '../../src/lib/api';
+import { UNFINISHED_ROUTES, UNFINISHED_SCREENS_ENABLED } from '../../src/lib/features';
 import { APP_NAME, APP_VERSION_LABEL } from '../../src/lib/app-version';
 import { Display, rd } from '../../src/components/ui/redesign';
 
@@ -29,7 +31,7 @@ type Section = { title: string; items: Item[] };
  * Grouping them here mirrors iOS/Android platform settings conventions:
  * short, labelled sections instead of one long undifferentiated list.
  */
-const SECTIONS: Section[] = [
+const ALL_SECTIONS: Section[] = [
   {
     title: 'Account',
     items: [
@@ -104,21 +106,14 @@ const SECTIONS: Section[] = [
     ],
   },
   {
-    title: 'Payments',
+    title: 'Bills & services',
     items: [
-      {
-        icon: 'wallet-outline',
-        label: 'Wallet',
-        route: '/wallet',
-        tint: '#16A34A',
-        description: 'Balance and transaction history',
-      },
       {
         icon: 'card-outline',
         label: 'Maintenance & dues',
         route: '/maintenance',
         tint: '#0EA5E9',
-        description: 'Bills and payment history',
+        description: 'Bills, dues and what you have paid',
       },
       {
         icon: 'repeat-outline',
@@ -156,6 +151,11 @@ const SECTIONS: Section[] = [
     ],
   },
 ];
+// Placeholder / developer rows are gated by UNFINISHED_SCREENS_ENABLED (off on iOS).
+const SECTIONS = ALL_SECTIONS.map((section) => ({
+    ...section,
+  items: section.items.filter((item) => UNFINISHED_SCREENS_ENABLED || !UNFINISHED_ROUTES.has(item.route)),
+})).filter((section) => section.items.length > 0);
 
 const SUPPORT_EMAIL = 'support@marzitech.in';
 
@@ -190,36 +190,34 @@ export default function SettingsScreen() {
   };
 
   /**
-   * There is no self-serve deletion endpoint on the backend yet, so this opens
-   * a pre-filled support request rather than pretending to delete on the spot.
-   * Play policy requires a discoverable in-app route to account deletion; an
-   * assisted flow satisfies that as long as we don't imply it is instant.
+   * Deletes the account on the spot via POST /auth/delete, which anonymises
+   * the resident, removes their KYC documents and revokes the session. App
+   * Store Guideline 5.1.1(v) requires in-app deletion; an email request is only
+   * accepted for highly regulated industries. On failure the user stays signed
+   * in and is told, so we never claim a deletion that did not happen.
    */
   const handleDeleteAccount = () => {
     Alert.alert(
       'Delete account',
-      'This removes your profile, family members, vehicles and documents from your society. ' +
-        'Our support team completes the deletion within 7 days and will confirm by email.',
+      'This permanently deletes your account and removes your profile, family members, vehicles ' +
+        'and documents from your society. This cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Request deletion',
+          text: 'Delete',
           style: 'destructive',
-          onPress: () => {
-            const subject = encodeURIComponent('Account deletion request');
-            const body = encodeURIComponent(
-              `Please delete my ${APP_NAME} account.\n\n` +
-                `Registered phone: ${user?.phone ?? '(add your number)'}\n` +
-                `Name: ${user?.name ?? '(add your name)'}\n`,
-            );
-            Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=${subject}&body=${body}`).catch(
-              () => {
-                Alert.alert(
-                  'No email app found',
-                  `Please email ${SUPPORT_EMAIL} from any device to request deletion.`,
-                );
-              },
-            );
+          onPress: async () => {
+            try {
+              await api.post('/auth/delete', {});
+            } catch {
+              Alert.alert(
+                'Could not delete account',
+                `Please check your connection and try again, or email ${SUPPORT_EMAIL}.`,
+              );
+              return;
+            }
+            await clearAuth();
+            router.replace('/(auth)/society-select');
           },
         },
       ],

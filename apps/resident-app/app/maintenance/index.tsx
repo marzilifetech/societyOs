@@ -1,14 +1,10 @@
-import { ScrollView, View, Text, TouchableOpacity, Alert, ActivityIndicator, RefreshControl, Switch } from 'react-native';
-import { router, useFocusEffect } from 'expo-router';
+import { ScrollView, View, Text, TouchableOpacity, ActivityIndicator, RefreshControl } from 'react-native';
+import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
-import { useState, useEffect, useCallback } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
-
-const AUTO_PAY_KEY = 'maintenance_auto_pay_enabled';
-const PAYMENT_METHOD_KEY = 'maintenance_payment_method_label';
 
 // Soft card shadow matching the redesign-kit RoundCard surface.
 const cardShadow = {
@@ -30,50 +26,6 @@ type Bill = {
 
 export default function MaintenanceScreen() {
   const [refreshing, setRefreshing] = useState(false);
-  const [autoPayEnabled, setAutoPayEnabled] = useState(false);
-  const [autoPayLoaded, setAutoPayLoaded] = useState(false);
-  const [paymentMethodLabel, setPaymentMethodLabel] = useState<string | null>(null);
-
-  const loadPaymentState = useCallback(() => {
-    Promise.all([
-      AsyncStorage.getItem(AUTO_PAY_KEY),
-      AsyncStorage.getItem(PAYMENT_METHOD_KEY),
-    ]).then(([autoVal, methodVal]) => {
-      setAutoPayEnabled(autoVal === 'true');
-      setPaymentMethodLabel(methodVal);
-      setAutoPayLoaded(true);
-    });
-  }, []);
-
-  // Reload when returning from the payment-method screen so the new method/state shows.
-  useFocusEffect(loadPaymentState);
-
-  const handleAutoPayToggle = async (val: boolean) => {
-    if (val && !paymentMethodLabel) {
-      router.push('/maintenance/payment-method' as any);
-      return;
-    }
-    setAutoPayEnabled(val);
-    await AsyncStorage.setItem(AUTO_PAY_KEY, String(val));
-    api.post('/maintenance/auto-pay', { enabled: val }).catch(() => {});
-  };
-
-  const handleRemoveMethod = () => {
-    Alert.alert('Remove payment method?', 'Auto-pay will be turned off until you add a method again.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Remove',
-        style: 'destructive',
-        onPress: async () => {
-          setAutoPayEnabled(false);
-          setPaymentMethodLabel(null);
-          await AsyncStorage.multiRemove([PAYMENT_METHOD_KEY, AUTO_PAY_KEY]);
-          api.post('/maintenance/auto-pay', { enabled: false }).catch(() => {});
-        },
-      },
-    ]);
-  };
-
   const { data: bills, isLoading, isError, refetch } = useQuery<Bill[]>({
     queryKey: ['maintenance-bills'],
     queryFn: () => api.get<Bill[]>('/maintenance/bills'),
@@ -97,7 +49,7 @@ export default function MaintenanceScreen() {
         </TouchableOpacity>
         <View>
           <Text className="text-2xl font-bold text-gray-900">Maintenance</Text>
-          <Text className="text-sm text-gray-500">Society dues and payments</Text>
+          <Text className="text-sm text-gray-500">Your society dues</Text>
         </View>
       </View>
 
@@ -124,72 +76,13 @@ export default function MaintenanceScreen() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await refetch(); setRefreshing(false); }} tintColor="#821A52" />}
           contentContainerStyle={{ padding: 24, paddingBottom: 40 }}
         >
-          {/* Auto-pay toggle */}
-          {autoPayLoaded && (
-            <View
-              className={`rounded-2xl p-4 mb-4 border ${autoPayEnabled ? 'bg-primary-50 border-primary-200' : 'bg-white border-gray-100'}`}
-              style={autoPayEnabled ? undefined : cardShadow}
-            >
-              <View className="flex-row items-center justify-between">
-                <View className="flex-row items-center flex-1 mr-3 gap-3">
-                  <View className={`w-10 h-10 rounded-xl items-center justify-center ${autoPayEnabled ? 'bg-primary-100' : 'bg-gray-100'}`}>
-                    <Ionicons name="wallet" size={20} color={autoPayEnabled ? '#821A52' : '#6B7280'} />
-                  </View>
-                  <View className="flex-1">
-                    <Text className="text-base font-semibold text-gray-900">Auto-Pay</Text>
-                    <Text className={`text-sm mt-0.5 ${autoPayEnabled ? 'text-primary-500' : 'text-gray-500'}`}>
-                      {autoPayEnabled
-                        ? paymentMethodLabel
-                          ? `Auto-pay active — charges ${paymentMethodLabel} on due date`
-                          : 'Auto-pay active — bills will be paid automatically on due date'
-                        : 'Enable to pay bills automatically on the due date'}
-                    </Text>
-                  </View>
-                </View>
-                <Switch
-                  value={autoPayEnabled}
-                  onValueChange={handleAutoPayToggle}
-                  trackColor={{ false: '#E5E7EB', true: '#F3D6E6' }}
-                  thumbColor={autoPayEnabled ? '#821A52' : '#9CA3AF'}
-                />
-              </View>
-
-              {paymentMethodLabel && (
-                <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-primary-200/60">
-                  <View className="flex-row items-center flex-1 mr-3 gap-2">
-                    <Ionicons name="card-outline" size={16} color="#6B7280" />
-                    <Text className="text-sm text-gray-700 flex-1" numberOfLines={1}>
-                      Method: <Text className="font-semibold text-gray-900">{paymentMethodLabel}</Text>
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    onPress={() => router.push('/maintenance/payment-method' as any)}
-                    className="px-2 py-1"
-                    accessibilityRole="button"
-                    accessibilityLabel="Change auto-pay payment method"
-                  >
-                    <Text className="text-primary-500 text-sm font-semibold">Change</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={handleRemoveMethod}
-                    className="px-2 py-1"
-                    accessibilityRole="button"
-                    accessibilityLabel="Remove auto-pay payment method"
-                  >
-                    <Text className="text-red-500 text-sm font-semibold">Remove</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-            </View>
-          )}
-
           {/* Overdue warning */}
           {hasOverdue && (
             <View className="bg-red-50 border border-red-200 rounded-2xl p-4 mb-4 flex-row items-center gap-3">
               <Ionicons name="alert-circle" size={28} color="#DC2626" />
               <View className="flex-1">
                 <Text className="text-red-700 text-base font-semibold">Overdue Payment</Text>
-                <Text className="text-red-600 text-sm mt-0.5">Late fees may apply. Please pay immediately.</Text>
+                <Text className="text-red-600 text-sm mt-0.5">Late fees may apply. Please pay at the society office as soon as possible.</Text>
               </View>
             </View>
           )}
@@ -210,20 +103,19 @@ export default function MaintenanceScreen() {
                   </Text>
                 </View>
               )}
-              <TouchableOpacity
-                onPress={() => router.push('/maintenance/pay' as any)}
-                className="bg-primary-500 rounded-full items-center justify-center py-4 flex-row gap-2"
-                accessibilityRole="button"
-                accessibilityLabel={`Pay maintenance bill of ₹${totalDue.toLocaleString('en-IN')}`}
-              >
-                <Ionicons name="card" size={18} color="#FFFFFF" />
-                <Text className="text-white font-bold text-base">Pay Now</Text>
-              </TouchableOpacity>
+              {/* Payments are made at the society office — the app has no payment
+                  gateway. This states it plainly instead of offering a Pay button. */}
+              <View className="bg-gray-50 rounded-xl p-3 flex-row items-start gap-2">
+                <Ionicons name="business-outline" size={18} color="#821A52" />
+                <Text className="text-gray-600 text-sm flex-1 leading-5">
+                  Please pay at the society office. Your bill is marked paid here once the office records it.
+                </Text>
+              </View>
             </View>
           )}
 
           {/* Nothing outstanding. Without this the screen rendered only the
-              Auto-Pay row above a screenful of blank space, which reads as a
+              header above a screenful of blank space, which reads as a
               failed load rather than good news — the most common state for a
               resident who pays on time. */}
           {pending.length === 0 && (

@@ -50,3 +50,22 @@ export const UGC_ENABLED = Platform.OS !== 'ios';
  * redirects home, and the App Privacy answers need not declare Health data.
  */
 export const CARE_PORTAL_ENABLED = Platform.OS !== 'ios';
+
+/**
+ * UNFINISHED_SCREENS_ENABLED gates screens that are placeholders, do nothing,
+ * or are developer tools. App Review rejects apps that expose "coming soon"
+ * features or controls with no effect (Guidelines 2.1 and 2.2):
+ *
+ * - Travel and Property: `ComingSoonScreen` placeholders ("SOON" tiles on
+ *   Home, plus Settings → My property).
+ * - Settings → Language: saves a choice nothing reads. There is no i18n yet.
+ * - Send a test notification: a push debugging tool that shows the device
+ *   token. On iOS push is not delivered yet, so it would visibly fail.
+ *
+ * Off on iOS: the entry points are hidden and the routes redirect home.
+ * Android is unchanged.
+ */
+export const UNFINISHED_SCREENS_ENABLED = Platform.OS !== 'ios';
+
+/** Routes gated by UNFINISHED_SCREENS_ENABLED, for filtering menu rows. */
+export const UNFINISHED_ROUTES = new Set(['/travel', '/property', '/settings/language', '/settings/notification-test']);

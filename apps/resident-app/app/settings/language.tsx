@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ScrollView, View, Text, TouchableOpacity, Alert } from 'react-native';
-import { router } from 'expo-router';
+import { Redirect, router } from 'expo-router';
+import { UNFINISHED_SCREENS_ENABLED } from '../../src/lib/features';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,7 +19,13 @@ const LANGUAGES = [
   { code: 'bn', label: 'Bengali', native: 'বাংলা' },
 ];
 
-export default function LanguageScreen() {
+// Gated off on iOS (App Review: placeholder / developer screen) — see src/lib/features.ts.
+export default function LanguageScreenGate() {
+  if (!UNFINISHED_SCREENS_ENABLED) return <Redirect href={'/(tabs)' as any} />;
+  return <LanguageScreen />;
+}
+
+function LanguageScreen() {
   const [selected, setSelected] = useState<string>('en');
   const [initial, setInitial] = useState<string>('en');
 

@@ -12,6 +12,7 @@ import {
 } from '../../src/lib/push';
 import { Display, rd } from '../../src/components/ui/redesign';
 import { Tappable } from '../../src/components/ui/Tappable';
+import { UNFINISHED_SCREENS_ENABLED } from '../../src/lib/features';
 import { APP_NAME } from '../../src/lib/app-version';
 
 /**
@@ -155,13 +156,15 @@ export default function NotificationSetupScreen() {
 
         <Text style={styles.sectionTitle}>Still not arriving?</Text>
         <View style={styles.card}>
-          <Row
-            icon="flask-outline"
-            tint="#F59E0B"
-            label="Send a test notification"
-            sub="Confirm alerts reach this phone"
-            onPress={() => router.push('/settings/notification-test' as any)}
-          />
+          {UNFINISHED_SCREENS_ENABLED ? (
+            <Row
+              icon="flask-outline"
+              tint="#F59E0B"
+              label="Send a test notification"
+              sub="Confirm alerts reach this phone"
+              onPress={() => router.push('/settings/notification-test' as any)}
+            />
+          ) : null}
           <Row
             icon="options-outline"
             tint="#7C3AED"

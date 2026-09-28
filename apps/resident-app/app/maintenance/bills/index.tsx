@@ -1,13 +1,10 @@
-import { FlatList, View, Text, TouchableOpacity, ActivityIndicator, RefreshControl, Alert, Linking } from 'react-native';
+import { FlatList, View, Text, TouchableOpacity, ActivityIndicator, RefreshControl, Alert, Share } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import * as SecureStore from 'expo-secure-store';
 import { Ionicons } from '@expo/vector-icons';
-import { api } from '../../../src/lib/api';
-
-const API_BASE = (globalThis as any).process?.env?.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000/v1';
+import { api, getText } from '../../../src/lib/api';
 
 type Bill = {
   id: string;
@@ -28,18 +25,16 @@ const STATUS_META: Record<string, { label: string; bg: string; text: string }> =
 export default function BillsListScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
+  // The export is fetched in-app with the bearer token and handed to the share
+  // sheet. It used to open the URL in the browser, which carries no token (401),
+  // and read the API base via globalThis.process.env, which is not inlined in
+  // release builds, so it pointed at localhost on every real device.
   const handleExport = async () => {
     try {
-      await SecureStore.getItemAsync('auth_token');
-      const url = `${API_BASE}/maintenance/bills/export?format=csv`;
-      const canOpen = await Linking.canOpenURL(url).catch(() => false);
-      if (canOpen) {
-        await Linking.openURL(url);
-      } else {
-        Alert.alert('Export ready', `Open this URL to download your bills CSV:\n\n${url}`);
-      }
+      const csv = await getText('/maintenance/bills/export?format=csv');
+      await Share.share({ title: 'Maintenance bills', message: csv });
     } catch {
-      Alert.alert('Export failed', 'Could not initiate export. Please try again.');
+      Alert.alert('Export failed', 'Could not export your bills. Please try again.');
     }
   };
 

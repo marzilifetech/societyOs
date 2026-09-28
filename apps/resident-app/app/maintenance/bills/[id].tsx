@@ -33,11 +33,6 @@ export default function BillDetailScreen() {
     enabled: !!id,
   });
 
-  const payNow = () => {
-    if (!id) return;
-    router.push(`/maintenance/pay?billId=${id}` as any);
-  };
-
   const downloadReceipt = async () => {
     const paymentId = bill?.payments?.[0]?.id;
     if (!paymentId) {
@@ -150,16 +145,15 @@ export default function BillDetailScreen() {
           </ScrollView>
 
           {isPending ? (
+            // Bills are paid at the society office; the app has no payment gateway.
             <View className="px-6 pb-6">
-              <TouchableOpacity
-                onPress={payNow}
-                accessibilityLabel={`Pay ${bill.amount} rupees`}
-                accessibilityRole="button"
-                className="bg-primary-500 rounded-2xl py-4 items-center flex-row justify-center gap-2"
-              >
-                <Ionicons name="card" size={18} color="#FFFFFF" />
-                <Text className="text-white font-bold text-base">Pay ₹{bill.amount.toLocaleString('en-IN')}</Text>
-              </TouchableOpacity>
+              <View className="bg-gray-50 border border-gray-200 rounded-2xl p-4 flex-row items-start gap-2">
+                <Ionicons name="business-outline" size={18} color="#821A52" />
+                <Text className="text-gray-600 text-sm flex-1 leading-5">
+                  Please pay ₹{bill.amount.toLocaleString('en-IN')} at the society office. This bill is marked
+                  paid here once the office records it.
+                </Text>
+              </View>
             </View>
           ) : bill.status === 'SUCCESS' ? (
             <View className="px-6 pb-6">
