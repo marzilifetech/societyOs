@@ -2,6 +2,10 @@
 
 App: One Community (resident app)
 
+Store name **One Community by Marzi** — "One Community" is taken on the App
+Store. The name under the icon stays "One Community" (`expo.name`); Apple
+accepts a store name that contains the on-device name (Guideline 2.3.8).
+
 Paste each field into App Store Connect. Character counts are Apple's limits;
 every value below is within them.
 
@@ -10,7 +14,7 @@ every value below is within them.
 | Field            | Value                                                    |
 | ---------------- | -------------------------------------------------------- |
 | Platform         | iOS                                                      |
-| Name             | `One Community`                                          |
+| Name             | `One Community by Marzi`                                 |
 | Primary language | English (India) — or English (U.S.) if IN is unavailable |
 | Bundle ID        | `com.societyos.resident`                                 |
 | SKU              | `societyos-resident-ios`                                 |
@@ -31,7 +35,7 @@ want permanently: it cannot be changed after the first submission.
 
 | Field                | Limit | Value                                |
 | -------------------- | ----- | ------------------------------------ |
-| Name                 | 30    | `One Community`                      |
+| Name                 | 30    | `One Community by Marzi`             |
 | Subtitle             | 30    | `Your society, in one app`           |
 | Category (primary)   | —     | Lifestyle                            |
 | Category (secondary) | —     | Utilities                            |
