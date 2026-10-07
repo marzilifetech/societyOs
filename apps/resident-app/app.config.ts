@@ -62,6 +62,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ...(config as ExpoConfig),
     plugins: [
       ...(config.plugins ?? []),
+      // Keeps the fmt C++17 workaround in the Podfile across `expo prebuild`;
+      // without it, iOS builds fail in fmt/format-inl.h on Xcode 26.
+      './plugins/withIosFmtCxx17',
       // Disables expo-splash-screen's androidx system-splash management, which
       // blocks the activity's first draw until hideAsync() lands and hangs the
       // app on the maroon splash (Android 15 / edge-to-edge / New Arch — seen
@@ -69,10 +72,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // `android/` folder, so every prebuild — i.e. every EAS/Play Store build
       // — silently reverted it while local builds kept working. See the plugin
       // for the full rationale.
-      // Keeps the fmt C++17 workaround in the Podfile across `expo prebuild`;
-      // without it, iOS builds fail in fmt/format-inl.h on Xcode 26.
-      './plugins/withIosFmtCxx17',
       './plugins/withAndroidNoSystemSplash',
+      // Stops split screen / pop-up view / fold-unfold (everyday on Samsung)
+      // from destroying the activity and rebooting the whole app.
+      './plugins/withAndroidActivityConfigChanges',
       // Same reasoning: release signing was a hand edit in the gitignored
       // android/ folder, so `expo prebuild` kept reverting local release builds
       // to the debug keystore. Credentials stay out of git — see the plugin.

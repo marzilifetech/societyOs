@@ -77,19 +77,17 @@ function visualFor(n: BannerNotification): BannerVisual {
 export function InAppBanner() {
   const { current, dismiss } = useNotificationBanner();
   const insets = useSafeAreaInsets();
-  const translateY = useRef(new Animated.Value(-200)).current;
+  // Starts IN PLACE. It used to start at -200 and spring in, but on this
+  // app's React Native setup (0.81, old architecture) an Animated value never
+  // reaches a view mounted after its screen's first render — and this banner
+  // only mounts when a notification arrives. It stayed parked off-screen, so a
+  // foreground "visitor at the gate" alert was invisible. A banner that is
+  // simply there is worth more than one that slides. Swipe-up still dismisses
+  // (the dismiss runs from the animation's end callback, which does fire).
+  const translateY = useRef(new Animated.Value(0)).current;
 
-  // Slide in on mount, slide out on dismiss.
   useEffect(() => {
-    if (current) {
-      translateY.setValue(-200);
-      Animated.spring(translateY, {
-        toValue: 0,
-        useNativeDriver: true,
-        bounciness: 6,
-        speed: 14,
-      }).start();
-    }
+    if (current) translateY.setValue(0);
   }, [current, translateY]);
 
   // Swipe up to dismiss.

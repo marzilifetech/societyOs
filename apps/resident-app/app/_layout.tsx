@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { View } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
@@ -40,7 +39,11 @@ import { initSentry, setSentryUser } from '../src/lib/sentry';
 import { ErrorBoundary } from '../src/components/ErrorBoundary';
 import { NetworkBanner } from '../src/components/NetworkBanner';
 import { useRealtime } from '../src/hooks/useRealtime';
+import { useBootGate } from '../src/hooks/useBootGate';
+import { primeReducedMotion } from '../src/hooks/useReducedMotion';
+import { BootScreen } from '../src/components/BootScreen';
 import { startOfflineDrainListener } from '../src/lib/offline-queue';
+import { settleWindowBackground, SETTLE_FALLBACK_MS } from '../src/lib/window-background';
 import '../src/lib/nativewind';
 import './global.css';
 
@@ -50,6 +53,18 @@ initSentry();
 setupNotificationHandler();
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
+
+// Read the stored session NOW, at import time, not from an effect. Every
+// expo-module async call — SecureStore and all nine font loads included —
+// shares ONE native queue. Started from an effect, the session reads were
+// queued behind the fonts, so on a slow phone they sat waiting for fonts and
+// then ran into their own timeout: a signed-in resident shown the sign-in
+// flow. First in the queue, they are never held up by anything cosmetic.
+void useAuthStore.getState().hydrate();
+
+// Known before the first screen renders, so no decorative animation ever
+// starts for a resident who has turned animations off.
+primeReducedMotion();
 
 function RealtimeProvider() {
   useRealtime();
@@ -134,15 +149,8 @@ function ForegroundBannerBridge({
 }
 
 export default function RootLayout() {
-  const hydrate = useAuthStore((s) => s.hydrate);
   const isHydrated = useAuthStore((s) => s.isHydrated);
   const token = useAuthStore((s) => s.token);
-  // Failsafe so the app can NEVER get trapped on the maroon splash. If either
-  // hydration or font loading stalls (device Keystore hiccup, a font asset that
-  // won't decode, etc.), we proceed anyway after a few seconds — fonts fall back
-  // to system defaults and a null token simply routes to the login flow. Far
-  // better than an infinite splash.
-  const [failsafeReady, setFailsafeReady] = useState(false);
 
   const [fontsLoaded, fontError] = useFonts({
     Montserrat_400Regular,
@@ -156,16 +164,25 @@ export default function RootLayout() {
     PlayfairDisplay_700Bold,
   });
 
+  // Hydration bounds itself (HYDRATE_BUDGET_MS) and fonts are only waited on
+  // for FONT_WAIT_MS, so this can't hold the app indefinitely. While it is
+  // closed the BootScreen — a continuation of the native splash with a
+  // spinner once launch is slow — is what the resident sees.
+  const bootReady = useBootGate({ isHydrated, fontsSettled: fontsLoaded || !!fontError });
+
   useEffect(() => {
-    // Hide splash as soon as hydration resolves (success or failure).
-    // ErrorBoundary.componentDidCatch is a second safety net if a render crash
-    // prevents this effect from running.
-    hydrate().finally(() => SplashScreen.hideAsync().catch(() => {}));
     // Deferred — calling NetInfo.addEventListener at module scope freezes the
     // JS bundle under Expo Go SDK 52 + New Architecture (same class of issue
     // documented in useRealtime.ts).
     startOfflineDrainListener();
-  }, [hydrate]);
+  }, []);
+
+  useEffect(() => {
+    // BootScreen hides the native splash as soon as its logo is drawn. This
+    // is the backstop in case that image never reports loading.
+    // ErrorBoundary.componentDidCatch covers a render crash.
+    if (bootReady) SplashScreen.hideAsync().catch(() => {});
+  }, [bootReady]);
 
   useEffect(() => {
     if (isHydrated) {
@@ -173,27 +190,6 @@ export default function RootLayout() {
       setSentryUser(u.user?.id ?? null);
     }
   }, [isHydrated]);
-
-  // Boot failsafe — if we're still gated after 3.5s, log WHY (so logcat reveals
-  // whether hydration or fonts stalled) and force the app past the splash.
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      const st = useAuthStore.getState();
-      if (!st.isHydrated || !fontsLoaded) {
-        console.warn(
-          `[boot] splash failsafe fired — isHydrated=${st.isHydrated} ` +
-            `fontsLoaded=${fontsLoaded} fontError=${fontError ? String(fontError) : 'none'}`,
-        );
-      }
-      // Hide unconditionally, not just from hydrate()'s `.finally`. If that
-      // promise never settles the splash would otherwise be held forever —
-      // which on iOS (and on any Android build where expo-splash-screen still
-      // manages the system splash) means a permanently frozen splash.
-      SplashScreen.hideAsync().catch(() => {});
-      setFailsafeReady(true);
-    }, 3500);
-    return () => clearTimeout(timer);
-  }, [fontsLoaded, fontError]);
 
   // Tap routing for notification responses (warm taps + cold start). Set up
   // once on mount; deep-links into the app via the router.
@@ -221,12 +217,7 @@ export default function RootLayout() {
     return () => sub?.remove();
   }, [isHydrated, token]);
 
-  // Show a solid view matching the splash background — avoids a white flash
-  // while React commits the isHydrated state update. `fontError` counts as
-  // "fonts done" (fall back to system fonts) and the failsafe timer guarantees
-  // we never hang here indefinitely.
-  const bootReady = (isHydrated && (fontsLoaded || !!fontError)) || failsafeReady;
-  if (!bootReady) return <View style={{ flex: 1, backgroundColor: '#6E0043' }} />;
+  if (!bootReady) return <BootScreen />;
 
   return (
     <ErrorBoundary>
@@ -260,11 +251,19 @@ export default function RootLayout() {
  */
 function RootShell({ token }: { token: string | null }) {
   const [deliveryPayload, setDeliveryPayload] = useState<DeliveryPayload | null>(null);
+  // The tabs and sign-in layouts settle the window background as soon as
+  // they are up; this covers a launch that goes straight elsewhere (e.g. a
+  // deep link). See src/lib/window-background.ts.
+  useEffect(() => settleWindowBackground(SETTLE_FALLBACK_MS), []);
   return (
     <>
       <NetworkBanner />
       {token ? <RealtimeProvider /> : null}
-      <StatusBar style="auto" />
+      {/* "dark" (dark icons), not "auto": the app is light-only, but "auto"
+          follows the PHONE's theme, so with dark mode on — common on Samsung —
+          the clock and battery turned white on our white screens and vanished.
+          Screens with a dark header still override this locally. */}
+      <StatusBar style="dark" />
       {/* Asks the OS for notification permission once, just after sign-in, and
           keeps the device token current. Renders nothing.
 
@@ -278,7 +277,16 @@ function RootShell({ token }: { token: string | null }) {
           'immediate' we replace the entire app with the blocker screen —
           even unauthenticated boot can't bypass it. */}
       <AppUpdateGate>
-        <Stack screenOptions={{ headerShown: false }} />
+        <Stack screenOptions={{ headerShown: false }}>
+          {/* The root index only redirects (see app/index.tsx). Entering the
+              app from it is a cut, like any splash → app: the default slide
+              made the first screen visibly arrive a second time right after
+              launch, and a cross-fade would show the window background
+              through both screens. */}
+          <Stack.Screen name="index" options={{ animation: 'none' }} />
+          <Stack.Screen name="(tabs)" options={{ animation: 'none' }} />
+          <Stack.Screen name="(auth)" options={{ animation: 'none' }} />
+        </Stack>
       </AppUpdateGate>
       {/* InAppBanner is mounted last so it overlays every screen, including
           bottom tabs and modals. Delivery pushes are diverted from the

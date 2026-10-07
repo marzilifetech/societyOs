@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
   FlatList,
   Linking,
@@ -17,7 +16,7 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
 import { useTheme } from '../../src/hooks/useTheme';
-import { ThemedText } from '../../src/components/ui';
+import { Skeleton, ThemedText } from '../../src/components/ui';
 import { APP_VERSION_LABEL } from '../../src/lib/app-version';
 
 interface Society {
@@ -178,8 +177,38 @@ export default function SocietySelectScreen() {
       ) : null}
 
       {isLoading ? (
-        <View style={{ alignItems: 'center', paddingTop: t.sectionGap * 2 }}>
-          <ActivityIndicator color={t.accentPrimary} size="large" />
+        // Rows shaped like the society cards, so the list fills in place
+        // instead of a lone spinner giving way to a full list.
+        <View
+          accessible
+          accessibilityRole="progressbar"
+          accessibilityLabel="Loading societies"
+          testID="societies-loading"
+          style={{ paddingHorizontal: t.screenPadding, gap: 12 }}
+        >
+          {[0, 1, 2, 3].map((row) => (
+            <View
+              key={row}
+              style={[
+                {
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  backgroundColor: t.bgPrimary,
+                  borderRadius: t.radiusLg,
+                  paddingHorizontal: t.cardPadding,
+                  paddingVertical: 14,
+                  minHeight: t.touchTargetLg,
+                },
+                cardShadow,
+              ]}
+            >
+              <Skeleton width={48} height={48} radius={t.radiusMd} style={{ marginRight: 14 }} />
+              <View style={{ flex: 1, gap: 8 }}>
+                <Skeleton width="70%" height={14} />
+                <Skeleton width="40%" height={11} />
+              </View>
+            </View>
+          ))}
         </View>
       ) : (
         <FlatList

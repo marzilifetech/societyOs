@@ -66,12 +66,35 @@ function mapError(err: unknown): never {
   throw err;
 }
 
+/**
+ * The auth store, required lazily: auth.store imports this module, so a
+ * top-level import would be a require cycle (with `api` undefined while the
+ * store module initialises). By the time anything here runs, both modules
+ * are fully loaded.
+ */
+function authStore(): typeof import('../store/auth.store')['useAuthStore'] {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require('../store/auth.store').useAuthStore;
+}
+
 async function persistTokens(pair: TokenPair | null) {
   if (pair) {
     _cachedAccess = pair.accessToken;
     _cachedRefresh = pair.refreshToken;
-    await SecureStore.setItemAsync('auth_token', pair.accessToken);
+    // Refresh token FIRST. Refresh tokens are single-use: if the app is
+    // killed between these two writes, a stored NEW refresh token next to an
+    // old access token still recovers on the next launch, while the reverse
+    // left the already-used refresh token on disk, which the server treats
+    // as token reuse and answers by ending the session.
     await SecureStore.setItemAsync('refresh_token', pair.refreshToken);
+    await SecureStore.setItemAsync('auth_token', pair.accessToken);
+    // Keep the auth store in step, so code that reads the token from it
+    // (socket auth, push registration) never holds a rotated-out one.
+    try {
+      authStore().getState().applyRefreshedTokens(pair.accessToken, pair.refreshToken);
+    } catch {
+      /* bookkeeping only — must never turn a good refresh into a failure */
+    }
   } else {
     _cachedAccess = null;
     _cachedRefresh = null;
@@ -81,9 +104,51 @@ async function persistTokens(pair: TokenPair | null) {
   }
 }
 
-function handleUnauthorized() {
-  // Refresh has already been attempted and rejected by the time we get here.
-  router.replace('/(auth)/society-select' as any);
+/**
+ * Guards against a burst of concurrent 401s (Home alone fires half a dozen
+ * queries at launch) each running the sign-out and the navigation.
+ */
+let _signingOut = false;
+
+/**
+ * Terminal session end: the access token was rejected AND the refresh token
+ * could not rescue it (see TERMINAL_401_CODES / tryRefresh in the api-client).
+ * Mirrors staff-app's handler.
+ *
+ * This used to only `router.replace` to the society picker, once PER failed
+ * request, while the session stayed in the store and in SecureStore:
+ *
+ *   1. Every 401 in the launch burst navigated again, so the screen visibly
+ *      loaded several times in a row.
+ *   2. The next cold start read the same dead token back, landed on Home,
+ *      401'd and bounced again — on every launch, until the user signed in.
+ *
+ * Clearing the store makes the end terminal, and navigation happens once.
+ * When there is no session left to end (late 401s from requests that were
+ * already in flight) there is nothing to do, and nowhere new to go.
+ */
+async function handleSessionEnded() {
+  if (_signingOut) return;
+  _signingOut = true;
+  _cachedAccess = null;
+  _cachedRefresh = null;
+  try {
+    const store = authStore();
+    if (!store.getState().token) return;
+    // The server already ended the session, so the logout and device-token
+    // calls could only 401 and delay the user getting back to sign-in.
+    await store.getState().clearAuth({ revokeOnServer: false });
+    try {
+      router.replace('/(auth)/society-select' as any);
+    } catch {
+      // Navigator not mounted yet. Nothing is lost: the store now has no
+      // session, so the root route sends the user to sign-in on its own.
+    }
+  } catch {
+    /* never let sign-out bookkeeping throw into a query */
+  } finally {
+    _signingOut = false;
+  }
 }
 
 const _base = new ApiClient({
@@ -91,7 +156,9 @@ const _base = new ApiClient({
   getToken: () => _cachedAccess,
   getRefreshToken: () => _cachedRefresh,
   setTokens: persistTokens,
-  onUnauthorized: handleUnauthorized,
+  onUnauthorized: () => {
+    void handleSessionEnded();
+  },
 });
 
 export const api = {

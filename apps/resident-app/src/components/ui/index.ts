@@ -8,6 +8,7 @@ export { StatusChip } from './StatusChip';
 export type { StatusTone } from './StatusChip';
 export { RadioCard } from './RadioCard';
 export { EmptyState } from './EmptyState';
+export { Skeleton } from './Skeleton';
 
 // 2026 redesign kit (rounded / serif visual language) — see redesign.tsx
 export {

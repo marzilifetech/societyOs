@@ -238,7 +238,8 @@ describe('setApiToken / loadApiToken', () => {
 });
 
 describe('handleUnauthorized (onUnauthorized callback)', () => {
-  it('redirects to /(auth)/society-select when ApiClient fires onUnauthorized', () => {
+  // Full behaviour (bursts, late 401s, failures) is in session-ended.test.ts.
+  it('ends a live session and redirects to /(auth)/society-select', async () => {
     jest.resetModules();
     let capturedOnUnauthorized: (() => void) | undefined;
     jest.mock('@societyos/api-client', () => ({
@@ -249,9 +250,15 @@ describe('handleUnauthorized (onUnauthorized callback)', () => {
     }));
     jest.mock('expo-router', () => ({ router: { replace: jest.fn() } }));
     jest.mock('expo-secure-store', () => ({ getItemAsync: jest.fn().mockResolvedValue(null), setItemAsync: jest.fn() }));
+    const mockClearAuth = jest.fn().mockResolvedValue(undefined);
+    jest.mock('../src/store/auth.store', () => ({
+      useAuthStore: { getState: () => ({ token: 'live', clearAuth: mockClearAuth }) },
+    }));
     require('../src/lib/api');
     const { router } = require('expo-router');
     capturedOnUnauthorized!();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mockClearAuth).toHaveBeenCalledWith({ revokeOnServer: false });
     expect(router.replace).toHaveBeenCalledWith('/(auth)/society-select');
   });
 });

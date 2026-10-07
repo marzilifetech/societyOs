@@ -2,8 +2,8 @@ import { Platform, Linking } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
-import { router } from 'expo-router';
 import { api } from './api';
+import { navigateWhenAppReady } from './deferred-navigation';
 
 /** Package name, needed as an extra on the Android settings intents below. */
 const applicationId =
@@ -409,7 +409,7 @@ export async function unregisterDeviceToken(): Promise<void> {
 // Tap routing
 // ---------------------------------------------------------------------------
 
-type PushData = {
+export type PushData = {
   type?: string;
   visitId?: string;
   entityId?: string;
@@ -424,59 +424,57 @@ function extractData(response: Notifications.NotificationResponse | null): PushD
 }
 
 /**
- * Route the app in response to a notification tap (no action identifier).
- * `data.type` is the backend category-registry key on current builds
- * (visitor_approvals, deliveries, …); the SCREAMING_SNAKE cases are legacy
- * aliases from older payloads and are kept as fallbacks.
+ * Where a notification tap (no action identifier) should take the resident,
+ * or null for nowhere. `data.type` is the backend category-registry key on
+ * current builds (visitor_approvals, deliveries, …); the SCREAMING_SNAKE cases
+ * are legacy aliases from older payloads and are kept as fallbacks.
  */
-function routeFromData(data: PushData | null) {
-  if (!data) return;
+export function hrefForNotification(data: PushData | null): string | null {
+  if (!data) return null;
   // visitId is the legacy field; entityId is the canonical one going forward.
   const id = (data.entityId as string | undefined) ?? data.visitId;
   switch (data.type) {
     // ── Category registry keys ──────────────────────────────────────────
     case 'visitor_approvals':
     case 'visitors_gate':
-      if (id) router.push(`/visitor/review/${id}` as any);
-      return;
+      return id ? `/visitor/review/${id}` : null;
     case 'deliveries':
-      if (id) router.push(`/visitor/review/${id}` as any);
-      else router.push('/packages' as any);
-      return;
+      return id ? `/visitor/review/${id}` : '/packages';
     case 'complaints':
-      if (id) router.push(`/complaints/${id}` as any);
-      else router.push('/complaints' as any);
-      return;
+      return id ? `/complaints/${id}` : '/complaints';
     case 'notices':
     case 'notices_urgent':
     case 'community':
-      router.push('/(tabs)/notices' as any);
-      return;
+      return '/(tabs)/notices';
     case 'emergency_sos':
-      router.push('/medical/sos' as any);
-      return;
+      return '/medical/sos';
     // ── Legacy aliases ──────────────────────────────────────────────────
     case 'VISITOR_APPROVAL_REQUEST':
     case 'DELIVERY_APPROVAL_REQUEST':
     case 'VISITOR_ARRIVAL':
-      if (id) router.push(`/visitor/review/${id}` as any);
-      return;
+      return id ? `/visitor/review/${id}` : null;
     case 'COMPLAINT_UPDATED':
-      if (data.entityId) router.push(`/complaints/${data.entityId}` as any);
-      return;
+      return data.entityId ? `/complaints/${data.entityId}` : null;
     case 'PACKAGE_ARRIVED':
-      router.push('/packages' as any);
-      return;
+      return '/packages';
     case 'NOTICE_PUBLISHED':
-      router.push('/(tabs)/notices' as any);
-      return;
+      return '/(tabs)/notices';
     case 'SOS_TRIGGERED':
     case 'SOS':
-      router.push('/medical/sos' as any);
-      return;
+      return '/medical/sos';
     default:
-      router.push('/notifications' as any);
+      return '/notifications';
   }
+}
+
+/**
+ * Route the app in response to a notification tap. Deferred until the
+ * signed-in app is on screen — see deferred-navigation.ts for why a cold-start
+ * tap used to be lost.
+ */
+function routeFromData(data: PushData | null) {
+  const href = hrefForNotification(data);
+  if (href) navigateWhenAppReady(href);
 }
 
 /**

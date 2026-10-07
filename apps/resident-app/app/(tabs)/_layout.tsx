@@ -7,6 +7,9 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../../src/lib/api';
 import { useTheme } from '../../src/hooks/useTheme';
 import { PendingVisitorsPill } from '../../src/components/PendingVisitorsPill';
+import { markAppShellReady } from '../../src/lib/deferred-navigation';
+import { isResidentProfileMissing } from '../../src/lib/profile-guard';
+import { settleWindowBackground } from '../../src/lib/window-background';
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
 
@@ -49,17 +52,16 @@ function TabIcon({ focused, name, label }: TabIconProps) {
  * handled by the api-client's onUnauthorized (→ society-select), not here.
  */
 function ResidentProfileGuard() {
-  const { isError, error } = useQuery({
+  const { isError, isFetching, error } = useQuery({
     queryKey: ['residents-me-guard'],
     queryFn: () => api.get('/residents/me'),
     retry: false,
     staleTime: 60_000,
   });
+  const missing = isResidentProfileMissing({ isError, isFetching, error });
   useEffect(() => {
-    if (isError && (error as { status?: number } | null)?.status === 404) {
-      router.replace('/(auth)/pending-approval' as any);
-    }
-  }, [isError, error]);
+    if (missing) router.replace('/(auth)/pending-approval' as any);
+  }, [missing]);
   return null;
 }
 
@@ -67,6 +69,12 @@ export default function TabsLayout() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const bottomPad = Math.max(insets.bottom, 10);
+
+  // The signed-in app is on screen: run any navigation that was waiting for
+  // it, such as the notification tap that launched the app.
+  useEffect(() => markAppShellReady(), []);
+  // A real screen is up: the launch splash behind the app can go.
+  useEffect(() => settleWindowBackground(), []);
   return (
     <>
     <ResidentProfileGuard />

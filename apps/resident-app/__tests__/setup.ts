@@ -41,6 +41,11 @@ jest.mock('expo-location', () => ({
 jest.mock('expo-notifications', () => ({
   getPermissionsAsync: jest.fn().mockResolvedValue({ status: 'granted' }),
   requestPermissionsAsync: jest.fn().mockResolvedValue({ status: 'granted' }),
+  // src/lib/push.ts builds its channel table from these enums at import time,
+  // so every suite that (transitively) imports it needs them to exist.
+  AndroidImportance: { MIN: 1, LOW: 2, DEFAULT: 3, HIGH: 4, MAX: 5 },
+  AndroidNotificationVisibility: { UNKNOWN: 0, PUBLIC: 1, PRIVATE: 2, SECRET: 3 },
+  DEFAULT_ACTION_IDENTIFIER: 'expo.modules.notifications.actions.DEFAULT',
 }));
 
 jest.mock('@tanstack/react-query', () => ({

@@ -9,9 +9,20 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../src/store/auth.store';
 import { useTheme } from '../../src/hooks/useTheme';
 import { api } from '../../src/lib/api';
-import { Display, RoundCard, IconCircle, PillButton, StatusPill, rd, type RdStatusTone } from '../../src/components/ui';
+import {
+  Display,
+  RoundCard,
+  IconCircle,
+  PillButton,
+  Skeleton,
+  StatusPill,
+  rd,
+  type RdStatusTone,
+} from '../../src/components/ui';
+import { Tappable } from '../../src/components/ui/Tappable';
 import { CARE_PORTAL_ENABLED, HEALTH_ENABLED, UNFINISHED_SCREENS_ENABLED } from '../../src/lib/features';
 import { openCarePortal } from '../../src/lib/care-portal';
+import { firstNameOf } from '../../src/lib/names';
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
 
@@ -89,14 +100,25 @@ function fmtWhen(iso?: string): string {
 export default function HomeScreen() {
   const t = useTheme();
   const qc = useQueryClient();
-  useAuthStore((s) => s.user);
+  // Known from sign-in, so the greeting is right on the very first frame
+  // instead of reading "Hi, Resident" and then changing once /residents/me
+  // answers — one of the visible "reloads" of Home at launch.
+  const storedName = useAuthStore((s) => s.user?.name);
   const [refreshing, setRefreshing] = useState(false);
 
-  const { data: profile, refetch: refetchProfile } = useQuery<ResidentProfile>({
+  const {
+    data: profile,
+    isPending: profilePending,
+    refetch: refetchProfile,
+  } = useQuery<ResidentProfile>({
     queryKey: ['resident-profile'],
     queryFn: () => api.get<ResidentProfile>('/residents/me'),
   });
-  const { data: recentRequests, refetch: refetchRequests } = useQuery<ServiceRequestSummary[]>({
+  const {
+    data: recentRequests,
+    isPending: requestsPending,
+    refetch: refetchRequests,
+  } = useQuery<ServiceRequestSummary[]>({
     queryKey: ['my-service-requests'],
     queryFn: () => api.get<ServiceRequestSummary[]>('/service-requests/my'),
   });
@@ -147,7 +169,7 @@ export default function HomeScreen() {
     setRefreshing(false);
   };
 
-  const firstName = profile?.user?.name?.split(' ')[0] ?? 'Resident';
+  const firstName = firstNameOf(profile?.user?.name ?? storedName);
   const flatNo = profile?.flat ? `${profile.flat.block} - ${profile.flat.number}` : '';
   const unreadNotices = notices?.filter((n) => !n.isRead).length ?? 0;
   const activeRequests = (recentRequests ?? []).filter((r) => ACTIVE_STATUSES.includes(r.status)).slice(0, 3);
@@ -180,6 +202,20 @@ export default function HomeScreen() {
                     <Text style={{ color: t.textSecondary, fontSize: t.fontSm }}>Flat {flatNo}</Text>
                     <Ionicons name="chevron-down" size={14} color={t.textMuted} />
                   </TouchableOpacity>
+                ) : null}
+                {!flatNo && profilePending ? (
+                  // Holds the flat line's place until the profile arrives, so
+                  // nothing below jumps when it does. The invisible text gives
+                  // it the real line height at any font size.
+                  <View
+                    style={{ marginTop: 4, justifyContent: 'center' }}
+                    accessibilityElementsHidden
+                    importantForAccessibility="no-hide-descendants"
+                    testID="flat-skeleton"
+                  >
+                    <Text style={{ fontSize: t.fontSm, opacity: 0 }}>Flat A - 000</Text>
+                    <Skeleton width={96} height={12} radius={6} style={{ position: 'absolute' }} />
+                  </View>
                 ) : null}
               </View>
               <TouchableOpacity
@@ -243,15 +279,16 @@ export default function HomeScreen() {
             <Display size="md" style={{ marginBottom: 16 }}>Quick Actions</Display>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 14 }}>
               {QUICK_ACTIONS.map((a) => (
-                <TouchableOpacity
+                <Tappable
                   key={a.label}
                   onPress={() =>
                     a.route === 'care-portal' ? openCarePortal() : router.push(a.route as any)
                   }
-                  activeOpacity={0.85}
                   accessibilityRole="button"
                   accessibilityLabel={a.soon ? `${a.label}, coming soon` : a.label}
                   style={{ width: '31%', alignItems: 'stretch' }}
+                  // A slight press-down: the tile visibly "takes" the tap.
+                  pressedStyle={{ transform: [{ scale: 0.96 }], opacity: 0.9 }}
                 >
                   <RoundCard tone="white" padding={14} style={{ alignItems: 'center', minHeight: 108, justifyContent: 'center', opacity: a.soon ? 0.6 : 1 }}>
                     {a.soon ? (
@@ -272,7 +309,7 @@ export default function HomeScreen() {
                     <IconCircle icon={a.icon} size={48} bg={a.bg} color={a.tint} />
                     <Text style={{ marginTop: 10, fontSize: t.fontSm, fontWeight: '600', color: t.textPrimary, textAlign: 'center' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{a.label}</Text>
                   </RoundCard>
-                </TouchableOpacity>
+                </Tappable>
               ))}
               {/* Invisible spacers pad the final row to a multiple of 3 so that
                   `justifyContent: 'space-between'` left-aligns a partial last
@@ -295,7 +332,28 @@ export default function HomeScreen() {
               ) : null}
             </View>
 
-            {activeRequests.length === 0 ? (
+            {requestsPending ? (
+              // Not "No active requests": saying there are none before we know
+              // is wrong, and the card then visibly changes once they load.
+              // A skeleton the shape of the card that will replace it.
+              <RoundCard tone="white" style={{ alignItems: 'center', paddingVertical: 28 }}>
+                <View
+                  accessible
+                  accessibilityRole="progressbar"
+                  accessibilityLabel="Loading your requests"
+                  testID="active-requests-loading"
+                  style={{ alignItems: 'center' }}
+                >
+                  <Skeleton width={32} height={32} radius={16} />
+                  <View style={{ marginTop: 8, alignItems: 'center', justifyContent: 'center' }}>
+                    {/* Invisible: gives the bar the real line height at any font size. */}
+                    <Text style={{ fontSize: t.fontSm, opacity: 0 }}>Loading requests</Text>
+                    <Skeleton width={140} height={12} radius={6} style={{ position: 'absolute' }} />
+                  </View>
+                </View>
+              </RoundCard>
+            ) : null}
+            {!requestsPending && (activeRequests.length === 0 ? (
               <RoundCard tone="white" style={{ alignItems: 'center', paddingVertical: 28 }}>
                 <Ionicons name="checkmark-circle" size={32} color={rd.green} />
                 <Text style={{ color: t.textMuted, fontSize: t.fontSm, marginTop: 8 }}>No active requests</Text>
@@ -346,7 +404,7 @@ export default function HomeScreen() {
                   );
                 })}
               </View>
-            )}
+            ))}
           </View>
         </ScrollView>
       </SafeAreaView>
