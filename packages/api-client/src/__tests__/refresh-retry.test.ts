@@ -80,13 +80,54 @@ describe('ApiClient.tryRefresh — transient-failure retry', () => {
 
     const client = makeClient(fetchImpl);
 
-    const promise = client.get('/me').catch((e) => e);
+    const promise = client.get<never>('/me').catch((e: Error & { status?: number }) => e);
     await jest.runAllTimersAsync();
-    await promise;
+    const err = await promise;
 
-    // Tokens preserved — user can retry when back online.
+    // Tokens preserved and the user is NOT signed out — being offline while
+    // the access token happens to be expired says nothing about the session.
     expect(setTokens).not.toHaveBeenCalledWith(null);
-    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+    expect(onUnauthorized).not.toHaveBeenCalled();
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toBe('Could not reach the server. Please check your connection.');
+    expect(err.status).toBeUndefined();
+  });
+
+  it('does NOT sign out when the refresh endpoint answers 5xx on every attempt', async () => {
+    const fetchImpl = sequentialFetch([
+      () => jsonResponse(401, { error: { code: 'TOKEN_EXPIRED' } }), // original
+      () => jsonResponse(503, {}),                                    // refresh #1
+      () => jsonResponse(502, {}),                                    // refresh #2
+      () => jsonResponse(500, {}),                                    // refresh #3
+    ]) as unknown as typeof fetch;
+
+    const client = makeClient(fetchImpl);
+
+    const promise = client.get<never>('/me').catch((e: Error & { status?: number }) => e);
+    await jest.runAllTimersAsync();
+    const err = await promise;
+
+    expect(fetchImpl).toHaveBeenCalledTimes(4);
+    expect(setTokens).not.toHaveBeenCalled();
+    expect(onUnauthorized).not.toHaveBeenCalled();
+    expect(err.message).toBe('Could not reach the server. Please check your connection.');
+  });
+
+  it('does NOT sign out when persisting a successful refresh throws', async () => {
+    // e.g. the device keystore refusing the write. The server-side session is
+    // fine, so this must surface as a retryable error, never as a sign-out.
+    setTokens.mockRejectedValueOnce(new Error('keystore unavailable'));
+    const fetchImpl = sequentialFetch([
+      () => jsonResponse(401, { error: { code: 'TOKEN_EXPIRED' } }), // original
+      () => jsonResponse(200, { data: { accessToken: 'new-at', refreshToken: 'new-rt' } }),
+    ]) as unknown as typeof fetch;
+
+    const client = makeClient(fetchImpl);
+
+    const err = await client.get<never>('/me').catch((e: Error & { status?: number }) => e);
+
+    expect(onUnauthorized).not.toHaveBeenCalled();
+    expect(err.message).toBe('Could not reach the server. Please check your connection.');
   });
 
   it('does NOT retry on 4xx — terminal server decision wipes tokens', async () => {

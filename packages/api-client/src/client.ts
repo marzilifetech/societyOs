@@ -66,23 +66,38 @@ const TERMINAL_401_CODES = new Set([
   'SESSION_TIMEOUT',
 ]);
 
+/**
+ * Outcome of a refresh attempt.
+ *
+ * `rejected` means the server definitively refused the refresh token (or
+ * there is none), so the session is over. `unavailable` means the refresh
+ * could not be completed at all (offline, timeouts, the refresh endpoint
+ * returning 5xx on every attempt). The session may be perfectly valid, so
+ * the caller must NOT sign the user out: they get a connection error and can
+ * retry once the network is back.
+ */
+type RefreshOutcome =
+  | { kind: 'refreshed'; accessToken: string }
+  | { kind: 'rejected' }
+  | { kind: 'unavailable' };
+
 export class ApiClient {
   private config: ApiClientConfig;
   /** In-flight refresh promise — concurrent 401s share a single refresh call. */
-  private _refreshInFlight: Promise<string | null> | null = null;
+  private _refreshInFlight: Promise<RefreshOutcome> | null = null;
 
   constructor(config: ApiClientConfig) {
     this.config = config;
   }
 
-  private async tryRefresh(): Promise<string | null> {
-    if (!this.config.getRefreshToken || !this.config.setTokens) return null;
+  private async tryRefresh(): Promise<RefreshOutcome> {
+    if (!this.config.getRefreshToken || !this.config.setTokens) return { kind: 'rejected' };
     if (this._refreshInFlight) return this._refreshInFlight;
 
-    this._refreshInFlight = (async () => {
+    this._refreshInFlight = (async (): Promise<RefreshOutcome> => {
       try {
         const refreshToken = this.config.getRefreshToken!();
-        if (!refreshToken) return null;
+        if (!refreshToken) return { kind: 'rejected' };
         const url = `${this.config.baseUrl}${this.config.refreshUrl ?? '/auth/refresh'}`;
 
         // Up to 3 attempts with backoff so a single network blip or transient
@@ -112,16 +127,18 @@ export class ApiClient {
           if (res.status < 500) break;
         }
 
-        if (!res) {
-          // All attempts failed at the network layer — do NOT wipe tokens.
-          // The refresh JWT is still valid; the user can retry when online.
+        if (!res || res.status >= 500) {
+          // Every attempt failed at the network layer, or the refresh
+          // endpoint kept answering 5xx. Neither says anything about the
+          // session, so do NOT wipe tokens — the refresh JWT is still valid
+          // and the user can retry when the server is reachable again.
           void lastNetworkError;
-          return null;
+          return { kind: 'unavailable' };
         }
         if (!res.ok) {
           // Definitive server rejection — terminal.
           await this.config.setTokens!(null);
-          return null;
+          return { kind: 'rejected' };
         }
         const json: any = await res.json().catch(() => null);
         const data = json?.data ?? json;
@@ -129,14 +146,14 @@ export class ApiClient {
         const newRefresh = data?.refreshToken;
         if (!accessToken || !newRefresh) {
           await this.config.setTokens!(null);
-          return null;
+          return { kind: 'rejected' };
         }
         await this.config.setTokens!({ accessToken, refreshToken: newRefresh });
-        return accessToken;
+        return { kind: 'refreshed', accessToken };
       } catch {
         // Defensive: anything unexpected — don't wipe tokens. Caller will
         // surface the error path; user can retry.
-        return null;
+        return { kind: 'unavailable' };
       } finally {
         this._refreshInFlight = null;
       }
@@ -266,10 +283,18 @@ export class ApiClient {
         isAuth4xx;
 
       if (canRefresh) {
-        const newAccess = await this.tryRefresh();
-        if (newAccess) {
+        const outcome = await this.tryRefresh();
+        if (outcome.kind === 'refreshed') {
           // Retry once with the fresh token.
           return this.request<T>(method, path, body, true);
+        }
+        if (outcome.kind === 'unavailable') {
+          // The session could not be checked, not "the session is over".
+          // Signing out here turned every flaky-network cold start with an
+          // expired access token into a forced logout. Same error the
+          // request path throws when fetch itself fails, so callers treat it
+          // as the connection problem it is.
+          throw new Error('Could not reach the server. Please check your connection.');
         }
       }
 
