@@ -159,7 +159,10 @@ export class AppPolicyService {
     if (platform === 'ios') {
       return 'https://apps.apple.com/'; // overridden once iOS shipping starts
     }
-    const pkg = app === 'staff' ? 'com.societyos.staff' : 'com.societyos.resident';
+    // The Android application IDs, NOT the iOS bundle IDs (com.societyos.*).
+    // The old com.societyos.* listing is a Play 404, so a forced update sent
+    // residents to a dead page with no way past the update wall.
+    const pkg = app === 'staff' ? 'com.marzi.staff' : 'com.marzi.resident';
     return `https://play.google.com/store/apps/details?id=${pkg}`;
   }
 }

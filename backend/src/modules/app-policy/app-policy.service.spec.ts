@@ -89,8 +89,14 @@ describe('AppPolicyService', () => {
       expect(p.minVersionCode).toBe(0);
       expect(p.recommendedVersionCode).toBe(0);
       expect(p.level).toBe('none');
-      // Default URL should be the Play Store deep-link for the right package.
-      expect(p.updateUrl).toMatch(/com\.societyos\.staff/);
+      // Default URL should be the Play Store deep-link for the right package:
+      // the Android application ID, not the iOS bundle ID (a Play 404).
+      expect(p.updateUrl).toBe('https://play.google.com/store/apps/details?id=com.marzi.staff');
+    });
+
+    it('defaults the resident update URL to its real Play listing', async () => {
+      const p = await service.getPolicy('resident', 'android', 5);
+      expect(p.updateUrl).toBe('https://play.google.com/store/apps/details?id=com.marzi.resident');
     });
 
     it('returns level=none for staff app with current=1 and no config', async () => {

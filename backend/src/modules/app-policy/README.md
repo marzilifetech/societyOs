@@ -23,7 +23,7 @@ Public — no auth. Returns:
   "level": "none" | "flexible" | "immediate",
   "minVersionCode": 12,
   "recommendedVersionCode": 14,
-  "updateUrl": "https://play.google.com/store/apps/details?id=com.societyos.resident",
+  "updateUrl": "https://play.google.com/store/apps/details?id=com.marzi.resident",
   "updateMessage": "Critical safety fix included" | null
 }
 ```
