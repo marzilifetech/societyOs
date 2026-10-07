@@ -232,3 +232,56 @@ platform :ios do
     attrs.each { |k, val| UI.message("#{k} = #{val.inspect}") unless val.is_a?(Hash) || val.is_a?(Array) }
   end
 end
+
+# ─── Google Play (Android) ──────────────────────────────────────────────────
+#
+# Auth: a Play service-account key, kept git-ignored at
+#   apps/resident-app/play-store-key.json   (same path eas.json uses)
+# Override with PLAY_STORE_KEY_PATH. Creating the key is a one-off in Play
+# Console → Setup → API access; see store/android/play-upload.md.
+#
+#   fastlane android check                      read-only: key works, version codes per track
+#   fastlane android upload                     signed AAB → internal testing (live for testers)
+#   fastlane android upload track:production    → production as a DRAFT
+#
+# Like the iOS lanes, nothing here rolls out to the public: a production
+# upload stays a draft until someone presses "Start rollout" in Play Console.
+
+PLAY_PACKAGE = "com.marzi.resident"
+PLAY_AAB = File.expand_path("../android/app/build/outputs/bundle/release/app-release.aab", __dir__)
+
+def play_key!
+  path = ENV["PLAY_STORE_KEY_PATH"] || File.expand_path("../play-store-key.json", __dir__)
+  UI.user_error!("Play service-account key not found at #{path} — see store/android/play-upload.md") unless File.exist?(path)
+  path
+end
+
+platform :android do
+  desc "Read-only: confirm the Play key works and show the version codes on each track"
+  lane :check do
+    key = play_key!
+    validate_play_store_json_key(json_key: key)
+    %w[internal alpha beta production].each do |track|
+      codes = google_play_track_version_codes(package_name: PLAY_PACKAGE, track: track, json_key: key)
+      UI.message("#{track}: #{codes.empty? ? '—' : codes.join(', ')}")
+    end
+  end
+
+  desc "Upload the signed release AAB (track: internal by default; production uploads as a draft)"
+  lane :upload do |options|
+    track = (options[:track] || "internal").to_s
+    UI.user_error!("No AAB at #{PLAY_AAB} — build it first (see store/android/play-upload.md)") unless File.exist?(PLAY_AAB)
+    upload_to_play_store(
+      package_name: PLAY_PACKAGE,
+      json_key: play_key!,
+      aab: PLAY_AAB,
+      track: track,
+      release_status: track == "production" ? "draft" : "completed",
+      skip_upload_apk: true,
+      skip_upload_metadata: true,
+      skip_upload_changelogs: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true
+    )
+  end
+end

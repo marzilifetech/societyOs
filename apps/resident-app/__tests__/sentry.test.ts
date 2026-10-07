@@ -95,27 +95,14 @@ describe('initSentry', () => {
     );
   });
 
-  it('builds release from expoConfig.version when SENTRY_RELEASE is absent', () => {
+  it('leaves release to the native SDK when SENTRY_RELEASE is absent', () => {
+    // The SDK then reports the native release (com.marzi.resident@1.0.15+21),
+    // which is the release the build uploads source maps under.
     process.env.SENTRY_DSN_RESIDENT = 'https://key@sentry.io/1';
     const { initSentry } = require('../src/lib/sentry');
     const Sentry = require('@sentry/react-native');
     initSentry();
-    expect(Sentry.init).toHaveBeenCalledWith(
-      expect.objectContaining({ release: 'resident@3.0.0' }),
-    );
-  });
-
-  it('falls back to "0.0.0" in release when expoConfig.version is absent', () => {
-    jest.resetModules();
-    jest.mock('@sentry/react-native', () => ({ init: jest.fn(), captureException: jest.fn(), setUser: jest.fn() }));
-    jest.mock('expo-constants', () => ({ __esModule: true, default: { expoConfig: null } }));
-    process.env.SENTRY_DSN_RESIDENT = 'https://key@sentry.io/1';
-    const { initSentry } = require('../src/lib/sentry');
-    const Sentry = require('@sentry/react-native');
-    initSentry();
-    expect(Sentry.init).toHaveBeenCalledWith(
-      expect.objectContaining({ release: 'resident@0.0.0' }),
-    );
+    expect(Sentry.init.mock.calls[0][0]).not.toHaveProperty('release');
   });
 
   it('beforeSend adds app: resident tag to the event', () => {

@@ -1,6 +1,5 @@
 // Sentry init for resident-app. Imported once from app/_layout.tsx.
 import * as Sentry from '@sentry/react-native';
-import Constants from 'expo-constants';
 
 let initialized = false;
 
@@ -11,13 +10,16 @@ export function initSentry() {
     initialized = true;
     return;
   }
-  const release =
-    process.env.SENTRY_RELEASE ??
-    `resident@${(Constants?.expoConfig?.version as string | undefined) ?? '0.0.0'}`;
+  // Leave `release` unset unless SENTRY_RELEASE overrides it: the SDK then
+  // tags events with the native release (e.g. "com.marzi.resident@1.0.15+21",
+  // dist "21"), which is exactly the release the Sentry Gradle/Xcode build
+  // step uploads source maps under. A hand-made "resident@<version>" never
+  // matched, so every stack trace would have stayed minified.
+  const release = process.env.SENTRY_RELEASE;
 
   Sentry.init({
     dsn,
-    release,
+    ...(release ? { release } : {}),
     enableAutoSessionTracking: true,
     tracesSampleRate: 0.1,
     enableNative: true,
