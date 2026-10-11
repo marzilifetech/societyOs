@@ -126,17 +126,76 @@ export interface Visitor {
 // Service Request
 export type ServiceRequestStatus = 'PENDING' | 'ASSIGNED' | 'IN_PROGRESS' | 'COMPLETED' | 'REJECTED' | 'CLOSED';
 
+/** A flat as the API attaches it to records. */
+export interface FlatBrief {
+  id: string;
+  block: string;
+  number: string;
+  floor?: number | null;
+}
+
+/**
+ * A person attached to someone else's record (task, visitor, alert) — the
+ * backend's PERSON_BRIEF_SELECT: identity and phone, nothing else.
+ */
+export interface PersonBrief {
+  id: string;
+  name: string | null;
+  phone: string | null;
+}
+
+/** A resident attached to someone else's record (backend RESIDENT_BRIEF). */
+export interface ResidentBrief {
+  id: string;
+  userId?: string;
+  flatId?: string;
+  user?: PersonBrief | null;
+  flat?: FlatBrief | null;
+}
+
+export type ServicePhotoPhase = 'BEFORE' | 'DURING' | 'AFTER';
+
+export interface ServicePhoto {
+  id: string;
+  phase: ServicePhotoPhase;
+  url: string;
+  takenAt?: string | null;
+}
+
+/**
+ * A service request / task as the API returns it.
+ *
+ * This used to declare `unit.flatNumber` and `resident.name`, which the API
+ * has never sent, so every staff task screen showed no flat and no name.
+ * Monetary/rating columns are Prisma Decimals and arrive as STRINGS.
+ */
 export interface ServiceRequest {
   id: string;
   category: string;
   description: string;
   status: ServiceRequestStatus;
-  rating?: number;
-  ratingNote?: string;
-  resident?: Pick<Resident, 'id' | 'name' | 'phone'>;
-  unit?: Pick<Unit, 'flatNumber' | 'tower'>;
+  resident?: ResidentBrief | null;
+  assignedStaff?: { id: string; designation?: string | null; user?: PersonBrief | null }[];
+  photos?: ServicePhoto[];
+  scheduledTime?: string | null;
+  preferredTime?: string | null;
+  acceptedAt?: string | null;
+  resolvedAt?: string | null;
+  rejectedReason?: string | null;
+  disputeReason?: string | null;
+  notes?: { id: string; body: string; voiceUrl?: string | null; createdAt: string; staffId: string }[];
+  /** Decimal, serialised as a string (e.g. "4.50"). */
+  rating?: string | null;
+  ratingNote?: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** "B-204" for a flat, or null when there is none. */
+export function flatLabel(flat: Pick<FlatBrief, 'block' | 'number'> | null | undefined): string | null {
+  if (!flat) return null;
+  const label = [flat.block, flat.number].filter(Boolean).join('-');
+  return label || null;
 }
 
 // Complaint

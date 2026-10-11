@@ -1,5 +1,14 @@
 const REQUEST_TIMEOUT_MS = 15_000;
 
+/**
+ * Upper bound on ONE refresh attempt, headers and body. Without it a refresh
+ * stuck on a half-dead mobile connection never settled, and since every 401
+ * waits on the one in-flight refresh, the whole app stopped answering until it
+ * was killed. An abort counts as a network failure: retried, then
+ * 'unavailable' — never a sign-out.
+ */
+const REFRESH_ATTEMPT_TIMEOUT_MS = 10_000;
+
 export interface TokenPair {
   accessToken: string;
   refreshToken: string;
@@ -95,6 +104,7 @@ export class ApiClient {
     if (this._refreshInFlight) return this._refreshInFlight;
 
     this._refreshInFlight = (async (): Promise<RefreshOutcome> => {
+      let abortTimer: ReturnType<typeof setTimeout> | undefined;
       try {
         const refreshToken = this.config.getRefreshToken!();
         if (!refreshToken) return { kind: 'rejected' };
@@ -108,17 +118,25 @@ export class ApiClient {
         const BACKOFF_MS = [0, 400, 1200];
         let res: Response | null = null;
         let lastNetworkError: unknown = null;
+        // The attempt that produced `res` stays armed until its body is read.
+        let controller: AbortController | null = null;
         for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
           if (BACKOFF_MS[attempt] > 0) {
             await new Promise((r) => setTimeout(r, BACKOFF_MS[attempt]));
           }
+          clearTimeout(abortTimer);
+          const attemptController = new AbortController();
+          controller = attemptController;
+          abortTimer = setTimeout(() => attemptController.abort(), REFRESH_ATTEMPT_TIMEOUT_MS);
           try {
             res = await fetch(url, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ refreshToken }),
+              signal: attemptController.signal,
             });
           } catch (err) {
+            // Includes the abort above: a stalled attempt is a network failure.
             lastNetworkError = err;
             res = null;
             continue;
@@ -141,6 +159,8 @@ export class ApiClient {
           return { kind: 'rejected' };
         }
         const json: any = await res.json().catch(() => null);
+        // A body cut off by the abort says nothing about the session.
+        if (controller?.signal.aborted) return { kind: 'unavailable' };
         const data = json?.data ?? json;
         const accessToken = data?.accessToken ?? data?.token;
         const newRefresh = data?.refreshToken;
@@ -155,6 +175,7 @@ export class ApiClient {
         // surface the error path; user can retry.
         return { kind: 'unavailable' };
       } finally {
+        clearTimeout(abortTimer);
         this._refreshInFlight = null;
       }
     })();

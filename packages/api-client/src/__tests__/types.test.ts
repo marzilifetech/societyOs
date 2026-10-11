@@ -47,3 +47,13 @@ describe('isVerifyOtpTotpChallenge', () => {
     }
   });
 });
+
+describe('flatLabel', () => {
+  it('formats block-number and handles missing parts', () => {
+    const { flatLabel } = require('../types');
+    expect(flatLabel({ block: 'B', number: '204' })).toBe('B-204');
+    expect(flatLabel({ block: '', number: '7' })).toBe('7');
+    expect(flatLabel(null)).toBeNull();
+    expect(flatLabel({ block: '', number: '' })).toBeNull();
+  });
+});

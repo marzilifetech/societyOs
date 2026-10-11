@@ -12,6 +12,10 @@ export interface ApiSuccessEnvelope<T> {
 }
 
 function isApiSuccessEnvelope<T>(body: object): body is ApiSuccessEnvelope<T> {
+  // `ApiClient` usually hands over an already-unwrapped value, which can be
+  // null (e.g. "no attendance record today") or a primitive; `in` on those
+  // threw a TypeError, turning an empty state into an error screen.
+  if (body === null || typeof body !== 'object') return false;
   if (!('data' in body && 'meta' in body && 'error' in body)) {
     return false;
   }

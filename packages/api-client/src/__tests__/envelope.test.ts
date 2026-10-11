@@ -62,3 +62,11 @@ describe('unwrapApiEnvelope', () => {
     expect(unwrapApiEnvelope(body)).toEqual(body);
   });
 });
+
+describe('unwrapApiEnvelope on already-unwrapped values', () => {
+  it('passes null and primitives through instead of throwing', () => {
+    expect(unwrapApiEnvelope(null as unknown as object)).toBeNull();
+    expect(unwrapApiEnvelope(42 as unknown as object)).toBe(42);
+    expect(unwrapApiEnvelope('x' as unknown as object)).toBe('x');
+  });
+});

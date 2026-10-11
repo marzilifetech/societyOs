@@ -97,3 +97,6 @@ apps/*/fastlane/README.md
 # App Store Connect API keys: never commit these.
 apps/*/fastlane/keys/
 *.p8
+
+# Keystore credential notes (Expo export) — keep out of git
+*keystore-credentials*.md

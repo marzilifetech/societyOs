@@ -130,6 +130,51 @@ describe('ApiClient.tryRefresh — transient-failure retry', () => {
     expect(err.message).toBe('Could not reach the server. Please check your connection.');
   });
 
+  it('aborts a stalled refresh instead of blocking every request behind it', async () => {
+    // A refresh that never answers (half-dead mobile connection) until aborted.
+    const stalled = (_url: string, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () =>
+          reject(Object.assign(new Error('Aborted'), { name: 'AbortError' })),
+        );
+      });
+    let refreshCalls = 0;
+    const fetchImpl = jest.fn((url: string, init?: RequestInit) => {
+      if (url.endsWith('/auth/refresh')) {
+        refreshCalls++;
+        return refreshCalls <= 3
+          ? stalled(url, init)
+          : Promise.resolve(
+              jsonResponse(200, { data: { accessToken: 'new-at', refreshToken: 'new-rt' } }),
+            );
+      }
+      return Promise.resolve(
+        init?.headers && (init.headers as Record<string, string>).Authorization === 'Bearer new-at'
+          ? jsonResponse(200, { data: { ok: true } })
+          : jsonResponse(401, { error: { code: 'TOKEN_EXPIRED' } }),
+      );
+    }) as unknown as typeof fetch;
+
+    const client = makeClient(fetchImpl);
+
+    const first = client.get<never>('/me').catch((e: Error) => e);
+    await jest.runAllTimersAsync();
+    const err = await first;
+
+    // Every attempt was cut off: a connection error, never a sign-out.
+    expect(refreshCalls).toBe(3);
+    expect(setTokens).not.toHaveBeenCalled();
+    expect(onUnauthorized).not.toHaveBeenCalled();
+    expect((err as Error).message).toBe('Could not reach the server. Please check your connection.');
+
+    // The stuck refresh no longer holds the slot: the next 401 refreshes again.
+    const second = client.get<never>('/me').catch((e: Error) => e);
+    await jest.runAllTimersAsync();
+    await second;
+    expect(refreshCalls).toBe(4);
+    expect(setTokens).toHaveBeenCalledWith({ accessToken: 'new-at', refreshToken: 'new-rt' });
+  });
+
   it('does NOT retry on 4xx — terminal server decision wipes tokens', async () => {
     const fetchImpl = sequentialFetch([
       () => jsonResponse(401, { error: { code: 'TOKEN_EXPIRED' } }), // original

@@ -21,6 +21,11 @@ export type {
   VisitorStatus,
   ServiceRequest,
   ServiceRequestStatus,
+  ServicePhoto,
+  ServicePhotoPhase,
+  FlatBrief,
+  PersonBrief,
+  ResidentBrief,
   Complaint,
   ComplaintStatus,
   Notice,
@@ -41,4 +46,4 @@ export type {
   Appointment,
   DashboardStats,
 } from './types';
-export { isVerifyOtpTotpChallenge } from './types';
+export { isVerifyOtpTotpChallenge, flatLabel } from './types';
