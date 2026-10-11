@@ -42,22 +42,36 @@ export class HousekeepingController {
   ) {
     // A resident who is also a society admin has role=ADMIN, so a bare role
     // check sent them the society-wide list inside their own resident app.
-    // `scope=mine` lets the caller state which view it wants; the default keeps
-    // the previous behaviour so the dashboard is untouched.
-    const wantsMine = scope === 'mine' || (scope == null && user.role === UserRole.RESIDENT);
+    // Residents get their own requests unless the caller asks for the
+    // society's (`scope=all`, sent by the admin console).
+    const wantsMine = scope !== 'all';
     if (wantsMine && (user.isResident || user.role === UserRole.RESIDENT)) {
       return this.housekeepingService.findForResident(user.sub, +page, +limit);
     }
     if (user.role === UserRole.RESIDENT) {
       return this.housekeepingService.findForResident(user.sub, +page, +limit);
     }
+    if (user.role === UserRole.STAFF) {
+      // Staff see their own assignments, not every request in the society.
+      return this.housekeepingService.findForStaff(user.sub, societyId, status, +page, +limit);
+    }
     return this.housekeepingService.findForAdmin(societyId, status, date, +page, +limit);
   }
 
+  /**
+   * The request's own resident, the staff member assigned to it, or an admin.
+   * It was resident-only, so the staff completion screen got a 403 and spun.
+   */
   @Get(':id')
-  @Roles(UserRole.RESIDENT)
-  findOne(@Param('id', ParseEntityIdPipe) id: string, @CurrentUser() user: JwtPayload) {
-    return this.housekeepingService.findOne(id, user.sub);
+  @Roles(UserRole.RESIDENT, UserRole.STAFF, UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  findOne(
+    @Param('id', ParseEntityIdPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+    @SocietyId() societyId: string,
+  ) {
+    if (user.role === UserRole.STAFF) return this.housekeepingService.findOneAsStaff(id, user.sub, societyId);
+    if (user.role === UserRole.RESIDENT) return this.housekeepingService.findOne(id, user.sub);
+    return this.housekeepingService.findOneAsAdmin(id, societyId);
   }
 
   @Patch(':id/cancel')
@@ -80,10 +94,14 @@ export class HousekeepingController {
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.STAFF)
   updateStatus(
     @Param('id', ParseEntityIdPipe) id: string,
+    @CurrentUser() user: JwtPayload,
     @SocietyId() societyId: string,
     @Body() dto: UpdateHousekeepingStatusDto,
   ) {
-    return this.housekeepingService.updateStatus(id, societyId, dto);
+    return this.housekeepingService.updateStatus(id, societyId, dto, {
+      userId: user.sub,
+      role: String(user.role),
+    });
   }
 
   @Get(':id/photo-upload-url')

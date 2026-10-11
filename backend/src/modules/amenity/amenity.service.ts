@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { requireResidentByUserId } from '../../common/utils/resident-context';
 import { PushService } from '../../common/notification/push.service';
@@ -20,6 +20,17 @@ type AmenityScheduleRules = {
   pricePerSlot?: number;
 };
 
+/** The schedule fields stored in `rules` (JSON), or {} when absent/corrupt. */
+function readRules(rules: string | null | undefined): AmenityScheduleRules {
+  if (!rules) return {};
+  try {
+    const parsed = JSON.parse(rules);
+    return parsed && typeof parsed === 'object' ? (parsed as AmenityScheduleRules) : {};
+  } catch {
+    return {};
+  }
+}
+
 function packRules(prev: string | null | undefined, patch: AmenityScheduleRules): string {
   let base: AmenityScheduleRules = {};
   if (prev) {
@@ -33,6 +44,25 @@ function packRules(prev: string | null | undefined, patch: AmenityScheduleRules)
   return JSON.stringify({ ...base, ...patch });
 }
 
+/**
+ * An amenity as the resident app reads it. The model has no `status`, opening
+ * hours, `maxCapacity` or hourly price, so every amenity showed "Unavailable"
+ * and none could be booked. Hours and price come from the schedule the admin
+ * console stores in `rules`.
+ */
+function presentAmenity<T extends { isActive: boolean; capacity: number; rules: string | null }>(amenity: T) {
+  const schedule = readRules(amenity.rules);
+  return {
+    ...amenity,
+    ...schedule,
+    status: amenity.isActive ? 'AVAILABLE' : 'UNAVAILABLE',
+    availableFrom: schedule.openTime ?? '06:00',
+    availableTo: schedule.closeTime ?? '22:00',
+    maxCapacity: amenity.capacity,
+    pricePerHour: schedule.pricePerSlot ?? 0,
+  };
+}
+
 @Injectable()
 export class AmenityService {
   private readonly logger = new Logger(AmenityService.name);
@@ -42,17 +72,27 @@ export class AmenityService {
   ) {}
 
   async findAll(societyId: string) {
-    return this.prisma.amenity.findMany({
+    const rows = await this.prisma.amenity.findMany({
       where: { societyId, isActive: true },
       orderBy: { name: 'asc' },
     });
+    return rows.map(presentAmenity);
   }
 
+  /** One amenity of the caller's society, as residents see it. */
+  async findOneInSociety(id: string, societyId: string) {
+    const amenity = await this.prisma.amenity.findFirst({ where: { id, societyId } });
+    if (!amenity) throw new NotFoundException('Amenity not found');
+    return presentAmenity(amenity);
+  }
+
+  /** Amenities with their schedule unpacked from `rules`, for the admin page. */
   async adminFindAll(societyId: string) {
-    return this.prisma.amenity.findMany({
+    const rows = await this.prisma.amenity.findMany({
       where: { societyId },
       orderBy: { name: 'asc' },
     });
+    return rows.map((a) => ({ ...a, ...readRules(a.rules) }));
   }
 
   async adminCreate(societyId: string, dto: CreateAmenityDto) {
@@ -101,8 +141,8 @@ export class AmenityService {
     return amenity;
   }
 
-  async getAvailability(id: string, date: string) {
-    const amenity = await this.findOne(id);
+  async getAvailability(id: string, date: string, societyId?: string) {
+    const amenity = societyId ? await this.findOneInSociety(id, societyId) : await this.findOne(id);
     const bookings = await this.prisma.amenityBooking.findMany({
       where: {
         amenityId: id,
@@ -114,19 +154,47 @@ export class AmenityService {
     return { amenity, bookedSlots: bookings, date };
   }
 
-  async createBooking(userId: string, dto: CreateAmenityBookingDto) {
+  async createBooking(userId: string, dto: CreateAmenityBookingDto, societyId?: string) {
     const resident = await requireResidentByUserId(this.prisma, userId);
     const amenity = await this.findOne(dto.amenityId);
+    // Booking used to take any society's amenity id.
+    if (societyId && amenity.societyId !== societyId) throw new NotFoundException('Amenity not found');
     if (!amenity.isActive) throw new BadRequestException('Amenity is not active');
+
+    const startSlot = dto.startSlot ?? dto.startTime;
+    const endSlot = dto.endSlot ?? dto.endTime;
+    if (!startSlot || !endSlot || startSlot >= endSlot) {
+      throw new BadRequestException({ code: 'INVALID_SLOT', message: 'Pick a start time before the end time.' });
+    }
+    const date = new Date(dto.date.slice(0, 10));
+    const guestCount = dto.guestCount ?? 1;
+
+    // Nothing stopped two households booking the same slot. Overlapping
+    // bookings may share the amenity up to its capacity (a gym); with no
+    // capacity set, a booking has it to itself (a party hall).
+    const overlapping = await this.prisma.amenityBooking.findMany({
+      where: {
+        amenityId: amenity.id,
+        date,
+        status: { in: [AmenityBookingStatus.PENDING, AmenityBookingStatus.CONFIRMED] },
+        startSlot: { lt: endSlot },
+        endSlot: { gt: startSlot },
+      },
+      select: { guestCount: true },
+    });
+    const taken = overlapping.reduce((sum, b) => sum + b.guestCount, 0);
+    if (overlapping.length && (amenity.capacity <= 0 || taken + guestCount > amenity.capacity)) {
+      throw new ConflictException({ code: 'SLOT_TAKEN', message: 'That time is already booked. Pick another slot.' });
+    }
 
     const booking = await this.prisma.amenityBooking.create({
       data: {
-        amenityId: dto.amenityId,
+        amenityId: amenity.id,
         residentId: resident.id,
-        date: new Date(dto.date),
-        startSlot: dto.startSlot,
-        endSlot: dto.endSlot,
-        guestCount: dto.guestCount ?? 1,
+        date,
+        startSlot,
+        endSlot,
+        guestCount,
       },
       include: { amenity: true },
     });
@@ -149,11 +217,13 @@ export class AmenityService {
 
   async myBookings(userId: string) {
     const resident = await requireResidentByUserId(this.prisma, userId);
-    return this.prisma.amenityBooking.findMany({
+    const rows = await this.prisma.amenityBooking.findMany({
       where: { residentId: resident.id },
       include: { amenity: true },
       orderBy: { createdAt: 'desc' },
     });
+    // `startTime` / `endTime` are the names the app shows.
+    return rows.map((b) => ({ ...b, startTime: b.startSlot, endTime: b.endSlot }));
   }
 
   async cancelBooking(id: string, userId: string) {

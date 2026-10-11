@@ -12,7 +12,11 @@ describe('Visitor gate (VisitorService)', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new VisitorService(prisma);
+    service = new VisitorService(
+      prisma,
+      { emitVisitorArrived: jest.fn() } as any, // VisitorGateway
+      { send: jest.fn().mockResolvedValue({ ok: true }) } as any, // PushService
+    );
   });
 
   const visitorRow = (overrides: Record<string, unknown> = {}) => ({

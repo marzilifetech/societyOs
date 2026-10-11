@@ -67,6 +67,7 @@ export class SocietyService {
     const breakdown = raw.map((item) => {
       const allocated = Number(item?.allocated ?? 0) || 0;
       const spent = Number(item?.spent ?? 0) || 0;
+      const utilisationPct = allocated > 0 ? Math.round((spent / allocated) * 1000) / 10 : 0;
       return {
         // Both spellings are emitted: the dashboard reads `name`, older
         // consumers read `category`.
@@ -75,7 +76,9 @@ export class SocietyService {
         allocated,
         spent,
         remaining: Math.round((allocated - spent) * 100) / 100,
-        utilisationPct: allocated > 0 ? Math.round((spent / allocated) * 1000) / 10 : 0,
+        utilisationPct,
+        // The resident app's name for utilisationPct.
+        percentage: utilisationPct,
       };
     });
     const totalBudget = Number(budget.totalIncome) || 0;
@@ -91,6 +94,8 @@ export class SocietyService {
       totalIncome: totalBudget,
       totalAllocated: Math.round(totalAllocated * 100) / 100,
       totalSpent: Math.round(totalSpent * 100) / 100,
+      // The resident app reads `spent` (it showed "₹undefined" and "NaN%").
+      spent: Math.round(totalSpent * 100) / 100,
       remaining: Math.round((totalBudget - totalSpent) * 100) / 100,
       unallocated: Math.round((totalBudget - totalAllocated) * 100) / 100,
       utilisationPct: totalBudget > 0 ? Math.round((totalSpent / totalBudget) * 1000) / 10 : 0,

@@ -1,4 +1,4 @@
-import { IsString, IsEnum, IsOptional } from 'class-validator';
+import { IsString, IsEnum, IsOptional, MaxLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export enum HelpUrgency {
@@ -26,4 +26,18 @@ export class UpdateHelpRequestStatusDto {
   @ApiProperty({ enum: ['IN_PROGRESS', 'COMPLETED', 'CANCELLED'] })
   @IsEnum(['IN_PROGRESS', 'COMPLETED', 'CANCELLED'])
   status: 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
+}
+
+export class CompleteHelpRequestDto {
+  @ApiPropertyOptional({ description: 'Uploaded photo (media key or https URL)' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1024)
+  photoUrl?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  notes?: string;
 }

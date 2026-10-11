@@ -27,7 +27,11 @@ export class RealtimeController {
 
   @Get('events')
   resync(@Query('since') since: string, @CurrentUser() user: JwtPayload) {
-    const events = this.realtime.getBufferedEvents(since, user.societyId);
+    const events = this.realtime.getBufferedEvents(since, {
+      sub: user.sub,
+      societyId: user.societyId,
+      role: String(user.role),
+    });
     return { since: since || null, events };
   }
 }

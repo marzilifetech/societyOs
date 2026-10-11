@@ -1,5 +1,5 @@
-import { IsString, IsUUID, Length, Matches } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { IsIn, IsOptional, IsString, IsUUID, Length, Matches, MaxLength } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 // Accept a real Indian mobile (10 digits, leading 6-9, optional +91/91 prefix)
 // OR any reserved TEST number in the 11111 series (10 digits, leading 11111 —
@@ -32,6 +32,17 @@ export class VerifyOtpDto {
   @IsString()
   @Length(4, 6)
   otp: string;
+
+  /**
+   * Which app is signing in. Staff and admin sign-ins must be for an existing
+   * account: without this, any unknown number that verified an OTP in the
+   * admin console or staff app was created as a PENDING RESIDENT and landed in
+   * the society's approval queue. Optional so older app builds keep working.
+   */
+  @ApiPropertyOptional({ enum: ['resident', 'staff', 'admin'] })
+  @IsOptional()
+  @IsIn(['resident', 'staff', 'admin'])
+  client?: 'resident' | 'staff' | 'admin';
 }
 
 export class CareHandoffExchangeDto {
@@ -39,4 +50,13 @@ export class CareHandoffExchangeDto {
   @IsString()
   @Length(16, 200)
   token: string;
+}
+
+/** Optional: send the refresh token so sign-out ends that whole session. */
+export class LogoutDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(4096)
+  refreshToken?: string;
 }

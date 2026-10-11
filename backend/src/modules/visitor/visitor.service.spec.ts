@@ -3,8 +3,9 @@
  */
 import { ForbiddenException, GoneException } from '@nestjs/common';
 import { VisitorStatus } from '@prisma/client';
-import { VisitorService } from './visitor.service';
+import { VisitorService, endOfIstDay, istWeekday } from './visitor.service';
 import { makePrismaMock } from '../../../test/helpers/prisma-mock';
+import { RESIDENT_BRIEF } from '../../common/prisma-selects';
 
 describe('VisitorService gate flows', () => {
   const prisma = makePrismaMock(['visitor', 'resident']) as any;
@@ -73,15 +74,46 @@ describe('VisitorService gate flows', () => {
     }
   });
 
-  it('checkIn rejects PENDING approval with VISITOR_PENDING_APPROVAL', async () => {
+  it('checkIn rejects a guard-logged walk-in still PENDING the resident decision', async () => {
     prisma.visitor.findUnique.mockResolvedValue(
-      visitorRow({ approvalStatus: 'PENDING' }),
+      visitorRow({ approvalStatus: 'PENDING', createdByStaffId: 'guard-user' }),
     );
 
     await expect(service.checkIn({ qrToken: 'ABCD1234' }, 'guard-user', 'socA')).rejects.toMatchObject({
       response: expect.objectContaining({ code: 'VISITOR_PENDING_APPROVAL' }),
     });
     expect(prisma.visitor.update).not.toHaveBeenCalled();
+  });
+
+  it("checks in a resident's own pass stored PENDING by older builds (the host approved it)", async () => {
+    prisma.visitor.findUnique.mockResolvedValue(
+      visitorRow({ approvalStatus: 'PENDING', createdByStaffId: null }),
+    );
+    prisma.visitor.update.mockResolvedValue({
+      ...visitorRow({ approvalStatus: 'PENDING' }),
+      status: VisitorStatus.CHECKED_IN,
+    });
+
+    await service.checkIn({ qrToken: 'ABCD1234' }, 'guard-user', 'socA');
+    expect(prisma.visitor.update.mock.calls[0][0].data.status).toBe(VisitorStatus.CHECKED_IN);
+  });
+
+  it('DENY at the gate turns the pass-holder away instead of checking them in', async () => {
+    prisma.visitor.findUnique.mockResolvedValue(visitorRow({ approvalStatus: 'APPROVED' }));
+    prisma.visitor.update.mockResolvedValue({ ...visitorRow({}), status: VisitorStatus.DENIED });
+
+    await service.checkIn({ qrToken: 'ABCD1234', decision: 'DENY' }, 'guard-user', 'socA');
+    expect(prisma.visitor.update.mock.calls[0][0].data).toEqual({ status: VisitorStatus.DENIED });
+  });
+
+  it('DENY refuses a visitor who is already inside', async () => {
+    prisma.visitor.findUnique.mockResolvedValue({
+      ...visitorRow({ approvalStatus: 'APPROVED' }),
+      status: VisitorStatus.CHECKED_IN,
+    });
+    await expect(
+      service.checkIn({ qrToken: 'ABCD1234', decision: 'DENY' }, 'guard-user', 'socA'),
+    ).rejects.toMatchObject({ response: expect.objectContaining({ code: 'DENY_NOT_ALLOWED' }) });
   });
 
   it('checkIn rejects REJECTED approval with VISITOR_REJECTED', async () => {
@@ -245,6 +277,7 @@ describe('VisitorService gate flows', () => {
     prisma.resident.findUnique.mockResolvedValue({
       id: 'r1',
       userId: 'u1',
+      flatId: 'f1',
       flat: { societyId: 'socA' },
       user: {},
     });
@@ -254,7 +287,7 @@ describe('VisitorService gate flows', () => {
 
     expect(rows).toHaveLength(1);
     expect(prisma.visitor.findMany).toHaveBeenCalledWith({
-      where: { residentId: 'r1' },
+      where: { resident: { flatId: 'f1' } },
       orderBy: { createdAt: 'desc' },
       take: 50,
     });
@@ -307,6 +340,20 @@ describe('VisitorService gate flows', () => {
     await expect(service.findById('v1', 'socA', 'u1')).rejects.toMatchObject({
       response: expect.objectContaining({ code: 'VISITOR_NOT_OWNER' }),
     });
+  });
+
+  it('findById lets another member of the same flat act on the visit', async () => {
+    const row = visitorRow({ residentId: 'spouse-res', resident: { flatId: 'f1', flat: { societyId: 'socA' } } });
+    prisma.visitor.findUnique.mockResolvedValue(row);
+    prisma.resident.findUnique.mockResolvedValue({
+      id: 'r1',
+      userId: 'u1',
+      flatId: 'f1',
+      flat: { societyId: 'socA' },
+      user: {},
+    });
+
+    await expect(service.findById('v1', 'socA', 'u1')).resolves.toBe(row);
   });
 
   it('findById returns visitor for owner', async () => {
@@ -421,7 +468,7 @@ describe('VisitorService gate flows', () => {
         approvalStatus: 'APPROVED',
         approvedById: 'guard-user',
       }),
-      include: { resident: { include: { user: true, flat: true } } },
+      include: { resident: RESIDENT_BRIEF },
     });
   });
 
@@ -434,7 +481,43 @@ describe('VisitorService gate flows', () => {
     expect(prisma.visitor.update).toHaveBeenCalledWith({
       where: { id: 'v1' },
       data: { approvalStatus: 'REJECTED' },
-      include: { resident: { include: { user: true, flat: true } } },
+      include: { resident: RESIDENT_BRIEF },
+    });
+  });
+
+  describe('recurring passes', () => {
+    it('lets a recurring visitor back in after checking out', async () => {
+      prisma.visitor.findUnique.mockResolvedValue(
+        visitorRow({ status: VisitorStatus.CHECKED_OUT, isRecurring: true, recurringSchedule: null }),
+      );
+      prisma.visitor.update.mockResolvedValue(visitorRow({ status: VisitorStatus.CHECKED_IN }));
+
+      await service.checkIn({ qrToken: 'ABCD1234' }, 'guard-user', 'socA');
+
+      expect(prisma.visitor.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ status: VisitorStatus.CHECKED_IN, exitAt: null }) }),
+      );
+    });
+
+    it('refuses a recurring pass on a day it is not for', async () => {
+      const notToday = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].filter((d) => d !== istWeekday(new Date()));
+      prisma.visitor.findUnique.mockResolvedValue(
+        visitorRow({ isRecurring: true, recurringSchedule: { days: notToday.slice(0, 1) } }),
+      );
+      await expect(service.checkIn({ qrToken: 'ABCD1234' }, 'guard-user', 'socA')).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'QR_NOT_TODAY' }),
+      });
+    });
+
+    it('still ends a one-off pass at checkout', async () => {
+      prisma.visitor.findUnique.mockResolvedValue(visitorRow({ status: VisitorStatus.CHECKED_OUT }));
+      await expect(service.checkIn({ qrToken: 'ABCD1234' }, 'guard-user', 'socA')).rejects.toBeInstanceOf(GoneException);
+    });
+
+    it('computes IST weekdays and end of day', () => {
+      // 2026-10-11 20:00 UTC is Monday 01:30 in India.
+      expect(istWeekday(new Date('2026-10-11T20:00:00.000Z'))).toBe('Mon');
+      expect(endOfIstDay('2026-10-31').toISOString()).toBe('2026-10-31T18:29:59.999Z');
     });
   });
 });

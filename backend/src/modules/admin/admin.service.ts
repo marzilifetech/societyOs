@@ -1,9 +1,9 @@
-import { Injectable, Logger, NotFoundException, BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, ConflictException, ForbiddenException, ServiceUnavailableException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
-import { PushService } from '../../common/notification/push.service';
-import { UserStatus, UserRole, ComplaintStatus, TravelPauseStatus, InfrastructureType, InfrastructureStatus, EventStatus, IncidentSeverity } from '@prisma/client';
+import { MAX_SCHEDULE_AHEAD_MS, PushService } from '../../common/notification/push.service';
+import { UserStatus, UserRole, ComplaintStatus, TravelPauseStatus, InfrastructureType, InfrastructureStatus, EventStatus, IncidentSeverity, VisitorStatus } from '@prisma/client';
 import { requireLeavePendingInSociety } from '../../common/utils/leave-admin.util';
 import { ComplianceService } from '../compliance/compliance.service';
 import { AuditService } from '../../common/audit/audit.service';
@@ -13,6 +13,8 @@ import { SocietySeederService } from '../society/society-seeder.service';
 import { runWithTenantContext, getTenantContext } from '../../common/tenancy/tenant.context';
 import { asyncPool } from '../../common/utils/async-pool';
 import { MarziMediaSigner } from '../../common/storage/marzi-media-signer.service';
+import { RESIDENT_BRIEF } from '../../common/prisma-selects';
+import { istDateOf } from '../staff/attendance-time';
 
 // Concurrency ceiling for fan-out push delivery — keeps a 1k-resident society
 // from saturating FCM rate limits while still finishing well under a minute.
@@ -415,12 +417,12 @@ export class AdminService {
       data: { status: 'APPROVED', ...(adminNote ? { adminNote } : {}) },
     });
 
-    const resignationTypes = ['RESIGNATION', 'TERMINATION', 'EMERGENCY', 'LEAVE_REQUESTED'];
-    if (resignationTypes.includes(leave.type?.toUpperCase?.() ?? leave.type)) {
-      // requireLeavePendingInSociety above already pinned the leave to this society,
-      // so dismissStaff's composite WHERE will resolve the same tenant.
-      await this.dismissStaff(societyId, leave.staffId);
-    }
+    // Approving a leave approves the leave — nothing else. It used to also
+    // DISMISS the staff member (soft-delete + suspended account) whenever the
+    // type was EMERGENCY or LEAVE_REQUESTED, so approving a guard's emergency
+    // leave silently ended their employment, and it bypassed the
+    // STAFF_DEACTIVATE permission. Dismissal is the explicit, confirmed
+    // "Mark as left" action on the leaves page.
 
     if (leave.staff?.userId) {
       void this.push
@@ -468,18 +470,29 @@ export class AdminService {
   }
 
   async getVisitors(societyId: string, status?: string, date?: string) {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // "Today" / "this week" start at IST midnight, not server (UTC) midnight.
+    const today = istDateOf(new Date());
+    const since =
+      date === 'today'
+        ? new Date(today.getTime() - 330 * 60_000)
+        : date === 'week'
+          ? new Date(today.getTime() - 6 * 24 * 3600_000 - 330 * 60_000)
+          : null;
+    // The page labels EXPECTED visitors "PENDING" (see the mapping below) and
+    // filters by that label; passing "PENDING" straight to Prisma was a 500.
+    // Unknown values are ignored rather than crashing the query.
+    const dbStatus = status === 'PENDING' ? 'EXPECTED' : status;
+    const validStatus = dbStatus && (Object.values(VisitorStatus) as string[]).includes(dbStatus);
 
     const visitors = await this.prisma.visitor.findMany({
       where: {
         resident: { flat: { societyId } },
-        ...(status ? { status: status as any } : {}),
-        ...(date === 'today' ? { createdAt: { gte: today } } : {}),
+        ...(validStatus ? { status: dbStatus as VisitorStatus } : {}),
+        ...(since ? { createdAt: { gte: since } } : {}),
       },
-      include: { resident: { include: { user: true, flat: true } } },
+      include: { resident: RESIDENT_BRIEF },
       orderBy: { createdAt: 'desc' },
-      take: 100,
+      take: 200,
     });
 
     return visitors.map((v) => ({
@@ -1590,6 +1603,8 @@ async createStaff(
       leavingDate: staff.leavingDate ?? null,
       familyDetails: staff.familyDetails ?? null,
       emergencyContact: (staff as any).emergencyContact ?? null,
+      // The shift picker reads this; without it every save looked lost.
+      shiftTemplateId: staff.shiftTemplateId ?? null,
       status: user.status,
       isActive: user.status === UserStatus.ACTIVE && !staff.leavingDate,
       pendingLoansCount,
@@ -1670,10 +1685,22 @@ async createStaff(
       select: { id: true },
     });
     if (!staff) throw new NotFoundException('Staff member not found in this society');
-    return this.prisma.staffDocument.findMany({
+    const docs = await this.prisma.staffDocument.findMany({
       where: { staffMemberId: staffId },
       orderBy: { uploadedAt: 'desc' },
     });
+    // Private uploads store an S3 key, which nobody could open: admins were
+    // asked to verify documents they couldn't see. Hand out a short-lived
+    // signed link instead (15 min, as for resident KYC); `fileKey` keeps the
+    // stored value. If signing fails the key stays, and the page says
+    // "Stored securely" rather than linking to nothing.
+    return Promise.all(
+      docs.map(async (d) => ({
+        ...d,
+        fileKey: d.fileUrl,
+        fileUrl: (await this.mediaSigner.sign(d.fileUrl)) ?? d.fileUrl,
+      })),
+    );
   }
 
   async addStaffDocument(
@@ -2332,64 +2359,86 @@ async createStaff(
     },
   ) {
     const { title, body, targetType, targetIds, scheduledAt } = dto;
-
-    // If scheduled for future, persist as a Notice (reuse existing model)
-    if (scheduledAt) {
-      const at = new Date(scheduledAt);
-      if (at > new Date()) {
-        const notice = await this.prisma.notice.create({
-          data: {
-            societyId,
-            title,
-            body,
-            category: 'PUSH_SCHEDULED',
-            target: targetType === 'BLOCK' ? 'BLOCK' : 'ALL',
-            targetBlock: targetType === 'BLOCK' && targetIds?.[0] ? targetIds[0] : undefined,
-            publishedAt: at,
-          },
-        });
-        return { scheduled: true, noticeId: notice.id, scheduledAt: at };
-      }
-    }
-
-    // Immediate send.
-    // H6: replaced the serial for-loop with a bounded async pool. A serial
-    // send over 500+ residents could stall the request thread for minutes
-    // and any single push failure (transient FCM 5xx) would short-circuit
-    // the rest of the broadcast.
     const notification = { title, body, category: 'admin_push' };
+    const data = { type: 'ADMIN_PUSH' };
 
-    if (targetType === 'ALL') {
-      await this.push.sendToSociety(societyId, null, notification, { type: 'ADMIN_PUSH' });
-      return { scheduled: false, sent: true };
+    const at = scheduledAt ? new Date(scheduledAt) : null;
+    if (at && Number.isNaN(at.getTime())) {
+      throw new BadRequestException({ code: 'INVALID_SCHEDULE', message: 'Pick a valid date and time.' });
+    }
+    const isScheduled = !!at && at.getTime() > Date.now();
+    if (isScheduled && at!.getTime() - Date.now() > MAX_SCHEDULE_AHEAD_MS) {
+      throw new BadRequestException({ code: 'SCHEDULE_TOO_FAR', message: 'Pushes can be scheduled up to 30 days ahead.' });
     }
 
-    let userIds: string[] = [];
-    if (targetType === 'BLOCK' && targetIds?.length) {
-      const residents = await this.prisma.resident.findMany({
-        where: { user: { societyId }, flat: { block: { in: targetIds } } },
-        include: { user: { select: { id: true } } },
-      });
-      userIds = residents.map((r) => r.user.id);
-    } else if (targetType === 'FLAT' && targetIds?.length) {
-      const residents = await this.prisma.resident.findMany({
-        where: { user: { societyId }, flat: { number: { in: targetIds } } },
-        include: { user: { select: { id: true } } },
-      });
-      userIds = residents.map((r) => r.user.id);
-    } else if (targetType === 'INDIVIDUAL' && targetIds?.length) {
-      userIds = targetIds;
-    }
-
-    if (userIds.length === 0) {
+    const userIds = targetType === 'ALL' ? null : await this.resolvePushRecipients(societyId, targetType, targetIds ?? []);
+    if (userIds && userIds.length === 0) {
       return { scheduled: false, sent: 0, failed: 0 };
     }
 
-    const { sent, failed } = await asyncPool(userIds, PUSH_CONCURRENCY, async (uid) => {
-      return this.push.send(uid, notification, { type: 'ADMIN_PUSH' });
-    });
+    if (isScheduled) {
+      const booked = await this.push.scheduleAt(
+        at!,
+        userIds ? { userIds } : { societyId, role: null },
+        notification,
+        data,
+      );
+      if (!booked) {
+        throw new ServiceUnavailableException({
+          code: 'SCHEDULING_UNAVAILABLE',
+          message: "Scheduling isn't available right now. Send it now, or try again later.",
+        });
+      }
+      return { scheduled: true, jobId: booked.jobId, scheduledAt: at, recipients: userIds?.length ?? null };
+    }
 
+    if (!userIds) {
+      await this.push.sendToSociety(societyId, null, notification, data);
+      return { scheduled: false, sent: true };
+    }
+    // Bounded pool: one failing push must not stop the rest of the broadcast.
+    const { sent, failed } = await asyncPool(userIds, PUSH_CONCURRENCY, (uid) =>
+      this.push.send(uid, notification, data),
+    );
     return { scheduled: false, sent, failed };
+  }
+
+  /**
+   * Active users of THIS society matching the target. INDIVIDUAL ids used to be
+   * pushed to as given, so any user id on the platform could be messaged.
+   * Flats accept "A-101" (block-number) or a bare "101".
+   */
+  private async resolvePushRecipients(
+    societyId: string,
+    targetType: 'FLAT' | 'BLOCK' | 'INDIVIDUAL',
+    targetIds: string[],
+  ): Promise<string[]> {
+    const ids = [...new Set(targetIds.map((t) => t.trim()).filter(Boolean))];
+    if (ids.length === 0) return [];
+    const activeInSociety = { societyId, status: { notIn: [UserStatus.INACTIVE, UserStatus.SUSPENDED, UserStatus.REJECTED] } };
+
+    if (targetType === 'INDIVIDUAL') {
+      const users = await this.prisma.user.findMany({ where: { id: { in: ids }, ...activeInSociety }, select: { id: true } });
+      return users.map((u) => u.id);
+    }
+
+    const flatWhere =
+      targetType === 'BLOCK'
+        ? { block: { in: ids } }
+        : {
+            OR: ids.map((id) => {
+              const dash = id.lastIndexOf('-');
+              // "A-101" is block A, flat 101 — or a flat stored as "A-101".
+              return dash > 0
+                ? { OR: [{ block: id.slice(0, dash).trim(), number: id.slice(dash + 1).trim() }, { number: id }] }
+                : { number: id };
+            }),
+          };
+    const residents = await this.prisma.resident.findMany({
+      where: { user: activeInSociety, flat: { societyId, ...flatWhere } },
+      select: { userId: true },
+    });
+    return [...new Set(residents.map((r) => r.userId))];
   }
 
   // ─── M12: SOS Recipients ─────────────────────────────────────────────────────

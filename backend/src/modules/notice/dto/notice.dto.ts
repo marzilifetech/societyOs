@@ -1,4 +1,12 @@
-import { IsString, IsBoolean, IsOptional, IsEnum, IsDateString } from 'class-validator';
+import {
+  IsString,
+  IsBoolean,
+  IsOptional,
+  IsEnum,
+  IsDateString,
+  IsNotEmpty,
+  MaxLength,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export enum BroadcastSeverity {
@@ -8,12 +16,16 @@ export enum BroadcastSeverity {
 }
 
 export class BroadcastDto {
-  @ApiProperty()
+  @ApiProperty({ maxLength: 120 })
   @IsString()
+  @IsNotEmpty()
+  @MaxLength(120)
   title: string;
 
-  @ApiProperty()
+  @ApiProperty({ maxLength: 2000 })
   @IsString()
+  @IsNotEmpty()
+  @MaxLength(2000)
   message: string;
 
   @ApiProperty({ enum: BroadcastSeverity })

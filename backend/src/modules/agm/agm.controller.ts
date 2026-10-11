@@ -24,8 +24,8 @@ export class AgmController {
   constructor(private agmService: AgmService) {}
 
   @Get('meetings')
-  getMeetings(@SocietyId() societyId: string) {
-    return this.agmService.getMeetings(societyId);
+  getMeetings(@SocietyId() societyId: string, @CurrentUser() user: JwtPayload) {
+    return this.agmService.getMeetings(societyId, user.sub);
   }
 
   @Post('meetings')
@@ -57,8 +57,8 @@ export class AgmController {
 
   @Get('meetings/:id')
   @Roles(UserRole.RESIDENT, UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  getMeeting(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
-    return this.agmService.getMeetingWithMyVotes(id, user.sub);
+  getMeeting(@Param('id') id: string, @CurrentUser() user: JwtPayload, @SocietyId() societyId: string) {
+    return this.agmService.getMeetingWithMyVotes(id, user.sub, societyId);
   }
 
   @Post('resolutions')

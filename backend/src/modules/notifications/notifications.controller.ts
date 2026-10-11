@@ -18,6 +18,17 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
 import { NotificationAudience } from '../../common/notification/notification-categories';
 
+/**
+ * The audience whose categories a user manages. Only the two apps have a
+ * preferences screen, so someone who lives in the society manages resident
+ * categories even when their role is ADMIN (a committee member could not mute
+ * resident categories before).
+ */
+function audienceOf(user: Pick<JwtPayload, 'role' | 'isResident'>): NotificationAudience {
+  if (user.role !== 'STAFF' && user.isResident) return 'resident';
+  return roleToAudience(user.role);
+}
+
 /** Maps a user role to the audience used by the notification category registry. */
 function roleToAudience(role: string): NotificationAudience {
   switch (role) {
@@ -61,12 +72,12 @@ export class NotificationsController {
 
   @Get('preferences')
   getPreferences(@CurrentUser() user: JwtPayload) {
-    return this.preferences.getPreferences(user.sub, roleToAudience(user.role));
+    return this.preferences.getPreferences(user.sub, audienceOf(user));
   }
 
   @Patch('preferences')
   setPreferences(@CurrentUser() user: JwtPayload, @Body() dto: UpdatePreferencesDto) {
-    return this.preferences.setPreferences(user.sub, roleToAudience(user.role), dto.prefs);
+    return this.preferences.setPreferences(user.sub, audienceOf(user), dto.prefs);
   }
 
   /** Server-backed inbox — last 20 notifications for the current user. */

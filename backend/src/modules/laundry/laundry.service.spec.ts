@@ -125,3 +125,21 @@ describe('LaundryService — cross-tenant guard', () => {
     });
   });
 });
+
+describe('laundry booking helpers', () => {
+  const { laundryTypeOf, istInstant, istParts } = require('./laundry.service');
+
+  it("maps the resident app's service names", () => {
+    expect(laundryTypeOf('WASH_AND_DRY')).toBe('WASH_AND_FOLD');
+    expect(laundryTypeOf('Dry')).toBe('DRY_CLEAN');
+    expect(laundryTypeOf('IRON')).toBe('IRON_ONLY');
+    expect(laundryTypeOf('WASH_AND_IRON')).toBe('WASH_AND_IRON');
+    expect(() => laundryTypeOf('BLEACH')).toThrow();
+  });
+
+  it('reads slots in IST, not server time', () => {
+    const at = istInstant('2026-10-12', '09:00');
+    expect(at.toISOString()).toBe('2026-10-12T03:30:00.000Z');
+    expect(istParts(at)).toEqual({ date: '2026-10-12', time: '09:00' });
+  });
+});

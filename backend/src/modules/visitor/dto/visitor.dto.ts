@@ -62,6 +62,16 @@ export class CheckInVisitorDto {
   @ApiProperty()
   @IsString()
   qrToken: string;
+
+  /**
+   * The guard's call at the gate. Optional — absent means ALLOW. Staff app
+   * builds up to 1.0.5 always send it, and with `forbidNonWhitelisted` an
+   * undeclared field rejected EVERY QR check-in with a 400.
+   */
+  @ApiPropertyOptional({ enum: ['ALLOW', 'DENY'] })
+  @IsOptional()
+  @IsIn(['ALLOW', 'DENY'])
+  decision?: 'ALLOW' | 'DENY';
 }
 
 export class VisitorDecisionDto {

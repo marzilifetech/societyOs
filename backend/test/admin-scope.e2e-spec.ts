@@ -14,6 +14,7 @@ function buildService(prisma: any) {
     { dataExport: jest.fn() } as any, // ComplianceService
     { write: jest.fn() } as any, // AuditService
     { buildDefaultConfig: jest.fn(() => ({})) } as any, // SocietySeederService
+    { sign: jest.fn().mockResolvedValue(null), signMany: jest.fn().mockResolvedValue({}) } as any, // MarziMediaSigner
   );
 }
 

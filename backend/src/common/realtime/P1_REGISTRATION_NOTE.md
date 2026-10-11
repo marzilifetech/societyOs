@@ -13,8 +13,8 @@ import { TranslateModule } from './modules/translate/translate.module';
 
 Append to the `imports: []` list:
 
-- `SmsModule`     (global; backs OTP + push SMS-fallback)
-- `PushModule`    (global; depends on SmsModule)
+- `SmsModule` (global; backs OTP + push SMS-fallback)
+- `PushModule` (global; depends on SmsModule)
 - `TranslateModule`
 
 `RealtimeModule` is already imported and now also exports the new
@@ -45,7 +45,7 @@ HIGH-severity event. No further action required from P2.
 `POST /v1/sos/:id/cancel` is registered and delegates to `SosService.flagFalseAlarm`
 (same as `PATCH .../false-alarm`). Clients may use either verb.
 
-**Resident cancel:** only while status is `ACTIVE`, within `SOS_CANCEL_WINDOW_MS` (default **5000** ms), and only for alerts they triggered (`residentId` = JWT `sub`).
+**Resident cancel / resolve:** only for alerts they triggered (`residentId` = JWT `sub`), while the alert is `ACTIVE` or `ACKNOWLEDGED`. (The old 5-second `SOS_CANCEL_WINDOW_MS` limit was removed in Oct 2026: the app counts down before sending, and after 5 s a resident could no longer call off a false alarm. The env var is still accepted but unused.)
 
 **Admin / super-admin / staff:** may mark false alarm while status is `ACTIVE` or `ACKNOWLEDGED` (no time window).
 
@@ -54,9 +54,9 @@ HIGH-severity event. No further action required from P2.
 ## Auth shape changes (clients)
 
 - `/auth/verify-otp` now returns `{ token, accessToken, refreshToken, user }`.
-Old `token` field preserved for backwards compat.
+  Old `token` field preserved for backwards compat.
 - `/auth/refresh` now expects `{ refreshToken }` in body (legacy bearer header
-fallback retained).
+  fallback retained).
 - New endpoints: `/auth/logout`, `/auth/delete`, `/auth/2fa/{setup,verify,disable}`.
 
 ## Error codes introduced (P2)

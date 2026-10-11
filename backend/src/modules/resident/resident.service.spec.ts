@@ -103,8 +103,8 @@ describe('ResidentService.getEmergencyContacts', () => {
 
   it('returns the society config emergencyContacts array', async () => {
     const contacts = [
-      { id: 'ec-medical', label: 'Medical', phone: '+91-108' },
-      { id: 'ec-security', label: 'Security', phone: '+91-9000000099' },
+      { id: 'c1', label: 'Main Gate', phone: '+91 98100 00002' },
+      { id: 'c2', label: 'Manager', phone: '+91 98100 00001' },
     ];
     mockPrisma.society.findUnique.mockResolvedValue({
       id: 'soc-1',
@@ -113,6 +113,22 @@ describe('ResidentService.getEmergencyContacts', () => {
 
     const result = await service.getEmergencyContacts('soc-1');
     expect(result).toEqual({ id: 'soc-1', config: { emergencyContacts: contacts } });
+  });
+
+  it('drops the placeholder numbers older builds seeded (they do not connect)', async () => {
+    mockPrisma.society.findUnique.mockResolvedValue({
+      id: 'soc-1',
+      config: {
+        emergencyContacts: [
+          { id: 'ec-security', label: 'Security', phone: '+91-9000000099' },
+          { id: 'ec-medical', label: 'Medical', phone: '+91-108' },
+          { id: 'real', label: 'Gate', phone: '+91 98100 00002' },
+        ],
+      },
+    });
+
+    const result = await service.getEmergencyContacts('soc-1');
+    expect(result.config.emergencyContacts).toEqual([{ id: 'real', label: 'Gate', phone: '+91 98100 00002' }]);
   });
 
   it('returns empty array when society has no emergencyContacts configured', async () => {

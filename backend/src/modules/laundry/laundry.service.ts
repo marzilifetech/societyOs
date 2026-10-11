@@ -1,4 +1,4 @@
-import { Injectable, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
 import { LaundryBookingStatus, LaundryType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { S3Service } from '../../common/storage/s3.service';
@@ -7,6 +7,36 @@ import { requireResidentByUserId } from '../../common/utils/resident-context';
 import { requireOwnedById } from '../../common/tenancy/require-owned.util';
 
 const SLOTS = ['09:00', '11:00', '14:00', '16:00'];
+const IST_OFFSET_MS = 330 * 60 * 1000;
+
+/** The resident app's service names → LaundryType. */
+const TYPE_ALIASES: Record<string, LaundryType> = {
+  WASH: LaundryType.WASH_AND_FOLD,
+  WASH_AND_DRY: LaundryType.WASH_AND_FOLD,
+  DRY: LaundryType.DRY_CLEAN,
+  IRON: LaundryType.IRON_ONLY,
+};
+
+export function laundryTypeOf(input: string): LaundryType {
+  const key = input.trim().toUpperCase().replace(/[^A-Z]+/g, '_');
+  if ((Object.values(LaundryType) as string[]).includes(key)) return key as LaundryType;
+  const aliased = TYPE_ALIASES[key];
+  if (!aliased) throw new BadRequestException({ code: 'LAUNDRY_TYPE_INVALID', message: 'Pick a laundry service.' });
+  return aliased;
+}
+
+/** YYYY-MM-DD + HH:MM in India → the instant. */
+export function istInstant(date: string, time: string): Date {
+  const [y, mo, d] = date.split('-').map(Number);
+  const [h, mi] = time.split(':').map(Number);
+  return new Date(Date.UTC(y, mo - 1, d, h, mi) - IST_OFFSET_MS);
+}
+
+/** An instant as India's calendar date and HH:MM. */
+export function istParts(at: Date): { date: string; time: string } {
+  const iso = new Date(at.getTime() + IST_OFFSET_MS).toISOString();
+  return { date: iso.slice(0, 10), time: iso.slice(11, 16) };
+}
 
 @Injectable()
 export class LaundryService {
@@ -88,11 +118,13 @@ export class LaundryService {
     return this.s3.getPresignedUploadUrl(`laundry/${id}`, contentType);
   }
 
+  /** Free slots on an IST calendar day (the server runs in UTC). */
   async getSlots(societyId: string, date: string) {
-    const start = new Date(date);
-    start.setHours(0, 0, 0, 0);
-    const end = new Date(date);
-    end.setHours(23, 59, 59, 999);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date ?? '')) {
+      throw new BadRequestException({ code: 'DATE_REQUIRED', message: 'Pick a date.' });
+    }
+    const start = istInstant(date, '00:00');
+    const end = new Date(start.getTime() + 24 * 60 * 60 * 1000 - 1);
 
     const bookings = await this.prisma.laundryBooking.findMany({
       where: {
@@ -103,13 +135,7 @@ export class LaundryService {
       select: { scheduledAt: true },
     });
 
-    const bookedTimes = new Set(
-      bookings.map((b) => {
-        const h = b.scheduledAt.getHours().toString().padStart(2, '0');
-        const m = b.scheduledAt.getMinutes().toString().padStart(2, '0');
-        return `${h}:${m}`;
-      }),
-    );
+    const bookedTimes = new Set(bookings.map((b) => istParts(b.scheduledAt).time));
 
     return SLOTS.filter((s) => !bookedTimes.has(s));
   }
@@ -117,28 +143,37 @@ export class LaundryService {
   async createBooking(
     userId: string,
     societyId: string,
-    dto: { scheduledAt: string; type: LaundryType; itemCount: number; notes?: string },
+    dto: { scheduledAt?: string; date?: string; timeSlot?: string; type: string; itemCount?: number; notes?: string },
   ) {
     const resident = await requireResidentByUserId(this.prisma, userId);
-    return this.prisma.laundryBooking.create({
+    const scheduledAt = dto.scheduledAt
+      ? new Date(dto.scheduledAt)
+      : dto.date && dto.timeSlot
+        ? istInstant(dto.date, dto.timeSlot)
+        : null;
+    if (!scheduledAt) {
+      throw new BadRequestException({ code: 'SLOT_REQUIRED', message: 'Pick a date and a time slot.' });
+    }
+    const created = await this.prisma.laundryBooking.create({
       data: {
         societyId,
         residentId: resident.id,
-        scheduledAt: new Date(dto.scheduledAt),
-        type: dto.type,
-        itemCount: dto.itemCount,
+        scheduledAt,
+        type: laundryTypeOf(dto.type),
+        itemCount: dto.itemCount ?? 1,
         notes: dto.notes,
       },
-      include: { resident: { include: { user: true, flat: true } } },
     });
+    return withAppFields(created);
   }
 
   async getMyBookings(userId: string) {
     const resident = await requireResidentByUserId(this.prisma, userId);
-    return this.prisma.laundryBooking.findMany({
+    const rows = await this.prisma.laundryBooking.findMany({
       where: { residentId: resident.id },
       orderBy: { scheduledAt: 'desc' },
     });
+    return rows.map(withAppFields);
   }
 
   async cancelBooking(userId: string, id: string, societyId: string) {
@@ -185,4 +220,10 @@ export class LaundryService {
     if (mapped) this.notifyResident(updated, mapped.type, mapped.body);
     return updated;
   }
+}
+
+/** `date` and `timeSlot` (IST) are what the resident app shows. */
+function withAppFields<T extends { scheduledAt: Date }>(booking: T) {
+  const { date, time } = istParts(booking.scheduledAt);
+  return { ...booking, date, timeSlot: time };
 }

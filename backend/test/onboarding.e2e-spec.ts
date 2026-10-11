@@ -27,5 +27,5 @@ describe('Onboarding flow', () => {
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
   });
 
-  it.skip('seeds default categories + bill heads on society create — unblocks when P1 lands SocietySeeder');
+  it.todo('seeds default categories + bill heads on society create — unblocks when P1 lands SocietySeeder');
 });

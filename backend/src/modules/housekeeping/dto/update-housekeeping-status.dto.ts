@@ -34,6 +34,12 @@ export class UpdateHousekeepingStatusDto {
   @IsString()
   afterPhotoUrl?: string;
 
+  @ApiPropertyOptional({ description: 'Admin only: the staff member (StaffMember id) to assign' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  staffId?: string;
+
   @ApiPropertyOptional({ description: "Staff member's completion note" })
   @IsOptional()
   @IsString()

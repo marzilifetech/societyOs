@@ -42,8 +42,26 @@ describe('StaffService documents', () => {
     const docs = await service.getMyDocuments('user-1');
 
     expect(docs).toHaveLength(1);
-    expect(docs[0].type).toBe('AADHAR');
+    // The app's spelling; storage keeps the admin's 'AADHAR'.
+    expect(docs[0].type).toBe('AADHAAR');
     expect(docs[0].status).toBe('UPLOADED');
+    // `fileUrl` is the field the app reads (it used to get only `url`).
+    expect(docs[0].fileUrl).toBe('https://x');
+  });
+
+  it('marks privately stored documents as not previewable', async () => {
+    mockPrisma.staffDocument.findMany.mockResolvedValue([
+      { id: 'd2', documentType: 'PAN', fileUrl: 'tenant/private/abc.pdf', uploadedAt: new Date(), verifiedAt: null },
+    ]);
+    const [doc] = await service.getMyDocuments('user-1');
+    expect(doc).toEqual(expect.objectContaining({ fileUrl: null, isPrivate: true }));
+  });
+
+  it('refuses a URL in place of an upload key (would be shown as a link to admins)', async () => {
+    await expect(
+      service.confirmDocumentUpload('user-1', { key: 'https://evil.example/login', type: 'PAN' }),
+    ).rejects.toMatchObject({ response: expect.objectContaining({ code: 'INVALID_DOCUMENT_KEY' }) });
+    expect(mockPrisma.staffDocument.create).not.toHaveBeenCalled();
   });
 
   it('confirmDocumentUpload persists StaffDocument row', async () => {

@@ -195,3 +195,32 @@ describe('TokenService.rotateRefresh', () => {
     });
   });
 });
+
+describe('TokenService.revokeRefresh (sign-out)', () => {
+  const token = (claims: object) => 'tok.' + Buffer.from(JSON.stringify(claims)).toString('base64');
+
+  it("ends the signing-out user's refresh family, so the token can't be rotated again", async () => {
+    const redis = makeFakeRedis();
+    const svc = new TokenService(makeFakeJwt(), makeConfig(), redis as any);
+    await redis.set('refresh:fam-1', 'tid-1');
+
+    const refresh = token({ sub: 'u1', fid: 'fam-1', tid: 'tid-1', typ: 'refresh' });
+    await expect(svc.revokeRefresh(refresh, 'u1')).resolves.toBe(true);
+
+    expect(await redis.get('refresh:fam-1')).toBeNull();
+    expect(await redis.get('refresh:revoked:fam-1')).toBe('1');
+    await expect(
+      svc.rotateRefresh(refresh, { phone: '+9100', role: 'RESIDENT', societyId: 'soc-1', managedBlocks: [] }),
+    ).rejects.toBeTruthy();
+  });
+
+  it("won't revoke a family that belongs to someone else", async () => {
+    const redis = makeFakeRedis();
+    const svc = new TokenService(makeFakeJwt(), makeConfig(), redis as any);
+    await redis.set('refresh:fam-2', 'tid-2');
+    await expect(
+      svc.revokeRefresh(token({ sub: 'someone-else', fid: 'fam-2', tid: 'tid-2', typ: 'refresh' }), 'u1'),
+    ).resolves.toBe(false);
+    expect(await redis.get('refresh:fam-2')).toBe('tid-2');
+  });
+});

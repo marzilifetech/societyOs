@@ -5,6 +5,37 @@ import { CreatePostDto, CreateCommentDto } from './dto/community.dto';
 import { CommunityPostStatus, UserRole } from '@prisma/client';
 import { PushService } from '../../common/notification/push.service';
 
+/**
+ * What the feed shows of a post's author: name and flat. It used to include
+ * the whole Resident row (PAN, Aadhaar and ID-proof URLs, date of birth,
+ * emergency contact, wallet balance) for every post and comment.
+ */
+const POST_AUTHOR = {
+  select: {
+    id: true,
+    user: { select: { name: true } },
+    flat: { select: { block: true, number: true } },
+  },
+} as const;
+
+type PostAuthor = { id: string; user: { name: string | null } | null; flat: { block: string; number: string } | null };
+
+function withFlatNumber<T extends PostAuthor | null>(resident: T) {
+  if (!resident) return resident;
+  const flatNumber = resident.flat ? [resident.flat.block, resident.flat.number].filter(Boolean).join('-') : null;
+  return { ...resident, flatNumber };
+}
+
+/** An anonymous post names nobody: no author, no resident id. */
+function presentPost<T extends { isAnonymous: boolean; residentId: string; resident: PostAuthor | null }>(
+  post: T,
+  viewerResidentId?: string,
+) {
+  const isMine = !!viewerResidentId && post.residentId === viewerResidentId;
+  if (post.isAnonymous) return { ...post, residentId: null, resident: null, isMine };
+  return { ...post, resident: withFlatNumber(post.resident), isMine };
+}
+
 @Injectable()
 export class CommunityService {
   private readonly logger = new Logger(CommunityService.name);
@@ -23,7 +54,7 @@ export class CommunityService {
         photoUrls: dto.photoUrls ?? [],
         isAnonymous: dto.isAnonymous ?? false,
       },
-      include: { resident: { include: { user: true } } },
+      include: { resident: POST_AUTHOR },
     });
   }
 
@@ -33,7 +64,7 @@ export class CommunityService {
       this.prisma.communityPost.findMany({
         where: { societyId, status: CommunityPostStatus.ACTIVE },
         include: {
-          resident: { include: { user: { select: { name: true } } } },
+          resident: POST_AUTHOR,
           _count: { select: { comments: true } },
         },
         orderBy: { createdAt: 'desc' },
@@ -42,8 +73,11 @@ export class CommunityService {
       }),
       this.prisma.communityPost.count({ where: { societyId, status: CommunityPostStatus.ACTIVE } }),
     ]);
+    const viewer = userId
+      ? await this.prisma.resident.findUnique({ where: { userId }, select: { id: true } })
+      : null;
     const mapped = posts.map((p) => ({
-      ...p,
+      ...presentPost(p, viewer?.id),
       likeCount: p.reactions,
       commentCount: p._count.comments,
       myLike: false, // PostLike table not in schema; per-user tracking unavailable
@@ -51,16 +85,20 @@ export class CommunityService {
     return { posts: mapped, total, page, limit };
   }
 
-  async getPost(id: string) {
-    const post = await this.prisma.communityPost.findUnique({
-      where: { id },
+  /** One post from the caller's own society (any post id used to be readable). */
+  async getPost(id: string, societyId?: string, userId?: string) {
+    const post = await this.prisma.communityPost.findFirst({
+      where: { id, ...(societyId ? { societyId } : {}) },
       include: {
-        resident: { include: { user: { select: { name: true } } } },
+        resident: POST_AUTHOR,
         _count: { select: { comments: true } },
       },
     });
     if (!post) throw new NotFoundException('Post not found');
-    return post;
+    const viewer = userId
+      ? await this.prisma.resident.findUnique({ where: { userId }, select: { id: true } })
+      : null;
+    return presentPost(post, viewer?.id);
   }
 
   async deletePost(id: string, userId: string, userRole: string) {
@@ -143,7 +181,7 @@ export class CommunityService {
 
     const comment = await this.prisma.postComment.create({
       data: { postId, residentId: resident.id, content: dto.content },
-      include: { resident: { include: { user: { select: { name: true } } } } },
+      include: { resident: POST_AUTHOR },
     });
 
     const ownerUserId = post.resident?.userId;
@@ -164,11 +202,13 @@ export class CommunityService {
         });
     }
 
-    return comment;
+    return { ...comment, resident: withFlatNumber(comment.resident) };
   }
 
-  async getComments(postId: string, page = 1, limit = 20) {
-    const post = await this.prisma.communityPost.findUnique({ where: { id: postId } });
+  async getComments(postId: string, page = 1, limit = 20, societyId?: string) {
+    const post = await this.prisma.communityPost.findFirst({
+      where: { id: postId, ...(societyId ? { societyId } : {}) },
+    });
     if (!post) throw new NotFoundException('Post not found');
 
     const take = Math.min(limit, 100);
@@ -179,12 +219,7 @@ export class CommunityService {
         where,
         select: {
           id: true, content: true, createdAt: true,
-          resident: {
-            select: {
-              id: true,
-              user: { select: { name: true } },
-            },
-          },
+          resident: POST_AUTHOR,
         },
         orderBy: { createdAt: 'asc' },
         skip,
@@ -192,6 +227,9 @@ export class CommunityService {
       }),
       this.prisma.postComment.count({ where }),
     ]);
-    return { data, meta: { total, page, limit: take, totalPages: Math.ceil(total / take) } };
+    return {
+      data: data.map((c) => ({ ...c, resident: withFlatNumber(c.resident) })),
+      meta: { total, page, limit: take, totalPages: Math.ceil(total / take) },
+    };
   }
 }

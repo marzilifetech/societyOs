@@ -70,6 +70,22 @@ describe('JwtStrategy.validate', () => {
     ).resolves.toMatchObject({ role: UserRole.RESIDENT });
   });
 
+  it.each([UserStatus.INACTIVE, UserStatus.SUSPENDED])(
+    'revokes a %s user immediately (a deactivated guard kept access for 7 days)',
+    async (status) => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'u1',
+        status,
+        role: UserRole.STAFF,
+        societyId: 'soc-1',
+        society: { id: 'soc-1', status: 'ACTIVE' },
+      });
+      await expect(
+        strategy.validate({ sub: 'u1', phone: '+91', role: UserRole.STAFF, societyId: 'soc-1' } as any),
+      ).rejects.toMatchObject({ response: expect.objectContaining({ code: 'USER_REVOKED' }) });
+    },
+  );
+
   it('rejects when home society is SUSPENDED', async () => {
     mockPrisma.user.findUnique.mockResolvedValue({
       id: 'u1',

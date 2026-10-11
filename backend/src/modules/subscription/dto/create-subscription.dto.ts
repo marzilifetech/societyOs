@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsEnum, IsDateString, IsArray, IsObject } from 'class-validator';
+import { IsString, IsOptional, IsEnum, IsDateString, IsArray, IsObject, IsInt, Min, Max, MaxLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { SubscriptionFrequency } from '@prisma/client';
 
@@ -18,9 +18,32 @@ export class CreateSubscriptionDto {
   @IsEnum(SubscriptionFrequency)
   frequency: SubscriptionFrequency;
 
-  @ApiProperty()
+  /** Defaults to today (IST) — the shipped app never sends it. */
+  @ApiPropertyOptional()
+  @IsOptional()
   @IsDateString()
-  startDate: string;
+  startDate?: string;
+
+  // The shipped app describes a subscription as one line — what, from whom,
+  // how many — instead of `items`. Stored as the single item.
+  @ApiPropertyOptional({ example: 'MILK' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  type?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  provider?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  quantity?: number;
 
   @ApiPropertyOptional()
   @IsOptional()

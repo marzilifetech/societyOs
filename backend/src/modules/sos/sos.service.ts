@@ -1,10 +1,15 @@
 import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
-import { RealtimeGateway } from '../../common/realtime/realtime.gateway';
+import { RealtimeGateway, SOS_RESPONDER_ROLES } from '../../common/realtime/realtime.gateway';
 import { PushService } from '../../common/notification/push.service';
 import { SosStatus, UserRole } from '@prisma/client';
 import type { JwtPayload } from '../../common/decorators/current-user.decorator';
+
+/** Staff and admins respond to an alert; anyone else may act only on their own. */
+function isResponder(actor: Pick<JwtPayload, 'role'>): boolean {
+  return SOS_RESPONDER_ROLES.includes(String(actor.role));
+}
 
 @Injectable()
 export class SosService {
@@ -33,40 +38,71 @@ export class SosService {
     });
     this.realtime.emitSosAlert(societyId, alert);
 
+    // Who raised it and where, so a guard can run to the right flat from the
+    // lockscreen without opening anything. Best-effort: never delay the alert.
+    const who = await this.describeRaiser(userId).catch(() => null);
     const isStaff = kind === 'staff';
     const title = isStaff ? 'Staff SOS alert' : 'SOS Alert!';
-    const body = isStaff
-      ? 'A staff member has triggered an emergency SOS. Location attached when available.'
-      : 'An emergency SOS has been triggered in your society. Location attached when available.';
+    const place = who?.flat ? ` at ${who.flat}` : '';
+    const name = who?.name ? `${who.name}${place}` : place ? `Someone${place}` : '';
+    const body = name
+      ? `${name} needs help now. Tap to respond.`
+      : isStaff
+        ? 'A staff member has triggered an emergency SOS. Tap to respond.'
+        : 'An emergency SOS has been triggered in your society. Tap to respond.';
+    const data: Record<string, string> = {
+      type: 'SOS_TRIGGERED',
+      entityId: alert.id,
+      alertId: alert.id,
+      kind,
+      ...(who?.name ? { raisedByName: who.name } : {}),
+      ...(who?.flat ? { flat: who.flat } : {}),
+    };
 
-    await this.push.sendToSociety(
-      societyId,
-      'ADMIN',
-      {
-        title,
-        body,
-        critical: true,
-        category: 'sos',
-      },
-      { type: 'SOS', alertId: String(alert.id) },
-    );
-
-    // On-duty guards/security are role STAFF (no SECURITY role exists). critical
-    // so it bypasses quiet hours / opt-out. Fire-and-forget; never block trigger.
-    void this.push
-      .sendToSociety(
+    // Admins (including building admins) and on-duty staff (guards are role
+    // STAFF — there is no SECURITY role), in parallel. The admin send used to
+    // be AWAITED before the guards' send even started, which only added
+    // latency, and BUILDING_ADMIN was never notified at all. Critical: bypasses
+    // quiet hours and opt-out. Never blocks or fails the trigger.
+    void Promise.allSettled([
+      this.push.sendToSociety(
         societyId,
-        'STAFF',
-        {
-          title,
-          body,
-          category: 'emergency_sos',
-          critical: true,
-        },
-        { type: 'SOS_TRIGGERED', alertId: String(alert.id) },
-      )
-      .catch(() => {});
+        [UserRole.ADMIN, UserRole.BUILDING_ADMIN],
+        { title, body, critical: true, category: 'emergency_sos', collapseKey: `sos:${alert.id}` },
+        data,
+      ),
+      this.push.sendToSociety(
+        societyId,
+        UserRole.STAFF,
+        { title, body, critical: true, category: 'emergency_sos', collapseKey: `sos:${alert.id}` },
+        data,
+      ),
+    ]);
 
+    return alert;
+  }
+
+  /** "Name" and "A-101" for the person who raised an alert. */
+  private async describeRaiser(userId: string): Promise<{ name?: string; flat?: string } | null> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        name: true,
+        resident: { select: { flat: { select: { block: true, number: true } } } },
+      },
+    });
+    if (!user) return null;
+    const f = user.resident?.flat;
+    return {
+      name: user.name ?? undefined,
+      flat: f ? [f.block, f.number].filter(Boolean).join('-') : undefined,
+    };
+  }
+
+  /** The alert, scoped to the caller's society — never another society's. */
+  private async findInSociety(alertId: string, societyId: string) {
+    const alert = await this.prisma.sosAlert.findFirst({ where: { id: alertId, societyId } });
+    if (!alert) throw new NotFoundException('SOS alert not found');
     return alert;
   }
 
@@ -104,29 +140,69 @@ export class SosService {
     return updated;
   }
 
-  async acknowledge(alertId: string, staffId: string) {
-    const alert = await this.prisma.sosAlert.findUnique({ where: { id: alertId } });
-    if (!alert) throw new NotFoundException('SOS alert not found');
+  /**
+   * A responder takes the alert. Scoped to the caller's society (any
+   * authenticated user from any society could silence any SOS before), and
+   * first-come: when two guards tap at once the first acknowledgement stands
+   * and the second gets the alert back as it is.
+   */
+  async acknowledge(alertId: string, responderId: string, societyId: string) {
+    const alert = await this.findInSociety(alertId, societyId);
+    if (alert.status === SosStatus.ACKNOWLEDGED) return alert;
+    if (alert.status !== SosStatus.ACTIVE) {
+      throw new ConflictException({
+        code: 'SOS_NOT_ACTIVE',
+        message: 'This alert is already closed',
+        currentStatus: alert.status,
+      });
+    }
 
-    const responseTimeSecs = Math.floor(
-      (Date.now() - alert.createdAt.getTime()) / 1000,
-    );
-
-    return this.prisma.sosAlert.update({
-      where: { id: alertId },
+    const responseTimeSecs = Math.floor((Date.now() - alert.createdAt.getTime()) / 1000);
+    await this.prisma.sosAlert.updateMany({
+      where: { id: alertId, societyId, status: SosStatus.ACTIVE },
       data: {
         status: SosStatus.ACKNOWLEDGED,
-        acknowledgedBy: staffId,
+        acknowledgedBy: responderId,
         acknowledgedAt: new Date(),
         responseTimeSecs,
       },
     });
+    const updated = await this.findInSociety(alertId, societyId);
+    // The sender's screen flips to "Help is coming".
+    this.realtime.emitSosToOwner(societyId, updated.residentId, `sos:${alertId}:acknowledged`, {
+      alertId,
+      acknowledged: true,
+      acknowledgedAt: updated.acknowledgedAt,
+    });
+    return updated;
   }
 
-  async resolve(alertId: string) {
-    return this.prisma.sosAlert.update({
+  /**
+   * Close an alert. Scoped to the caller's society; closing twice is a no-op.
+   * Responders may close any alert; anyone else only their own. (The person
+   * who raised it got a 403 on "Mark as resolved", so guards kept seeing an
+   * emergency that was over.)
+   */
+  async resolve(alertId: string, societyId: string, actor?: Pick<JwtPayload, 'sub' | 'role'>) {
+    const alert = await this.findInSociety(alertId, societyId);
+    if (actor && !isResponder(actor) && alert.residentId !== actor.sub) {
+      throw new ForbiddenException({ code: 'SOS_NOT_OWNER', message: 'Only the person who sent this SOS can close it' });
+    }
+    if (alert.status === SosStatus.RESOLVED || alert.status === SosStatus.FALSE_ALARM) return alert;
+    const updated = await this.prisma.sosAlert.update({
       where: { id: alertId },
       data: { status: SosStatus.RESOLVED, resolvedAt: new Date() },
+    });
+    this.announceClosed(updated);
+    return updated;
+  }
+
+  /** Tell responders and the sender that an alert is no longer open. */
+  private announceClosed(alert: { id: string; societyId: string; residentId: string; status: SosStatus }) {
+    this.realtime.emitSosAlert(alert.societyId, alert);
+    this.realtime.emitSosToOwner(alert.societyId, alert.residentId, `sos:${alert.id}:closed`, {
+      alertId: alert.id,
+      status: alert.status,
     });
   }
 
@@ -149,43 +225,25 @@ export class SosService {
   }
 
   /**
-   * Resident may cancel within SOS_CANCEL_WINDOW_MS (default 5s) while ACTIVE only.
-   * Admin / super-admin / staff may mark false alarm while ACTIVE or ACKNOWLEDGED.
-   * Terminal states are idempotent: returns the existing row.
+   * Cancel an alert as a false alarm, while it is ACTIVE or ACKNOWLEDGED.
+   * Responders may cancel any alert in their society, the sender their own.
+   * The sender used to be limited to the first 5 seconds, and the app (which
+   * counts down before sending) showed "Cancelled" while the alert stayed
+   * open. Terminal states are idempotent: returns the existing row.
    */
-  async flagFalseAlarm(alertId: string, actor: JwtPayload) {
-    const alert = await this.prisma.sosAlert.findUnique({ where: { id: alertId } });
-    if (!alert) throw new NotFoundException('SOS alert not found');
+  async flagFalseAlarm(alertId: string, actor: JwtPayload, societyId: string) {
+    // Scoped to the caller's society: staff and admins are "privileged" here,
+    // and used to be privileged over every society's alerts.
+    const alert = await this.findInSociety(alertId, societyId);
 
     if (alert.status === SosStatus.FALSE_ALARM || alert.status === SosStatus.RESOLVED) {
       return alert;
     }
 
-    const privileged =
-      actor.role === UserRole.ADMIN ||
-      actor.role === UserRole.SUPER_ADMIN ||
-      actor.role === UserRole.STAFF;
-
-    if (!privileged) {
-      if (alert.residentId !== actor.sub) {
-        throw new ForbiddenException({ code: 'SOS_NOT_OWNER', message: 'Only the alerting resident can cancel' });
-      }
-      if (alert.status !== SosStatus.ACTIVE) {
-        throw new ConflictException({
-          code: 'SOS_CANCEL_NOT_ALLOWED',
-          message: 'Cancel is only allowed while the alert is active',
-        });
-      }
-      const windowMs = parseInt(this.config.get<string>('SOS_CANCEL_WINDOW_MS') ?? '5000', 10);
-      const age = Date.now() - alert.createdAt.getTime();
-      if (age > windowMs) {
-        throw new ConflictException({
-          code: 'SOS_CANCEL_WINDOW_EXPIRED',
-          message: `Cancel is only allowed within ${windowMs / 1000}s of triggering`,
-          retryAfter: 0,
-        });
-      }
-    } else if (alert.status !== SosStatus.ACTIVE && alert.status !== SosStatus.ACKNOWLEDGED) {
+    if (!isResponder(actor) && alert.residentId !== actor.sub) {
+      throw new ForbiddenException({ code: 'SOS_NOT_OWNER', message: 'Only the alerting resident can cancel' });
+    }
+    if (alert.status !== SosStatus.ACTIVE && alert.status !== SosStatus.ACKNOWLEDGED) {
       throw new ConflictException({
         code: 'SOS_CANCEL_NOT_ALLOWED',
         message: 'Cannot mark false alarm for this alert state',
@@ -193,24 +251,51 @@ export class SosService {
       });
     }
 
-    return this.prisma.sosAlert.update({
+    const updated = await this.prisma.sosAlert.update({
       where: { id: alertId },
       data: { status: SosStatus.FALSE_ALARM },
     });
+    this.announceClosed(updated);
+    return updated;
   }
 
+  /**
+   * Open alerts for responders: ACTIVE and ACKNOWLEDGED (acknowledged is still
+   * an emergency in progress — returning ACTIVE only made an alert vanish from
+   * the admin console the moment someone acknowledged it, so it could never be
+   * marked resolved).
+   *
+   * Only what a responder needs about the person: name, phone (to call them),
+   * role and flat. This used to `include` whole User rows — TOTP secret, FCM
+   * token, DOB, email — and the route had no role guard, so any resident could
+   * read them.
+   */
   async getActive(societyId: string) {
     return this.prisma.sosAlert.findMany({
-      where: { societyId, status: SosStatus.ACTIVE },
-      include: {
+      where: { societyId, status: { in: [SosStatus.ACTIVE, SosStatus.ACKNOWLEDGED] } },
+      select: {
+        id: true,
+        status: true,
+        lat: true,
+        lng: true,
+        note: true,
+        createdAt: true,
+        acknowledgedAt: true,
+        acknowledgedBy: true,
+        responseTimeSecs: true,
         resident: {
-          include: {
-            resident: { include: { flat: true } },
-            staffMember: true,
+          select: {
+            id: true,
+            name: true,
+            phone: true,
+            role: true,
+            resident: { select: { flat: { select: { block: true, number: true } } } },
+            staffMember: { select: { designation: true } },
           },
         },
       },
       orderBy: { createdAt: 'desc' },
+      take: 50,
     });
   }
 

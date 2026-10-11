@@ -12,7 +12,15 @@ export class RateConciergeDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(1000)
   review?: string;
+
+  /** What the shipped app calls `review`; either is accepted. */
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  comment?: string;
 }
 
 /**

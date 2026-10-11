@@ -8,6 +8,9 @@ const mockPrisma = {
     findMany: jest.fn(),
     deleteMany: jest.fn(),
   },
+  user: {
+    updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+  },
 };
 
 describe('DevicesService', () => {
@@ -56,6 +59,20 @@ describe('DevicesService', () => {
       expect(arg.update.platform).toBe('android');
       expect(arg.update.lastSeenAt).toBeInstanceOf(Date);
     });
+
+    it("clears the token from any OTHER user's legacy fcmToken (shared guard phone)", async () => {
+      mockPrisma.device.upsert.mockResolvedValue({ id: 'd-1' });
+
+      await service.registerDevice('guard-b', { token: 'tok-abc', platform: 'android' });
+
+      expect(mockPrisma.user.updateMany).toHaveBeenCalledWith({
+        where: { fcmToken: 'tok-abc', id: { not: 'guard-b' } },
+        data: { fcmToken: null },
+      });
+      expect(mockPrisma.user.updateMany.mock.invocationCallOrder[0]).toBeLessThan(
+        mockPrisma.device.upsert.mock.invocationCallOrder[0],
+      );
+    });
   });
 
   describe('removeDevice', () => {
@@ -91,5 +108,20 @@ describe('DevicesService', () => {
         expect.objectContaining({ where: { userId: 'user-1' } }),
       );
     });
+  });
+});
+
+describe('DevicesService.releaseDevice', () => {
+  it('detaches the token from every account, including the legacy column', async () => {
+    const prisma: any = {
+      device: { deleteMany: jest.fn().mockReturnValue('d') },
+      user: { updateMany: jest.fn().mockReturnValue('u') },
+      $transaction: jest.fn().mockResolvedValue([{ count: 1 }, { count: 0 }]),
+    };
+    const { DevicesService } = require('./devices.service');
+    const out = await new DevicesService(prisma).releaseDevice('tok-1');
+    expect(prisma.device.deleteMany).toHaveBeenCalledWith({ where: { token: 'tok-1' } });
+    expect(prisma.user.updateMany).toHaveBeenCalledWith({ where: { fcmToken: 'tok-1' }, data: { fcmToken: null } });
+    expect(out).toEqual({ released: true });
   });
 });

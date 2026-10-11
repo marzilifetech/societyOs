@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException, GoneException, ConflictException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RealtimeGateway } from '../../common/realtime/realtime.gateway';
 import { PushService } from '../../common/notification/push.service';
@@ -6,6 +7,31 @@ import { WhatsAppService } from '../../common/notification/whatsapp.service';
 import { requireResidentByUserId } from '../../common/utils/resident-context';
 import { requireOwnedById } from '../../common/tenancy/require-owned.util';
 import { BroadcastDto, UpdateNoticeDto } from './dto/notice.dto';
+
+/**
+ * Notices a member may see: not expired, already published, and not one of
+ * the PUSH_SCHEDULED rows an earlier build saved for "scheduled" admin
+ * pushes. Those were never meant for the board and are now hidden.
+ * (`category: { not }` alone would also drop rows with no category.)
+ */
+const SCHEDULED_PUSH_CATEGORY = 'PUSH_SCHEDULED';
+
+/**
+ * Who hears a society notice. Residents who are also society admins have
+ * role ADMIN/BUILDING_ADMIN, so a bare 'RESIDENT' filter skipped them.
+ */
+const NOTICE_AUDIENCE = ['RESIDENT', 'ADMIN', 'BUILDING_ADMIN'];
+/** Emergency broadcasts also reach staff: the guards are the first responders. */
+const BROADCAST_AUDIENCE = [...NOTICE_AUDIENCE, 'STAFF'];
+function visibleNoticeWhere(now = new Date()): Prisma.NoticeWhereInput {
+  return {
+    AND: [
+      { OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] },
+      { OR: [{ publishedAt: null }, { publishedAt: { lte: now } }] },
+      { OR: [{ category: null }, { category: { not: SCHEDULED_PUSH_CATEGORY } }] },
+    ],
+  };
+}
 
 @Injectable()
 export class NoticeService {
@@ -23,7 +49,7 @@ export class NoticeService {
     return this.prisma.notice.findMany({
       where: {
         societyId,
-        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+        ...visibleNoticeWhere(),
         ...(opts?.onlyPinned ? { isPinned: true } : {}),
       },
       orderBy: [{ isPinned: 'desc' }, { publishedAt: 'desc' }, { createdAt: 'desc' }],
@@ -37,7 +63,7 @@ export class NoticeService {
       where: {
         id,
         societyId,
-        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+        ...visibleNoticeWhere(),
       },
     });
     if (!notice) throw new NotFoundException('Notice not found');
@@ -58,7 +84,7 @@ export class NoticeService {
       void this.push
         .sendToSociety(
           societyId,
-          'RESIDENT',
+          NOTICE_AUDIENCE,
           { title: notice.title, body, category: 'notices' },
           { type: 'NOTICE_PUBLISHED', entityId: String(notice.id) },
         )
@@ -102,16 +128,25 @@ export class NoticeService {
       sentAt,
     });
 
+    // Only EMERGENCY severity takes over the screen. INFO and WARNING used the
+    // unregistered 'emergency' category, which mapped to the SOS channel and
+    // made a water-cut notice ring like a panic alert.
+    const isEmergency = dto.severity === 'EMERGENCY';
     await this.push.sendToSociety(
       societyId,
-      'RESIDENT',
+      BROADCAST_AUDIENCE,
       {
         title: dto.title,
         body: dto.message,
-        critical: dto.severity === 'EMERGENCY',
-        category: 'emergency',
+        critical: isEmergency,
+        category: isEmergency ? 'emergency_sos' : 'notices_urgent',
       },
-      { type: 'EMERGENCY_BROADCAST', noticeId: notice.id, severity: dto.severity },
+      {
+        type: 'EMERGENCY_BROADCAST',
+        entityId: notice.id,
+        noticeId: notice.id,
+        severity: dto.severity,
+      },
     );
 
     return notice;

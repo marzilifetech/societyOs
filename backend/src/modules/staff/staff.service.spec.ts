@@ -53,6 +53,28 @@ describe('StaffService', () => {
       jest.useRealTimers();
     });
 
+    it('refuses a request longer than the remaining balance', async () => {
+      // 11 of 12 casual days used this year.
+      mockPrisma.leaveRequest.findMany.mockResolvedValue([
+        {
+          type: 'CASUAL',
+          startDate: new Date('2026-02-01'),
+          endDate: new Date('2026-02-11'),
+        },
+      ]);
+      await expect(
+        service.requestLeave('user-1', {
+          type: 'CASUAL',
+          startDate: '2026-06-20',
+          endDate: '2026-06-22',
+          reason: 'family function',
+        }),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'INSUFFICIENT_LEAVE_BALANCE' }),
+      });
+      expect(mockPrisma.leaveRequest.create).not.toHaveBeenCalled();
+    });
+
     it('rejects leave starting before today', async () => {
       await expect(
         service.requestLeave('user-1', {
@@ -278,8 +300,10 @@ describe('StaffService', () => {
         mockPrisma.resident.findFirst.mockResolvedValue(null);
         await expect(service.lookupResidentByPhone('soc1', '999')).rejects.toThrow();
         const call = mockPrisma.resident.findFirst.mock.calls[0][0];
-        // user.phone is set to the trimmed input, NOT a contains/startsWith.
-        expect(call.where.user.phone).toBe('999');
+        // Exact spellings of the number only — never contains/startsWith, so
+        // a partial number can't be used to enumerate residents.
+        expect(Object.keys(call.where.user.phone)).toEqual(['in']);
+        expect(call.where.user.phone.in).toEqual(expect.arrayContaining(['999']));
       });
     });
 
@@ -307,5 +331,17 @@ describe('StaffService', () => {
         );
       });
     });
+  });
+});
+
+describe('StaffService phone lookups', () => {
+  it('finds a resident by the 10 digits a guard types (stored as +91…)', async () => {
+    const prisma: any = {
+      resident: { findFirst: jest.fn().mockResolvedValue(null) },
+    };
+    const svc = new StaffService(prisma, {} as any, { emit: jest.fn() } as any, {} as any);
+    await svc.lookupResidentByPhone('soc', ' 98765 43210 ').catch(() => undefined);
+    const where = prisma.resident.findFirst.mock.calls[0][0].where;
+    expect(where.user.phone.in).toEqual(expect.arrayContaining(['+919876543210', '9876543210']));
   });
 });

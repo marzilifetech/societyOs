@@ -248,6 +248,16 @@ export class AuthService {
     });
 
     const isNewUser = !user;
+    if (!user && (dto.client === 'admin' || dto.client === 'staff')) {
+      // Only residents self-register; staff and admins are added by the society.
+      throw new UnauthorizedException({
+        code: 'NOT_REGISTERED',
+        message:
+          dto.client === 'staff'
+            ? 'This number is not registered as staff here. Ask your supervisor to add you.'
+            : 'This number does not have admin access to this society.',
+      });
+    }
     if (!user) {
       user = await this.prisma.user.create({
         data: {
@@ -584,8 +594,9 @@ export class AuthService {
     return user;
   }
 
-  async logout(token: string) {
+  async logout(token: string, refreshToken?: string, sub?: string) {
     await this.tokens.revoke(token);
+    if (refreshToken && sub) await this.tokens.revokeRefresh(refreshToken, sub);
     return { message: 'Logged out' };
   }
 

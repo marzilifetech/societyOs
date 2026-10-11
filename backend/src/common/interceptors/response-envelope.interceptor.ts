@@ -8,6 +8,7 @@ import {
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { Request, Response } from 'express';
+import { stripSecrets } from '../utils/strip-secrets';
 
 const SKIP_ENVELOPE_PATHS = ['/health', '/readyz', '/api/docs', '/metrics'];
 
@@ -33,15 +34,17 @@ export class ResponseEnvelopeInterceptor implements NestInterceptor {
       (req as any).id ?? (req.headers['x-request-id'] as string | undefined);
 
     return next.handle().pipe(
-      map((payload: any) => {
+      map((raw: any) => {
         // Never wrap binary/file downloads. A StreamableFile (CSV exports &
         // import templates for flats/residents/staff/infrastructure, etc.) must
         // stream its raw bytes with the Content-Type/Content-Disposition the
         // handler set — JSON-enveloping it produced a `{data,meta,error}` blob
         // saved as a .csv, which is what broke the Flats/Residents downloads.
-        if (payload instanceof StreamableFile) {
-          return payload;
+        if (raw instanceof StreamableFile) {
+          return raw;
         }
+        // Backstop against secrets in ANY response — see strip-secrets.ts.
+        const payload = stripSecrets(raw);
 
         // If handler already returned an envelope shape, pass-through.
         if (

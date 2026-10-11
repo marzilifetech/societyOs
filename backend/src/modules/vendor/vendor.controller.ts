@@ -38,8 +38,9 @@ export class VendorController {
     @CurrentUser() user: JwtPayload,
     @Query('page') page = 1,
     @Query('limit') limit = 20,
+    @Query('vendorId') vendorId?: string,
   ) {
-    return this.vendorService.myOrders(user.sub, +page, +limit);
+    return this.vendorService.myOrders(user.sub, +page, +limit, vendorId);
   }
 
   @Get('orders')

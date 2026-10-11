@@ -35,14 +35,12 @@ const DEFAULT_SERVICE_CATEGORIES = [
   'Other',
 ];
 
-// Default 4-tile emergency contact set surfaced on the resident-app home
-// screen (F5). Per-society values can override this through admin /sos.
-const DEFAULT_EMERGENCY_CONTACTS = [
-  { id: 'ec-security', label: 'Security', phone: '+91-9000000099' },
-  { id: 'ec-manager', label: 'Manager', phone: '+91-9000000088' },
-  { id: 'ec-medical', label: 'Medical', phone: '+91-108' },
-  { id: 'ec-fire', label: 'Fire', phone: '+91-101' },
-];
+/**
+ * Placeholder numbers earlier builds seeded into every new society. They do
+ * not connect ("+91-108" is not a dialable form of 108), so a resident in an
+ * emergency would call nothing. Filtered out wherever contacts are served.
+ */
+export const PLACEHOLDER_EMERGENCY_PHONES = new Set(['+91-9000000099', '+91-9000000088', '+91-108', '+91-101']);
 
 @Injectable()
 export class SocietySeederService {
@@ -52,7 +50,9 @@ export class SocietySeederService {
       billing: { ...DEFAULT_BILLING, ...(overrides?.billing as object) },
       sla: { ...DEFAULT_SLA, ...(overrides?.sla as object) },
       serviceCategories: DEFAULT_SERVICE_CATEGORIES,
-      emergencyContacts: DEFAULT_EMERGENCY_CONTACTS,
+      // Empty until the society's admin enters its real numbers (admin → SOS).
+      // The app always offers the national numbers (112, 100, 101, 108).
+      emergencyContacts: [],
     };
     // Apply overrides last so callers can swap any default key, but make sure
     // we don't end up with the seed default winning over a real value.

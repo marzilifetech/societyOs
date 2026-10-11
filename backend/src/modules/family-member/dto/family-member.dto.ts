@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsBoolean, IsObject } from 'class-validator';
+import { IsString, IsOptional, IsBoolean, IsObject, IsDateString, IsIn, MaxLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 
@@ -16,14 +16,37 @@ export class PermissionsDto {
   paymentAlerts?: boolean;
 }
 
-export class CreateFamilyMemberDto {
+const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
+
+/** Fields the resident app's add/edit form sends besides the basics. */
+class FamilyMemberDetailsDto {
+  @ApiPropertyOptional()
+  @IsDateString()
+  @IsOptional()
+  dateOfBirth?: string;
+
+  @ApiPropertyOptional({ enum: BLOOD_GROUPS })
+  @IsIn(BLOOD_GROUPS)
+  @IsOptional()
+  bloodGroup?: string;
+
+  @ApiPropertyOptional()
+  @IsBoolean()
+  @IsOptional()
+  isEmergencyContact?: boolean;
+}
+
+export class CreateFamilyMemberDto extends FamilyMemberDetailsDto {
   @ApiProperty()
   @IsString()
+  @MaxLength(100)
   name: string;
 
-  @ApiProperty()
+  @ApiPropertyOptional()
   @IsString()
-  phone: string;
+  @IsOptional()
+  @MaxLength(20)
+  phone?: string;
 
   @ApiProperty()
   @IsString()
@@ -36,7 +59,7 @@ export class CreateFamilyMemberDto {
   permissions?: PermissionsDto;
 }
 
-export class UpdateFamilyMemberDto {
+export class UpdateFamilyMemberDto extends FamilyMemberDetailsDto {
   @ApiPropertyOptional()
   @IsString()
   @IsOptional()

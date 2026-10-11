@@ -63,7 +63,9 @@ export class PackageService {
             category: 'deliveries',
             collapseKey: `package:${pkg.id}`,
           },
-          { type: 'PACKAGE_ARRIVED', entityId: pkg.id, packageId: pkg.id },
+          // No `entityId`: installed apps route a 'deliveries' push that has
+          // one to the visitor-approval screen, which knows nothing of parcels.
+          { type: 'PACKAGE_ARRIVED', packageId: pkg.id },
         )
         .catch((err) => {
           this.logger.warn(`package arrived push failed id=${pkg.id}: ${(err as Error).message}`);
@@ -95,7 +97,11 @@ export class PackageService {
       }),
       this.prisma.package.count({ where }),
     ]);
-    return { data, meta: { total, page, limit: take, totalPages: Math.ceil(total / take) } };
+    // `courier` is the name the resident app shows as the card title.
+    return {
+      data: data.map((p) => ({ ...p, courier: p.courierName })),
+      meta: { total, page, limit: take, totalPages: Math.ceil(total / take) },
+    };
   }
 
   async findBySociety(societyId: string, page = 1, limit = 20) {

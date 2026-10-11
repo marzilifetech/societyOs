@@ -2,7 +2,7 @@ import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards } from '@ne
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { LaundryBookingStatus, LaundryType, UserRole } from '@prisma/client';
 import { LaundryService } from './laundry.service';
-import { MarkPickedUpDto } from './dto/laundry.dto';
+import { CreateLaundryBookingDto, MarkPickedUpDto } from './dto/laundry.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
@@ -26,7 +26,7 @@ export class LaundryController {
   createBooking(
     @CurrentUser() user: JwtPayload,
     @SocietyId() societyId: string,
-    @Body() dto: { scheduledAt: string; type: LaundryType; itemCount: number; notes?: string },
+    @Body() dto: CreateLaundryBookingDto,
   ) {
     return this.laundryService.createBooking(user.sub, societyId, dto);
   }

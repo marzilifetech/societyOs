@@ -103,6 +103,26 @@ export class TokenService {
   }
 
   /**
+   * End the session a refresh token belongs to (its whole family), if it is
+   * ours and belongs to `sub`. Sign-out used to deny only the access token, so
+   * a refresh token copied off a shared office PC kept minting sessions for 30
+   * days. Other devices, with their own families, stay signed in.
+   */
+  async revokeRefresh(refreshToken: string, sub: string): Promise<boolean> {
+    try {
+      const payload: any = this.jwt.verify(refreshToken, {
+        secret: this.config.get('JWT_REFRESH_SECRET') || this.config.get('JWT_SECRET'),
+        ignoreExpiration: true,
+      });
+      if (payload?.typ !== 'refresh' || !payload.fid || payload.sub !== sub) return false;
+      await this.revokeFamily(payload.fid);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Rotate refresh token. Three failure modes:
    *
    *  1. JWT signature invalid / expired           → INVALID_REFRESH

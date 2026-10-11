@@ -1,4 +1,5 @@
 import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { RESIDENT_BRIEF } from '../../common/prisma-selects';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateComplaintDto, RateComplaintDto, UpdateComplaintStatusDto } from './dto/complaint.dto';
 import { requireResidentByUserId } from '../../common/utils/resident-context';
@@ -75,14 +76,19 @@ export class ComplaintService {
     const resident = await requireResidentByUserId(this.prisma, userId);
     const complaint = await this.prisma.complaint.findUnique({
       where: { id },
-      include: { resident: { include: { user: true, flat: true } } },
+      include: {
+        resident: RESIDENT_BRIEF,
+        assignedTo: { select: { id: true, designation: true, user: { select: { name: true } } } },
+      },
     });
 
     if (!complaint || complaint.residentId !== resident.id) {
       throw new NotFoundException('Complaint not found');
     }
 
-    return complaint;
+    // `assignedStaff` is the staff member's NAME: the app renders it as text
+    // (an object there crashes the screen). `assignedTo` has the details.
+    return { ...complaint, assignedStaff: complaint.assignedTo?.user?.name ?? null };
   }
 
   async findBySociety(societyId: string, status?: string, managedBlocks?: string[]) {

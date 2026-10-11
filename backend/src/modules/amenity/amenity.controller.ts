@@ -32,8 +32,8 @@ export class AmenityController {
   }
 
   @Post('bookings')
-  createBooking(@CurrentUser() user: JwtPayload, @Body() dto: CreateAmenityBookingDto) {
-    return this.amenityService.createBooking(user.sub, dto);
+  createBooking(@CurrentUser() user: JwtPayload, @SocietyId() societyId: string, @Body() dto: CreateAmenityBookingDto) {
+    return this.amenityService.createBooking(user.sub, dto, societyId);
   }
 
   @Post('bookings/:id/rating')
@@ -47,13 +47,13 @@ export class AmenityController {
   }
 
   @Get(':id/availability')
-  getAvailability(@Param('id') id: string, @Query('date') date: string) {
-    return this.amenityService.getAvailability(id, date);
+  getAvailability(@Param('id') id: string, @SocietyId() societyId: string, @Query('date') date: string) {
+    return this.amenityService.getAvailability(id, date, societyId);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.amenityService.findOne(id);
+  findOne(@Param('id') id: string, @SocietyId() societyId: string) {
+    return this.amenityService.findOneInSociety(id, societyId);
   }
 }
 

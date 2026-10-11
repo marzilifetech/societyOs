@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { DomesticHelpService } from './domestic-help.service';
-import { CreateDomesticHelpDto, UpdateDomesticHelpDto, MarkAttendanceDto } from './dto/domestic-help.dto';
+import { CreateDomesticHelpDto, UpdateDomesticHelpDto, MarkAttendanceDto, LogSalaryPaymentDto } from './dto/domestic-help.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
 
@@ -48,7 +48,7 @@ export class DomesticHelpController {
   }
 
   @Post(':id/salary')
-  getSalary(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
-    return this.domesticHelpService.getSalary(id, user.sub);
+  logSalaryPayment(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: LogSalaryPaymentDto) {
+    return this.domesticHelpService.logSalaryPayment(id, user.sub, dto);
   }
 }

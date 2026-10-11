@@ -9,7 +9,8 @@ import { Logger, Inject, forwardRef } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { Server, Socket } from 'socket.io';
-import { RealtimeGateway } from './realtime.gateway';
+import { RealtimeGateway, SOS_RESPONDER_ROLES } from './realtime.gateway';
+import { PrismaService } from '../../prisma/prisma.service';
 
 interface AuthedSocket extends Socket {
   data: {
@@ -44,7 +45,55 @@ export class EventsGateway
     private config: ConfigService,
     @Inject(forwardRef(() => RealtimeGateway))
     private realtime: RealtimeGateway,
+    private prisma: PrismaService,
   ) {}
+
+  /**
+   * Rooms a connection belongs to, from the CURRENT database row rather than
+   * the token's claims (role and society can change after a token is minted).
+   *
+   * Besides the society/role rooms, a connection joins the entity rooms that
+   * services actually emit to — `resident:<residentId>`, `staff:<staffId>` and
+   * each staff chat group `staff:msg:<groupId>`. Nothing joined those, so
+   * every visitor-arrival, task-assigned and chat event went nowhere.
+   *
+   * Returns null for anyone who must not have a live connection (unknown,
+   * deactivated or suspended users, or a society that isn't active).
+   */
+  async roomsFor(userId: string): Promise<{ societyId: string; role: string; rooms: string[] } | null> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        status: true,
+        role: true,
+        societyId: true,
+        society: { select: { status: true } },
+        resident: { select: { id: true, deletedAt: true } },
+        staffMember: { select: { id: true, deletedAt: true } },
+      },
+    });
+    if (!user || user.status === 'SUSPENDED' || user.status === 'INACTIVE') return null;
+    if (user.role !== 'SUPER_ADMIN' && user.society?.status !== 'ACTIVE') return null;
+
+    const sid = user.societyId;
+    const role = String(user.role);
+    const rooms = [`society:${sid}`];
+    if (['ADMIN', 'BUILDING_ADMIN', 'SUPER_ADMIN'].includes(role)) rooms.push(`society:${sid}:admin`);
+    if (SOS_RESPONDER_ROLES.includes(role)) rooms.push(`society:${sid}:responders`);
+    if (user.resident && !user.resident.deletedAt) {
+      rooms.push(`society:${sid}:resident:${userId}`, `resident:${user.resident.id}`);
+    }
+    if (user.staffMember && !user.staffMember.deletedAt) {
+      const staffId = user.staffMember.id;
+      rooms.push(`society:${sid}:staff:${userId}`, `staff:${staffId}`);
+      const groups = await this.prisma.staffMessageGroup.findMany({
+        where: { societyId: sid, memberIds: { has: staffId } },
+        select: { id: true },
+      });
+      for (const g of groups) rooms.push(`staff:msg:${g.id}`);
+    }
+    return { societyId: sid, role, rooms };
+  }
 
   async afterInit(server: Server) {
     this.realtime.setServer(server);
@@ -84,35 +133,18 @@ export class EventsGateway
         secret: this.config.get('JWT_SECRET'),
       });
 
+      const membership = await this.roomsFor(payload.sub);
+      if (!membership) {
+        client.disconnect(true);
+        return;
+      }
+
       const c = client as AuthedSocket;
       c.data.userId = payload.sub;
-      c.data.societyId = payload.societyId;
-      c.data.role = payload.role;
+      c.data.societyId = membership.societyId;
+      c.data.role = membership.role;
       c.data.tokenExp = payload.exp || 0;
-
-      // Auto-join rooms by role
-      const sid = payload.societyId;
-      const uid = payload.sub;
-      const role = String(payload.role || '').toUpperCase();
-
-      switch (role) {
-        case 'RESIDENT':
-          c.join(`society:${sid}:resident:${uid}`);
-          break;
-        case 'STAFF':
-          c.join(`society:${sid}:staff:${uid}`);
-          break;
-        case 'ADMIN':
-        case 'SUPER_ADMIN':
-          c.join(`society:${sid}:admin`);
-          break;
-        case 'GATE':
-        case 'GUARD':
-          c.join(`society:${sid}:gate`);
-          break;
-      }
-      // Society-wide broadcast room
-      c.join(`society:${sid}`);
+      await c.join(membership.rooms);
 
       // Schedule disconnect on token expiry
       if (c.data.tokenExp) {
@@ -129,7 +161,9 @@ export class EventsGateway
         }
       }
 
-      this.logger.debug(`socket connected user=${uid} role=${role} society=${sid}`);
+      this.logger.debug(
+        `socket connected user=${payload.sub} role=${membership.role} society=${membership.societyId}`,
+      );
     } catch (err) {
       this.logger.warn(`socket auth failed: ${(err as Error).message}`);
       client.disconnect(true);

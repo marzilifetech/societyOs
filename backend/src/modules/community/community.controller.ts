@@ -41,10 +41,11 @@ export class CommunityController {
   @Get('posts/:id/comments')
   getComments(
     @Param('id') id: string,
+    @SocietyId() societyId: string,
     @Query('page') page = 1,
     @Query('limit') limit = 20,
   ) {
-    return this.communityService.getComments(id, +page, +limit);
+    return this.communityService.getComments(id, +page, +limit, societyId);
   }
 
   @Post('posts/:id/comments')
@@ -67,7 +68,7 @@ export class CommunityController {
   }
 
   @Get('posts/:id')
-  getPost(@Param('id') id: string) {
-    return this.communityService.getPost(id);
+  getPost(@Param('id') id: string, @SocietyId() societyId: string, @CurrentUser() user: JwtPayload) {
+    return this.communityService.getPost(id, societyId, user.sub);
   }
 }

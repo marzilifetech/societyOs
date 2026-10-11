@@ -8,6 +8,7 @@ import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.de
 import { SocietyId } from '../../common/decorators/society.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserRole } from '@prisma/client';
+import { SubmitFeedbackDto } from './dto/feedback.dto';
 
 @ApiTags('feedback')
 @ApiBearerAuth()
@@ -21,7 +22,7 @@ export class FeedbackController {
   submitFeedback(
     @CurrentUser() user: JwtPayload,
     @SocietyId() societyId: string,
-    @Body() dto: { category?: string; message: string; isAnonymous?: boolean; rating?: number },
+    @Body() dto: SubmitFeedbackDto,
   ) {
     return this.feedbackService.submitFeedback(user.sub, societyId, dto);
   }

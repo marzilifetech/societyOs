@@ -3,6 +3,31 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { findResidentByUserId, requireResidentByUserId } from '../../common/utils/resident-context';
 import { PushService } from '../../common/notification/push.service';
 
+type EventWithCounts = {
+  date: Date;
+  category: string | null;
+  _count: { registrations: number };
+  registrations?: { waitlisted: boolean }[];
+};
+
+/** The fields the apps read on an event, list or detail. */
+function presentEvent<T extends EventWithCounts>(event: T, viewerIsResident: boolean) {
+  const mine = event.registrations?.[0];
+  return {
+    ...event,
+    category: event.category ?? 'OTHER',
+    eventDate: event.date,
+    // In IST: the server runs in UTC, so a 6:30 pm event read "01:00 pm".
+    eventTime: event.date.toLocaleTimeString('en-IN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: 'Asia/Kolkata',
+    }),
+    registrationCount: event._count.registrations,
+    myRegistration: viewerIsResident && mine ? { status: mine.waitlisted ? 'WAITLISTED' : 'REGISTERED' } : null,
+  };
+}
+
 @Injectable()
 export class EventService {
   private readonly logger = new Logger(EventService.name);
@@ -27,21 +52,26 @@ export class EventService {
       orderBy: { date: 'asc' },
     });
 
-    return events.map((event) => ({
-      ...event,
-      category: event.category ?? 'OTHER',
-      eventDate: event.date,
-      eventTime: event.date.toLocaleTimeString('en-IN', {
-        hour: '2-digit',
-        minute: '2-digit',
-      }),
-      registrationCount: event._count.registrations,
-      myRegistration: resident
-        ? event.registrations[0]
-          ? { status: event.registrations[0].waitlisted ? 'WAITLISTED' : 'REGISTERED' }
-          : null
-        : null,
-    }));
+    return events.map((event) => presentEvent(event, !!resident));
+  }
+
+  /**
+   * One event of the caller's society, shaped like a list row. It used to be
+   * the raw row — no `eventTime`, `registrationCount` or `myRegistration` —
+   * so the detail screen showed "Invalid Date" and offered "Register" to
+   * people already registered (who then got a 409).
+   */
+  async getEventForViewer(id: string, societyId: string, userId?: string) {
+    const resident = userId ? await findResidentByUserId(this.prisma, userId) : null;
+    const event = await this.prisma.event.findFirst({
+      where: { id, societyId },
+      include: {
+        _count: { select: { registrations: true } },
+        registrations: resident ? { where: { residentId: resident.id }, take: 1 } : false,
+      },
+    });
+    if (!event) throw new NotFoundException('Event not found');
+    return presentEvent(event, !!resident);
   }
 
   async getEvent(id: string) {

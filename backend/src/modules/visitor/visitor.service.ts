@@ -7,12 +7,13 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { VisitorStatus, VisitorType } from '@prisma/client';
+import { UserStatus, VisitorStatus, VisitorType } from '@prisma/client';
 import { CreateAtGateVisitorDto, CreateVisitorDto, CheckInVisitorDto } from './dto/visitor.dto';
 import { requireResidentByUserId } from '../../common/utils/resident-context';
 import { randomBytes } from 'crypto';
 import { VisitorGateway } from './visitor.gateway';
 import { PushService } from '../../common/notification/push.service';
+import { RESIDENT_BRIEF } from '../../common/prisma-selects';
 
 /**
  * Canonical India delivery partners shown to staff in the Add Entry form
@@ -57,6 +58,40 @@ type VisitorWithResidentFlat = {
   resident: { flat: { societyId: string } };
 };
 
+/** What the gate-approval push needs to know about a walk-in. */
+type PendingApprovalVisitor = {
+  id: string;
+  name: string;
+  purpose?: string | null;
+  photoUrl?: string | null;
+  type: VisitorType;
+  deliveryPartner?: string | null;
+  resident?: { userId?: string | null; flatId?: string | null } | null;
+};
+
+/** How long a recurring pass lasts when the resident sets no end date. */
+const RECURRING_DEFAULT_MS = 90 * 24 * 60 * 60 * 1000;
+const IST_OFFSET_MS = 330 * 60 * 1000;
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+
+/** 'Mon'…'Sun' for `now` in India. */
+export function istWeekday(now: Date): string {
+  return WEEKDAYS[new Date(now.getTime() + IST_OFFSET_MS).getUTCDay()];
+}
+
+/** 23:59:59.999 IST on a YYYY-MM-DD (or ISO) date. */
+export function endOfIstDay(date: string): Date {
+  const [y, m, d] = date.slice(0, 10).split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d, 23, 59, 59, 999) - IST_OFFSET_MS);
+}
+
+/** The weekdays a recurring pass is limited to, or null for any day. */
+function recurringDaysOf(visitor: { isRecurring?: boolean; recurringSchedule?: unknown }): string[] | null {
+  if (!visitor.isRecurring) return null;
+  const days = (visitor.recurringSchedule as { days?: unknown } | null)?.days;
+  return Array.isArray(days) && days.length ? days.map(String) : null;
+}
+
 @Injectable()
 export class VisitorService {
   constructor(
@@ -66,10 +101,10 @@ export class VisitorService {
   ) {}
 
   /**
-   * Fire the actionable visitor-arrival push to the resident (photo + name +
-   * time). Best-effort: never blocks or fails the gate check-in. The push is
-   * data-tagged VISITOR_ARRIVAL so the app routes a tap to the approve/deny
-   * review screen for this visit.
+   * Tell the resident their visitor has arrived (photo + name + time).
+   * Best-effort: never blocks or fails the gate check-in. It fires at
+   * check-in, when there is nothing left to decide, so the app opens the
+   * visit's details (`VISITOR_ARRIVAL` → /visitor/[id]), not the review screen.
    */
   private notifyResidentArrival(visitor: {
     id: string;
@@ -119,70 +154,84 @@ export class VisitorService {
    * The decide() endpoint is idempotent — duplicate taps and multi-device fan-
    * out collapse safely. Best-effort: never blocks visitor creation.
    */
-  private notifyResidentPendingApproval(visitor: {
-    id: string;
-    name: string;
-    purpose?: string | null;
-    photoUrl?: string | null;
-    type: VisitorType;
-    deliveryPartner?: string | null;
-    resident?: { userId?: string | null } | null;
-  }): void {
-    try {
-      const userId = visitor?.resident?.userId;
-      if (!userId) return;
+  private notifyResidentPendingApproval(visitor: PendingApprovalVisitor): void {
+    void this.sendPendingApproval(visitor).catch(() => {
+      /* best-effort; the gate flow must not depend on push delivery */
+    });
+  }
 
-      const isDelivery = visitor.type === VisitorType.DELIVERY;
-      const partner = visitor.deliveryPartner?.trim();
-      const purpose = visitor.purpose?.trim();
+  private async sendPendingApproval(visitor: PendingApprovalVisitor): Promise<void> {
+    if (!visitor.resident) return;
+    const userIds = await this.householdUserIds(visitor.resident);
+    if (userIds.length === 0) return;
 
-      const title = isDelivery
-        ? `${partner ?? 'Delivery'} at the gate`
-        : 'Visitor at the gate';
-      const body = isDelivery
-        ? `${visitor.name} is at the gate with a delivery. What should we do?`
-        : purpose
+    const isDelivery = visitor.type === VisitorType.DELIVERY;
+    const partner = visitor.deliveryPartner?.trim();
+    const purpose = visitor.purpose?.trim();
+
+    const title = isDelivery ? `${partner ?? 'Delivery'} at the gate` : 'Visitor at the gate';
+    const body = isDelivery
+      ? `${visitor.name} is at the gate with a delivery. What should we do?`
+      : purpose
         ? `${visitor.name} (${purpose}) is at the gate. Approve entry?`
         : `${visitor.name} is at the gate. Approve entry?`;
 
-      const actions = isDelivery
-        ? [
-            { id: 'APPROVE', title: 'Approve' },
-            { id: 'LEAVE_AT_SECURITY', title: 'Leave at security' },
-            { id: 'REJECT', title: 'Reject', destructive: true },
-          ]
-        : [
-            { id: 'APPROVE', title: 'Approve' },
-            { id: 'REJECT', title: 'Reject', destructive: true },
-          ];
+    const actions = isDelivery
+      ? [
+          { id: 'APPROVE', title: 'Approve' },
+          { id: 'LEAVE_AT_SECURITY', title: 'Leave at security' },
+          { id: 'REJECT', title: 'Reject', destructive: true },
+        ]
+      : [
+          { id: 'APPROVE', title: 'Approve' },
+          { id: 'REJECT', title: 'Reject', destructive: true },
+        ];
 
-      void this.push
-        .send(
-          userId,
-          {
-            title,
-            body,
-            category: isDelivery ? 'deliveries' : 'visitors_gate',
-            ...(visitor.photoUrl ? { imageUrl: visitor.photoUrl } : {}),
-            collapseKey: `visitor:${visitor.id}`,
-            actions,
-          },
-          {
-            type: isDelivery ? 'DELIVERY_APPROVAL_REQUEST' : 'VISITOR_APPROVAL_REQUEST',
-            visitId: visitor.id,
-            entityId: visitor.id,
-            visitorName: visitor.name,
-            actionGroup: isDelivery ? 'delivery_approval' : 'visitor_approval',
-            ...(partner ? { deliveryPartner: partner } : {}),
-            ...(purpose ? { purpose } : {}),
-          },
-        )
-        .catch(() => {
-          /* best-effort; gate flow must not depend on push delivery */
-        });
-    } catch {
-      /* never let an approval push break visitor creation */
+    const notification = {
+      title,
+      body,
+      category: isDelivery ? 'deliveries' : 'visitors_gate',
+      ...(visitor.photoUrl ? { imageUrl: visitor.photoUrl } : {}),
+      collapseKey: `visitor:${visitor.id}`,
+      actions,
+    };
+    const data = {
+      type: isDelivery ? 'DELIVERY_APPROVAL_REQUEST' : 'VISITOR_APPROVAL_REQUEST',
+      visitId: visitor.id,
+      entityId: visitor.id,
+      visitorName: visitor.name,
+      actionGroup: isDelivery ? 'delivery_approval' : 'visitor_approval',
+      ...(partner ? { deliveryPartner: partner } : {}),
+      ...(purpose ? { purpose } : {}),
+    };
+    await Promise.allSettled(userIds.map((uid) => this.push.send(uid, notification, data)));
+  }
+
+  /**
+   * Every active member of the host's flat. Only the named resident used to be
+   * asked, so when they were out or their phone was off the guard waited with
+   * no answer. The first decision wins: decide() is idempotent.
+   */
+  private async householdUserIds(resident: {
+    userId?: string | null;
+    flatId?: string | null;
+  }): Promise<string[]> {
+    const ids = new Set<string>(resident.userId ? [resident.userId] : []);
+    if (resident.flatId) {
+      const members = await this.prisma.resident.findMany({
+        // Approved, current members only: a sign-up still awaiting approval
+        // has a Resident row on the flat it chose, and must not see who is at
+        // that flat's gate.
+        where: {
+          flatId: resident.flatId,
+          deletedAt: null,
+          user: { status: UserStatus.ACTIVE },
+        },
+        select: { userId: true },
+      });
+      for (const m of members) ids.add(m.userId);
     }
+    return [...ids];
   }
 
   /**
@@ -201,8 +250,8 @@ export class VisitorService {
       visitor.approvalStatus === 'APPROVED'
         ? 'approved entry'
         : visitor.approvalStatus === 'LEFT_AT_SECURITY'
-        ? 'asked to leave it at security'
-        : 'rejected the entry';
+          ? 'asked to leave it at security'
+          : 'rejected the entry';
     const label = visitor.type === VisitorType.DELIVERY ? 'delivery' : 'visitor';
     try {
       void this.push
@@ -239,12 +288,23 @@ export class VisitorService {
   }
 
   /** QR gate: time window + revoked/expired rows (not applied when re-reading an already checked-in pass — see checkIn). */
-  private assertQrGateEligible(visitor: VisitorWithResidentFlat & {
-    status: VisitorStatus;
-    validFrom: Date | null;
-    validUntil: Date | null;
-  }) {
+  private assertQrGateEligible(
+    visitor: VisitorWithResidentFlat & {
+      status: VisitorStatus;
+      validFrom: Date | null;
+      validUntil: Date | null;
+      isRecurring?: boolean;
+      recurringSchedule?: unknown;
+    },
+  ) {
     const now = new Date();
+    const days = recurringDaysOf(visitor);
+    if (days && !days.includes(istWeekday(now))) {
+      throw new GoneException({
+        code: 'QR_NOT_TODAY',
+        message: `This pass is for ${days.join(', ')} only`,
+      });
+    }
     if (visitor.validFrom && now < visitor.validFrom) {
       throw new GoneException({
         code: 'QR_NOT_YET_VALID',
@@ -269,7 +329,8 @@ export class VisitorService {
         message: 'This visitor pass has expired',
       });
     }
-    if (visitor.status === VisitorStatus.CHECKED_OUT) {
+    // A recurring pass (maid, driver, tutor) is used again on the next visit.
+    if (visitor.status === VisitorStatus.CHECKED_OUT && !visitor.isRecurring) {
       throw new GoneException({
         code: 'QR_VISIT_ENDED',
         message: 'This visitor has already checked out',
@@ -286,9 +347,15 @@ export class VisitorService {
       });
     }
     const validFrom = dto.validFrom ? new Date(dto.validFrom) : new Date();
+    // A recurring pass lasts until its end date (the end of that day in IST),
+    // not 24 hours: every recurring pass used to stop working the next day.
     const validUntil = dto.validUntil
       ? new Date(dto.validUntil)
-      : new Date(validFrom.getTime() + 24 * 60 * 60 * 1000);
+      : dto.isRecurring
+        ? dto.recurringUntil
+          ? endOfIstDay(dto.recurringUntil)
+          : new Date(validFrom.getTime() + RECURRING_DEFAULT_MS)
+        : new Date(validFrom.getTime() + 24 * 60 * 60 * 1000);
 
     const recurringSchedule =
       dto.isRecurring && dto.recurringDays?.length
@@ -307,6 +374,10 @@ export class VisitorService {
         validFrom,
         validUntil,
         status: VisitorStatus.EXPECTED,
+        // The host resident created this pass — that IS the approval. Left at
+        // the schema default (PENDING), every pre-registered guest was turned
+        // away at the gate with "requires approval before check-in".
+        approvalStatus: 'APPROVED',
         isRecurring: dto.isRecurring ?? false,
         ...(recurringSchedule !== undefined && { recurringSchedule }),
       },
@@ -349,8 +420,7 @@ export class VisitorService {
       if (!isAllowedDeliveryPartner(partner)) {
         throw new BadRequestException({
           code: 'DELIVERY_PARTNER_INVALID',
-          message:
-            'Delivery partner must be one of the known list or start with "Other: ".',
+          message: 'Delivery partner must be one of the known list or start with "Other: ".',
         });
       }
       deliveryPartner = partner;
@@ -376,7 +446,7 @@ export class VisitorService {
         status: VisitorStatus.EXPECTED,
         approvalStatus: 'PENDING',
       },
-      include: { resident: { include: { user: true, flat: true } } },
+      include: { resident: RESIDENT_BRIEF },
     });
 
     this.notifyResidentPendingApproval(created);
@@ -393,11 +463,20 @@ export class VisitorService {
       });
     }
 
-    return this.prisma.visitor.findMany({
-      where: { residentId: resident.id },
+    const rows = await this.prisma.visitor.findMany({
+      // The whole flat's visitors: a gate request goes to every member, so any
+      // of them must be able to find it in their list.
+      where: { resident: { flatId: resident.flatId } },
       orderBy: { createdAt: 'desc' },
       take: 50,
     });
+    // Only a guard's walk-in waits on the household. Rows residents created
+    // themselves (passes and parking requests from older builds) were stored
+    // PENDING by mistake and showed as "Guest at gate" cards; the gate already
+    // treats them as approved, so report them that way.
+    return rows.map((v) =>
+      v.approvalStatus === 'PENDING' && !v.createdByStaffId ? { ...v, approvalStatus: 'APPROVED' as const } : v,
+    );
   }
 
   async findById(id: string, societyId: string, userId?: string) {
@@ -419,7 +498,9 @@ export class VisitorService {
           message: 'Resident is not in this society context',
         });
       }
-      if (visitor.residentId !== resident.id) {
+      // Any member of the host's flat may act on the visit (household-wide).
+      const sameFlat = !!resident.flatId && visitor.resident?.flatId === resident.flatId;
+      if (visitor.residentId !== resident.id && !sameFlat) {
         throw new ForbiddenException({
           code: 'VISITOR_NOT_OWNER',
           message: 'Visitor does not belong to this resident',
@@ -460,6 +541,10 @@ export class VisitorService {
 
     this.assertSameSociety(visitor, societyId);
 
+    if (dto.decision === 'DENY') {
+      return this.denyAtGate(visitor);
+    }
+
     // Idempotent check-in: repeat scan returns the same row, no duplicate updates (409-style conflicts avoided).
     if (visitor.status === VisitorStatus.CHECKED_IN) {
       return visitor;
@@ -467,7 +552,10 @@ export class VisitorService {
 
     this.assertQrGateEligible(visitor);
 
-    if (visitor.approvalStatus === 'PENDING') {
+    // Only a walk-in logged by a guard (createdByStaffId set) waits on the
+    // resident's decision. Passes residents created before this fix were
+    // stored PENDING by mistake; they are approved by their own host.
+    if (visitor.approvalStatus === 'PENDING' && visitor.createdByStaffId) {
       throw new ForbiddenException({
         code: 'VISITOR_PENDING_APPROVAL',
         message: 'Visitor entry requires admin approval before check-in',
@@ -486,6 +574,8 @@ export class VisitorService {
         status: VisitorStatus.CHECKED_IN,
         entryAt: new Date(),
         checkedInBy: guardUserId,
+        // A recurring visitor coming back: clear the previous visit's exit.
+        ...(visitor.status === VisitorStatus.CHECKED_OUT ? { exitAt: null } : {}),
       },
       include: { resident: { include: { flat: true } } },
     });
@@ -501,6 +591,34 @@ export class VisitorService {
     this.notifyResidentArrival(updated);
 
     return updated;
+  }
+
+  /**
+   * The guard turns a pass-holder away at the gate. Idempotent; a visitor who
+   * is already inside can't be "denied" (check them out instead).
+   */
+  private async denyAtGate(visitor: { id: string; status: VisitorStatus }) {
+    if (visitor.status === VisitorStatus.DENIED) {
+      return this.prisma.visitor.findUnique({
+        where: { id: visitor.id },
+        include: { resident: { include: { flat: true } } },
+      });
+    }
+    if (
+      visitor.status === VisitorStatus.CHECKED_IN ||
+      visitor.status === VisitorStatus.CHECKED_OUT
+    ) {
+      throw new ConflictException({
+        code: 'DENY_NOT_ALLOWED',
+        message: 'This visitor is already inside or has left. Check them out instead.',
+        currentStatus: visitor.status,
+      });
+    }
+    return this.prisma.visitor.update({
+      where: { id: visitor.id },
+      data: { status: VisitorStatus.DENIED },
+      include: { resident: { include: { flat: true } } },
+    });
   }
 
   async checkOut(visitorId: string, societyId: string) {
@@ -532,10 +650,7 @@ export class VisitorService {
     });
   }
 
-  async listForSociety(
-    societyId: string,
-    opts?: { approvalStatus?: string; date?: string },
-  ) {
+  async listForSociety(societyId: string, opts?: { approvalStatus?: string; date?: string }) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -545,7 +660,7 @@ export class VisitorService {
         ...(opts?.approvalStatus ? { approvalStatus: opts.approvalStatus } : {}),
         ...(opts?.date === 'today' ? { createdAt: { gte: today } } : {}),
       },
-      include: { resident: { include: { user: true, flat: true } } },
+      include: { resident: RESIDENT_BRIEF },
       orderBy: { createdAt: 'desc' },
       take: 100,
     });
@@ -566,6 +681,10 @@ export class VisitorService {
       resident: {
         name: v.resident.user.name,
         unit: { flatNumber: v.resident.flat?.number, tower: v.resident.flat?.block },
+        // Both shapes the staff app has read: `name`/`unit` (installed builds)
+        // and `user.name`/`flat` (current builds).
+        user: { name: v.resident.user.name },
+        flat: v.resident.flat ? { block: v.resident.flat.block, number: v.resident.flat.number } : null,
       },
       createdAt: v.createdAt,
     }));
@@ -588,7 +707,7 @@ export class VisitorService {
         approvedById: approverUserId,
         approvedAt: new Date(),
       },
-      include: { resident: { include: { user: true, flat: true } } },
+      include: { resident: RESIDENT_BRIEF },
     });
   }
 
@@ -605,7 +724,7 @@ export class VisitorService {
     return this.prisma.visitor.update({
       where: { id: visitorId },
       data: { approvalStatus: 'REJECTED' },
-      include: { resident: { include: { user: true, flat: true } } },
+      include: { resident: RESIDENT_BRIEF },
     });
   }
 
@@ -631,8 +750,8 @@ export class VisitorService {
       action === 'APPROVE'
         ? 'APPROVED'
         : action === 'LEAVE_AT_SECURITY'
-        ? 'LEFT_AT_SECURITY'
-        : 'REJECTED';
+          ? 'LEFT_AT_SECURITY'
+          : 'REJECTED';
 
     const res = await this.prisma.visitor.updateMany({
       where: { id: visitorId, approvalStatus: 'PENDING' },
@@ -641,7 +760,7 @@ export class VisitorService {
 
     const visitor = await this.prisma.visitor.findUnique({
       where: { id: visitorId },
-      include: { resident: { include: { user: true, flat: true } } },
+      include: { resident: RESIDENT_BRIEF },
     });
 
     // Fire-and-forget feedback push to the guard who created the entry, but
@@ -665,7 +784,10 @@ export class VisitorService {
     if (existing.status === VisitorStatus.DENIED) {
       return existing;
     }
-    if (existing.status === VisitorStatus.CHECKED_IN || existing.status === VisitorStatus.CHECKED_OUT) {
+    if (
+      existing.status === VisitorStatus.CHECKED_IN ||
+      existing.status === VisitorStatus.CHECKED_OUT
+    ) {
       throw new ConflictException({
         code: 'DENY_NOT_ALLOWED',
         message: 'Cannot deny a visitor that has already entered or completed their visit',

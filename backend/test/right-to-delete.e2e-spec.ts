@@ -26,5 +26,5 @@ describe('Right-to-delete (C1)', () => {
     expect(trail[0].action).toBe('USER_LOGIN');
   });
 
-  it.skip('cascades anonymisation across related entities — unblocks when P3 lands DataExportService');
+  it.todo('cascades anonymisation across related entities — unblocks when P3 lands DataExportService');
 });

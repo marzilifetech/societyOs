@@ -72,11 +72,12 @@ export class CanteenController {
     @Query('status') status?: string,
     @Query('scope') scope?: string,
   ) {
-    // `scope=mine` forces the personal view. A resident who is also a society
-    // admin has role=ADMIN, so a bare role check handed them the whole
-    // society's pre-orders inside their own resident app.
+    // Anyone who lives here gets their own orders unless they ask for the
+    // society's (`scope=all`, sent by the admin console). The shipped resident
+    // app sends no scope, so a resident who is also an admin was shown every
+    // household's orders, names and flats.
     const effectiveRole =
-      scope === 'mine' && (user.isResident || user.role === UserRole.RESIDENT)
+      scope !== 'all' && (user.isResident || user.role === UserRole.RESIDENT)
         ? UserRole.RESIDENT
         : user.role;
     return this.canteenService.listPreOrders(user.sub, societyId, effectiveRole, date, status);

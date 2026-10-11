@@ -26,8 +26,9 @@ export class EventController {
   }
 
   @Get(':id')
-  getEvent(@Param('id') id: string) {
-    return this.eventService.getEvent(id);
+  getEvent(@Param('id') id: string, @SocietyId() societyId: string, @CurrentUser() user: JwtPayload) {
+    const isResident = user.isResident || user.role === UserRole.RESIDENT;
+    return this.eventService.getEventForViewer(id, societyId, isResident ? user.sub : undefined);
   }
 
   @Post(':id/register')

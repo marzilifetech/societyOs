@@ -58,8 +58,50 @@ const QUIET_END_HOUR = 7; //  07:00 IST
 
 const DEFER_QUEUE = 'push-deferred';
 
-/** Approvals/deliveries are pointless after ~30 min — let FCM/APNs drop them. */
-const ACTIONABLE_TTL_MS = 30 * 60 * 1000;
+/** A gate approval prompt is pointless after ~30 min — let FCM/APNs drop it. */
+const GATE_PROMPT_TTL_MS = 30 * 60 * 1000;
+
+/** Categories whose action buttons answer someone waiting at the gate. */
+const GATE_PROMPT_CATEGORIES = new Set(['visitors_gate', 'deliveries']);
+
+/** Upper bound on queueing a deferred push, so a Redis outage can't stall callers. */
+const DEFER_ENQUEUE_TIMEOUT_MS = 2000;
+
+/**
+ * Users who must not receive society pushes: deactivated/suspended staff and
+ * residents, and rejected sign-ups. (Exact role match used to be the only
+ * filter, so a deactivated guard kept receiving every SOS and task broadcast.)
+ */
+const NON_RECIPIENT_STATUSES = ['INACTIVE', 'SUSPENDED', 'REJECTED'] as const;
+
+/**
+ * FCM error codes that mean THIS TOKEN is dead and should be forgotten.
+ *
+ * `messaging/invalid-argument` used to be treated the same way, but FCM also
+ * returns it for problems with the MESSAGE (e.g. a payload over 4 KB). One
+ * oversized broadcast then deleted every recipient's device row — a whole
+ * society silently stopped receiving pushes, and the apps' "already
+ * registered" cache stopped them re-registering. It now counts only when the
+ * error is explicitly about the registration token.
+ */
+export function isDeadTokenError(code: string | undefined, message: string | undefined): boolean {
+  const c = String(code ?? '');
+  if (/registration-token-not-registered|invalid-registration-token|Unregistered/i.test(c)) {
+    return true;
+  }
+  return /invalid-argument/i.test(c) && /registration token/i.test(String(message ?? ''));
+}
+
+/**
+ * A push that asks the recipient to DECIDE something (it carries action
+ * buttons: approve a visitor, accept a task). Someone is waiting on the
+ * answer, so it is never held for quiet hours and never suppressed by a
+ * category mute — a muted "visitor arrivals" category used to leave the guard
+ * at the gate waiting on a prompt the resident never saw.
+ */
+function requiresResponse(notification: PushNotification): boolean {
+  return !!notification.actions && notification.actions.length > 0;
+}
 
 /**
  * Society fan-outs up to this many recipients get one message per recipient so
@@ -67,6 +109,22 @@ const ACTIONABLE_TTL_MS = 30 * 60 * 1000;
  * 500-token multicast chunks with no badge (perf).
  */
 const SOCIETY_BADGE_MAX_RECIPIENTS = 200;
+
+/**
+ * What a push carries of the title/body. FCM rejects messages over 4 KB, and
+ * the body travels twice in data-only mode (data + notification). The full
+ * text stays in the inbox row; the tray only ever shows a couple of lines.
+ */
+const PUSH_TITLE_MAX = 120;
+const PUSH_BODY_MAX = 900;
+
+export function clampForPush(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1).trimEnd()}…`;
+}
+
+/** One role, several roles, or everyone (null). */
+export type SocietyRoleFilter = string | string[] | null;
 
 type DeferredJob =
   | {
@@ -80,12 +138,31 @@ type DeferredJob =
   | {
       kind: 'society';
       societyId: string;
-      role: string | null;
+      role: SocietyRoleFilter;
       notification: PushNotification;
       data?: Record<string, string>;
       /** DEFERRED NotificationLog row written at defer time; reconciled on delivery. */
       logId?: string | null;
+    }
+  | {
+      /** An admin push booked for a later time; see `scheduleAt`. */
+      kind: 'scheduled';
+      target: ScheduledTarget;
+      notification: PushNotification;
+      data?: Record<string, string>;
+      logId?: null;
     };
+
+/** Who a scheduled push goes to: a society role filter, or named users. */
+export type ScheduledTarget =
+  | { societyId: string; role: SocietyRoleFilter }
+  | { userIds: string[] };
+
+/** How far ahead an admin may book a push. Redis is not long-term storage. */
+export const MAX_SCHEDULE_AHEAD_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** Parallel sends while delivering a scheduled push to named users. */
+const SCHEDULED_SEND_CONCURRENCY = 20;
 
 function istWallClock(now: Date): { y: string; mo: string; d: string; h: number } {
   const parts = Object.fromEntries(
@@ -142,6 +219,7 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PushService.name);
   private initialized = false;
   private redisConn: IORedis | null = null;
+  private producerConn: IORedis | null = null;
   private deferQueue: Queue | null = null;
   private deferWorker: Worker | null = null;
 
@@ -156,16 +234,24 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
     const url = this.config.get<string>('REDIS_URL');
     if (!url) return;
     try {
+      // The WORKER needs `maxRetriesPerRequest: null` (BullMQ requirement for
+      // blocking commands). The PRODUCER must fail fast instead: with retries
+      // unlimited, `queue.add` simply hung while Redis was down, and every
+      // request that sent a push during quiet hours hung with it.
       this.redisConn = new IORedis(url, { maxRetriesPerRequest: null });
+      this.producerConn = new IORedis(url, { maxRetriesPerRequest: 1, enableOfflineQueue: false });
+      this.producerConn.on('error', (e) => this.logger.debug(`[push] producer redis: ${e.message}`));
       // bullmq bundles its own ioredis types, so the app's IORedis instance is
       // structurally identical but nominally incompatible — cast is safe.
-      const connection = this.redisConn as unknown as ConnectionOptions;
+      const connection = this.producerConn as unknown as ConnectionOptions;
       this.deferQueue = new Queue(DEFER_QUEUE, { connection });
       this.deferWorker = new Worker(
         DEFER_QUEUE,
         async (job) => {
           const payload = job.data as DeferredJob;
-          if (payload.kind === 'user') {
+          if (payload.kind === 'scheduled') {
+            await this.deliverScheduled(payload.target, payload.notification, payload.data);
+          } else if (payload.kind === 'user') {
             await this.sendNow(
               payload.userId,
               payload.notification,
@@ -194,10 +280,12 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
       this.deferWorker = null;
       try {
         await this.redisConn?.quit();
+        await this.producerConn?.quit();
       } catch {
         /* noop */
       }
       this.redisConn = null;
+      this.producerConn = null;
     }
   }
 
@@ -206,6 +294,7 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
       await this.deferWorker?.close();
       await this.deferQueue?.close();
       await this.redisConn?.quit();
+      await this.producerConn?.quit();
     } catch {
       /* noop */
     }
@@ -254,14 +343,17 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
       status: 'DEFERRED',
     });
     try {
-      await this.deferQueue.add(
-        'deliver',
-        { ...job, logId: logId ?? undefined },
-        {
-          delay,
-          removeOnComplete: { count: 500 },
-          removeOnFail: { count: 50 },
-        },
+      await rejectAfter(
+        this.deferQueue.add(
+          'deliver',
+          { ...job, logId: logId ?? undefined },
+          {
+            delay,
+            removeOnComplete: { count: 500 },
+            removeOnFail: { count: 50 },
+          },
+        ),
+        DEFER_ENQUEUE_TIMEOUT_MS,
       );
     } catch (e) {
       this.logger.warn(`[push] defer queue unavailable: ${(e as Error).message}`);
@@ -298,12 +390,10 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
    * NotificationPreference table wins; in its absence we fall back to the legacy
    * `user.notificationPrefs` JSON for migration continuity.
    */
-  private async isOptedOut(
-    userId: string,
-    category?: string,
-    critical?: boolean,
-  ): Promise<boolean> {
+  private async isOptedOut(userId: string, notification: PushNotification): Promise<boolean> {
+    const { category, critical } = notification;
     if (critical === true) return false;
+    if (requiresResponse(notification)) return false;
     if (!category) return false;
     if (isForceOn(category)) return false;
 
@@ -328,10 +418,15 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
    */
   private buildMessage(
     tokens: string[],
-    notification: PushNotification,
+    fullNotification: PushNotification,
     data?: Record<string, string>,
     opts?: { badge?: number },
   ): admin.messaging.MulticastMessage {
+    const notification: PushNotification = {
+      ...fullNotification,
+      title: clampForPush(fullNotification.title, PUSH_TITLE_MAX),
+      body: clampForPush(fullNotification.body, PUSH_BODY_MAX),
+    };
     // Resolve coarse-grained type (MARKETING/DELIVERY/EMERGENCY) from the
     // category key (preferred) or the free-form data.type. `notification.critical`
     // is a hard override — if the caller flagged the push as critical we route
@@ -373,7 +468,8 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
     // app `assets/sounds/README.md` for the swap-in checklist.
     const apnsSound = ntype === 'MARKETING' ? undefined : 'default';
 
-    const hasActions = !!notification.actions && notification.actions.length > 0;
+    const hasActions = requiresResponse(notification);
+
     const dataOnly = !!notification.dataOnly || hasActions;
     // High FCM priority for anything except MARKETING — DELIVERY + EMERGENCY
     // need to wake the device + show heads-up instead of being batched in doze.
@@ -382,19 +478,24 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
     const android: admin.messaging.AndroidConfig = {
       priority: highPriority ? 'high' : 'normal',
     };
+    // De-duplication is done with the notification TAG (a newer push for the
+    // same visitor/task replaces the tray entry), NOT `android.collapseKey`:
+    // FCM keeps at most 4 distinct collapse keys per device while it is
+    // offline or dozing and drops the rest, and every key here is unique per
+    // record — a guard phone that missed five task pushes lost one of them.
     const apnsHeaders: Record<string, string> = {};
-    if (notification.collapseKey) {
-      android.collapseKey = notification.collapseKey;
-      apnsHeaders['apns-collapse-id'] = notification.collapseKey;
-    }
+    const tag = notification.collapseKey;
+    if (tag) apnsHeaders['apns-collapse-id'] = tag;
 
-    // Time-boxed relevance: an approval/delivery prompt is useless after ~30
+    // Time-boxed relevance: a gate approval prompt is useless after ~30
     // minutes, so let FCM/APNs expire it instead of waking the user later.
-    // SOS and community-style pushes keep the platform default (no expiry).
-    if (channelId === 'approvals' || channelId === 'deliveries') {
-      android.ttl = ACTIONABLE_TTL_MS;
+    // This used to apply to the whole channel, so a parcel-held notice, a
+    // visitor outcome or a task assignment also vanished from any phone that
+    // was offline for half an hour.
+    if (hasActions && notification.category && GATE_PROMPT_CATEGORIES.has(notification.category)) {
+      android.ttl = GATE_PROMPT_TTL_MS;
       apnsHeaders['apns-expiration'] = String(
-        Math.floor((Date.now() + ACTIONABLE_TTL_MS) / 1000),
+        Math.floor((Date.now() + GATE_PROMPT_TTL_MS) / 1000),
       );
     }
 
@@ -436,6 +537,7 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
           channelId,
           title: notification.title,
           body: notification.body,
+          ...(tag ? { tag } : {}),
           ...(notification.imageUrl ? { imageUrl: notification.imageUrl } : {}),
           ...(opts?.badge !== undefined ? { notificationCount: opts.badge } : {}),
         },
@@ -469,6 +571,7 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
       ...android,
       notification: {
         channelId,
+        ...(tag ? { tag } : {}),
         ...(notification.imageUrl ? { imageUrl: notification.imageUrl } : {}),
         ...(opts?.badge !== undefined ? { notificationCount: opts.badge } : {}),
       },
@@ -603,7 +706,7 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
       return { ok: false, reason: 'user_not_found' };
     }
 
-    if (await this.isOptedOut(userId, notification.category, notification.critical)) {
+    if (await this.isOptedOut(userId, notification)) {
       await this.writeLog({ id: deferredLogId, userId, notification, data, status: 'SKIPPED' });
       return { ok: false, reason: 'opted_out' };
     }
@@ -647,11 +750,7 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
 
       const invalidTokens: string[] = [];
       res.responses.forEach((r, i) => {
-        const code = (r.error as any)?.errorInfo?.code || r.error?.message;
-        if (
-          code &&
-          /Unregistered|registration-token-not-registered|invalid-argument/i.test(String(code))
-        ) {
+        if (r.error && isDeadTokenError((r.error as any)?.errorInfo?.code ?? r.error.code, r.error.message)) {
           invalidTokens.push(tokens[i]);
         }
       });
@@ -684,6 +783,7 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
    */
   private isTimeSensitive(notification: PushNotification): boolean {
     if (notification.critical) return true;
+    if (requiresResponse(notification)) return true;
     const cat = notification.category ? getCategory(notification.category) : undefined;
     if (cat?.actionable) return true;
     if (notification.category && isForceOn(notification.category)) return true;
@@ -704,6 +804,53 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
     return this.initialized;
   }
 
+  /**
+   * Book a push for `at`. It goes out through the ordinary `send` path, so
+   * opt-outs and quiet hours are applied at delivery time, not booking time.
+   *
+   * Returns null when there is no Redis queue: the caller must say scheduling
+   * is unavailable. (It used to save a Notice that nothing ever sent, and that
+   * then appeared on every resident's notice board.)
+   */
+  async scheduleAt(
+    at: Date,
+    target: ScheduledTarget,
+    notification: PushNotification,
+    data?: Record<string, string>,
+  ): Promise<{ jobId: string } | null> {
+    if (!this.deferQueue) return null;
+    const delay = Math.max(0, at.getTime() - Date.now());
+    const job: DeferredJob = { kind: 'scheduled', target, notification, data };
+    try {
+      const added = await rejectAfter(
+        this.deferQueue.add('scheduled', job, {
+          delay,
+          removeOnComplete: { count: 500 },
+          removeOnFail: { count: 50 },
+        }),
+        DEFER_ENQUEUE_TIMEOUT_MS,
+      );
+      return { jobId: String(added.id) };
+    } catch (e) {
+      this.logger.warn(`[push] could not schedule push: ${(e as Error).message}`);
+      return null;
+    }
+  }
+
+  private async deliverScheduled(
+    target: ScheduledTarget,
+    notification: PushNotification,
+    data?: Record<string, string>,
+  ): Promise<void> {
+    if ('societyId' in target) {
+      await this.sendToSociety(target.societyId, target.role, notification, data);
+      return;
+    }
+    for (const batch of chunk(target.userIds, SCHEDULED_SEND_CONCURRENCY)) {
+      await Promise.allSettled(batch.map((uid) => this.send(uid, notification, data)));
+    }
+  }
+
   /** True when quiet-hours deferral can actually hold a push for later. */
   hasDeferQueue(): boolean {
     return this.deferQueue !== null;
@@ -720,7 +867,7 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
     });
     if (!user) return { ok: false, reason: 'user_not_found' };
 
-    if (await this.isOptedOut(userId, notification.category, notification.critical)) {
+    if (await this.isOptedOut(userId, notification)) {
       return { ok: false, reason: 'opted_out' };
     }
 
@@ -744,7 +891,7 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
 
   private async sendToSocietyNow(
     societyId: string,
-    role: string | null,
+    role: SocietyRoleFilter,
     notification: PushNotification,
     data?: Record<string, string>,
     deferredLogId?: string,
@@ -774,8 +921,12 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
       return { sent: 0, failed: 0, cleaned: 0 };
     }
 
-    const where: Record<string, unknown> = { societyId };
-    if (role) where.role = role;
+    const where: Record<string, unknown> = {
+      societyId,
+      status: { notIn: [...NON_RECIPIENT_STATUSES] },
+    };
+    if (Array.isArray(role)) where.role = { in: role };
+    else if (role) where.role = role;
     const users = await this.prisma.user.findMany({
       where: where as any,
       select: { id: true, fcmToken: true, notificationPrefs: true },
@@ -787,7 +938,11 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
 
     // Batch eligibility (no per-user queries — avoids N+1 on a society broadcast).
     const category = notification.category;
-    const bypass = notification.critical === true || !category || isForceOn(category);
+    const bypass =
+      notification.critical === true ||
+      requiresResponse(notification) ||
+      !category ||
+      isForceOn(category);
     const userIds = users.map((u) => u.id);
 
     const prefByUser = new Map<string, boolean>();
@@ -854,8 +1009,7 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
 
         const invalidTokens: string[] = [];
         res.responses.forEach((r, i) => {
-          const code = (r.error as any)?.errorInfo?.code || r.error?.message;
-          if (code && /Unregistered|registration-token-not-registered|invalid-argument/i.test(String(code))) {
+          if (r.error && isDeadTokenError((r.error as any)?.errorInfo?.code ?? r.error.code, r.error.message)) {
             invalidTokens.push(batchTokens[i]);
           }
         });
@@ -866,7 +1020,11 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
       }
     };
 
-    if (recipientIds.length <= SOCIETY_BADGE_MAX_RECIPIENTS) {
+    // Emergencies take the fastest path: no per-recipient badge bookkeeping,
+    // every 500-token chunk in flight at once.
+    if (notification.critical) {
+      await Promise.all(chunk(tokens, 500).map((c) => dispatch(c)));
+    } else if (recipientIds.length <= SOCIETY_BADGE_MAX_RECIPIENTS) {
       // Small fan-out: one message per recipient so every device carries its
       // own unread badge. One grouped count query for all recipients (not N).
       const unreadByUser = new Map<string, number>();
@@ -939,7 +1097,7 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
    */
   async sendToSociety(
     societyId: string,
-    role: string | null,
+    role: SocietyRoleFilter,
     notification: PushNotification,
     data?: Record<string, string>,
   ): Promise<{ sent: number; failed: number; cleaned: number; queued?: boolean }> {
@@ -970,6 +1128,15 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
     const r = await this.sendToSocietyNow(societyId, role, notification, data);
     return { ...r, queued: false };
   }
+}
+
+/** `promise`, or a rejection once `ms` have passed — whichever comes first. */
+function rejectAfter<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 function chunk<T>(arr: T[], size: number): T[][] {

@@ -2,7 +2,7 @@ import { Injectable, Logger, NotFoundException, BadRequestException, ConflictExc
 import { AgmMeetingStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PushService } from '../../common/notification/push.service';
-import { requireResidentByUserId } from '../../common/utils/resident-context';
+import { findResidentByUserId, requireResidentByUserId } from '../../common/utils/resident-context';
 import { VoteDto, VoteChoice, CreateResolutionDto } from './dto/agm.dto';
 
 @Injectable()
@@ -13,13 +13,21 @@ export class AgmService {
     private push: PushService,
   ) {}
 
-  async getMeetings(societyId: string) {
-    const meetings = await this.prisma.agmMeeting.findMany({
-      where: { societyId },
-      include: { resolutions: true },
-      orderBy: { date: 'desc' },
-    });
-    return meetings.map((m) => this.decorateMeeting(m));
+  /**
+   * The society's meetings. With `userId`, each resolution also carries the
+   * caller's own vote (`myVote`): without it the app offered "Vote Now"
+   * forever and a second vote came back as an error.
+   */
+  async getMeetings(societyId: string, userId?: string) {
+    const [meetings, viewer] = await Promise.all([
+      this.prisma.agmMeeting.findMany({
+        where: { societyId },
+        include: { resolutions: true },
+        orderBy: { date: 'desc' },
+      }),
+      userId ? findResidentByUserId(this.prisma, userId) : null,
+    ]);
+    return meetings.map((m) => this.decorateMeeting(m, viewer?.id));
   }
 
   /**
@@ -114,16 +122,17 @@ export class AgmService {
    * residentId -> choice, and returning it wholesale leaked every resident's
    * individual vote to any caller.
    */
-  private decorateMeeting<T extends { resolutions?: any[] }>(meeting: T) {
+  private decorateMeeting<T extends { resolutions?: any[] }>(meeting: T, viewerResidentId?: string) {
     if (!Array.isArray(meeting.resolutions)) return meeting;
     return {
       ...meeting,
-      resolutions: meeting.resolutions.map((r) => this.decorateResolution(r)),
+      resolutions: meeting.resolutions.map((r) => this.decorateResolution(r, viewerResidentId)),
     };
   }
 
-  private decorateResolution(resolution: any) {
+  private decorateResolution(resolution: any, viewerResidentId?: string) {
     const raw = (resolution?.votes as Record<string, any>) ?? {};
+    const proxies: Record<string, string> = raw.__proxies ?? {};
     const counts = { FOR: 0, AGAINST: 0, ABSTAIN: 0, total: 0 };
     for (const [key, value] of Object.entries(raw)) {
       if (key === '__proxies' || key === '__deadline') continue;
@@ -138,6 +147,12 @@ export class AgmService {
       ...rest,
       votingDeadline: raw.__deadline ?? null,
       voteSummary: counts,
+      // Flat counts are what the app's results bar reads.
+      forCount: counts.FOR,
+      againstCount: counts.AGAINST,
+      abstainCount: counts.ABSTAIN,
+      myVote: viewerResidentId ? (raw[viewerResidentId] as string | undefined) ?? null : null,
+      myProxy: viewerResidentId ? proxies[viewerResidentId] ?? null : null,
     };
   }
 
@@ -183,33 +198,22 @@ export class AgmService {
     });
   }
 
-  async getMeetingWithMyVotes(meetingId: string, userId: string) {
-    const meeting = await this.prisma.agmMeeting.findUnique({
-      where: { id: meetingId },
-      include: { resolutions: true },
-    });
+  /**
+   * One meeting of the caller's society, with their own votes. It returned
+   * every resident's individual vote (the raw `votes` map), counted the
+   * deadline entry as a vote, 404'd for admins with no resident record and
+   * answered for any society's meeting id.
+   */
+  async getMeetingWithMyVotes(meetingId: string, userId: string, societyId?: string) {
+    const [meeting, viewer] = await Promise.all([
+      this.prisma.agmMeeting.findFirst({
+        where: { id: meetingId, ...(societyId ? { societyId } : {}) },
+        include: { resolutions: true },
+      }),
+      findResidentByUserId(this.prisma, userId),
+    ]);
     if (!meeting) throw new NotFoundException('Meeting not found');
-
-    const resident = await requireResidentByUserId(this.prisma, userId);
-
-    const resolutions = meeting.resolutions.map((resolution) => {
-      const allData = (resolution.votes as Record<string, any>) ?? {};
-      const proxies: Record<string, string> = allData['__proxies'] ?? {};
-      const counts = { FOR: 0, AGAINST: 0, ABSTAIN: 0, total: 0 };
-      for (const [key, vote] of Object.entries(allData)) {
-        if (key === '__proxies') continue;
-        counts[vote as keyof typeof counts]++;
-        counts.total++;
-      }
-      return {
-        ...resolution,
-        voteSummary: counts,
-        myVote: allData[resident.id] ?? null,
-        myProxy: proxies[resident.id] ?? null,
-      };
-    });
-
-    return { ...meeting, resolutions };
+    return this.decorateMeeting(meeting, viewer?.id);
   }
 
   async castResolutionVote(resolutionId: string, userId: string, vote: VoteChoice) {

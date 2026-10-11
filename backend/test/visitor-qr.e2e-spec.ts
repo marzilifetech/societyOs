@@ -38,5 +38,5 @@ describe('Visitor QR flow', () => {
     expect(await redeem('tok_abc123')).toEqual({ ok: false, reason: 'ALREADY_USED' });
   });
 
-  it.skip('VisitorService.generatePass HMAC-signs token — unblocks when P2 ships signed-token impl');
+  it.todo('VisitorService.generatePass HMAC-signs token — unblocks when P2 ships signed-token impl');
 });

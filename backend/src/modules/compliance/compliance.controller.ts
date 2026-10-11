@@ -21,6 +21,35 @@ import { ComplianceService } from './compliance.service';
 import { ConsentService } from '../../common/consent/consent.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { Throttle } from '@nestjs/throttler';
+import { SocietyId } from '../../common/decorators/society.decorator';
+import type { JwtPayload } from '../../common/decorators/current-user.decorator';
+
+/**
+ * Audit-log filter for the caller. A society admin sees their own society's
+ * log only — the controller used to apply no society filter at all (AuditLog
+ * is a cross-tenant model the tenant extension does not scope), so any admin
+ * could read every society's before/after snapshots, IPs and user agents.
+ * Super admins keep the platform-wide view.
+ */
+export function auditWhere(
+  user: JwtPayload,
+  societyId: string,
+  q: { entity?: string; adminId?: string; action?: string; from?: string; to?: string },
+): Record<string, unknown> {
+  const where: Record<string, any> = {};
+  if (user.role !== 'SUPER_ADMIN') where.societyId = societyId;
+  if (q.entity) where.entityType = { equals: q.entity, mode: 'insensitive' };
+  if (q.adminId) where.actorId = q.adminId;
+  if (q.action) where.action = { contains: q.action, mode: 'insensitive' };
+  const from = q.from ? new Date(q.from) : null;
+  const to = q.to ? new Date(q.to) : null;
+  if ((from && !isNaN(from.getTime())) || (to && !isNaN(to.getTime()))) {
+    where.createdAt = {};
+    if (from && !isNaN(from.getTime())) where.createdAt.gte = from;
+    if (to && !isNaN(to.getTime())) where.createdAt.lte = to;
+  }
+  return where;
+}
 
 @Controller('compliance')
 @UseGuards(JwtAuthGuard)
@@ -75,22 +104,18 @@ export class AdminAuditLogsController {
 
   @Get()
   async list(
+    @CurrentUser() user: JwtPayload,
+    @SocietyId() societyId: string,
     @Query('entity') entity?: string,
     @Query('adminId') adminId?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('cursor') cursor?: string,
     @Query('take') takeStr?: string,
+    @Query('action') action?: string,
   ) {
     const take = Math.min(parseInt(takeStr ?? '50', 10) || 50, 200);
-    const where: any = {};
-    if (entity) where.entityType = entity;
-    if (adminId) where.actorId = adminId;
-    if (from || to) {
-      where.createdAt = {};
-      if (from) where.createdAt.gte = new Date(from);
-      if (to) where.createdAt.lte = new Date(to);
-    }
+    const where = auditWhere(user, societyId, { entity, adminId, action, from, to });
     const items = await (this.prisma as any).auditLog.findMany({
       where,
       orderBy: { createdAt: 'desc' },
@@ -110,17 +135,13 @@ export class AdminAuditLogsController {
   @Header('Content-Disposition', 'attachment; filename="audit-logs.csv"')
   async exportCsv(
     @Res({ passthrough: true }) _res: Response,
+    @CurrentUser() user: JwtPayload,
+    @SocietyId() societyId: string,
     @Query('entity') entity?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
   ): Promise<StreamableFile> {
-    const where: any = {};
-    if (entity) where.entityType = entity;
-    if (from || to) {
-      where.createdAt = {};
-      if (from) where.createdAt.gte = new Date(from);
-      if (to) where.createdAt.lte = new Date(to);
-    }
+    const where = auditWhere(user, societyId, { entity, from, to });
     const rows = await (this.prisma as any).auditLog.findMany({
       where,
       orderBy: { createdAt: 'desc' },

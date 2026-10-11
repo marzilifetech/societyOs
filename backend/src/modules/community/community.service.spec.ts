@@ -6,7 +6,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { PushService } from '../../common/notification/push.service';
 
 const mockPrisma: Record<string, any> = {
-  communityPost: { findUnique: jest.fn(), update: jest.fn() },
+  communityPost: { findUnique: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
   postComment: { create: jest.fn(), findMany: jest.fn(), count: jest.fn() },
   resident: { findUnique: jest.fn() },
 };
@@ -148,6 +148,42 @@ describe('CommunityService', () => {
     it('throws NotFoundException when the post does not exist', async () => {
       mockPrisma.communityPost.findUnique.mockResolvedValue(null);
       await expect(service.pinPost('missing', 'soc-1', true)).rejects.toThrow(NotFoundException);
+    });
+  });
+  describe('getPost', () => {
+    const author = { id: 'r1', user: { name: 'Asha' }, flat: { block: 'A', number: '101' } };
+
+    it('names nobody on an anonymous post, but tells the author it is theirs', async () => {
+      mockPrisma.communityPost.findFirst.mockResolvedValue({
+        id: 'p1', residentId: 'r1', isAnonymous: true, resident: author, _count: { comments: 0 },
+      });
+      mockPrisma.resident.findUnique.mockResolvedValue({ id: 'r1' });
+
+      const post = await service.getPost('p1', 'soc-1', 'u1');
+
+      expect(post).toMatchObject({ resident: null, residentId: null, isMine: true });
+      expect(mockPrisma.communityPost.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'p1', societyId: 'soc-1' } }),
+      );
+    });
+
+    it('shows only name and flat of a named author', async () => {
+      mockPrisma.communityPost.findFirst.mockResolvedValue({
+        id: 'p1', residentId: 'r1', isAnonymous: false, resident: author, _count: { comments: 0 },
+      });
+      mockPrisma.resident.findUnique.mockResolvedValue({ id: 'r2' });
+
+      const post: any = await service.getPost('p1', 'soc-1', 'u2');
+
+      expect(post.resident).toEqual({ ...author, flatNumber: 'A-101' });
+      expect(post.isMine).toBe(false);
+      const { include } = mockPrisma.communityPost.findFirst.mock.calls[0][0];
+      expect(Object.keys(include.resident.select).sort()).toEqual(['flat', 'id', 'user']);
+    });
+
+    it('does not return a post from another society', async () => {
+      mockPrisma.communityPost.findFirst.mockResolvedValue(null);
+      await expect(service.getPost('p1', 'soc-2', 'u1')).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 });

@@ -1,5 +1,6 @@
-import { IsString, IsOptional, IsBoolean, IsEnum, IsInt, Max, Min } from 'class-validator';
+import { IsString, IsOptional, IsBoolean, IsEnum, IsInt, Max, MaxLength, Min } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { EnumLabel } from '../../../common/utils/dto-transforms';
 
 export enum ComplaintCategory {
   NOISE = 'NOISE',
@@ -24,6 +25,7 @@ export enum ComplaintStatus {
 
 export class CreateComplaintDto {
   @ApiProperty({ enum: ComplaintCategory })
+  @EnumLabel()
   @IsEnum(ComplaintCategory)
   category: ComplaintCategory;
 
@@ -40,6 +42,16 @@ export class CreateComplaintDto {
   @IsOptional()
   @IsBoolean()
   isAnonymous?: boolean;
+
+  /**
+   * A photo uploaded through /media. The app has always sent it; with no
+   * field here every complaint with a photo was a 400.
+   */
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  photoUrl?: string;
 }
 
 export class UpdateComplaintStatusDto {

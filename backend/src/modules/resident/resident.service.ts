@@ -4,6 +4,7 @@ import { ResidentType, UserStatus } from '@prisma/client';
 import { findResidentByUserId } from '../../common/utils/resident-context';
 import { NotificationService } from '../notification/notification.service';
 import { MarziMediaSigner } from '../../common/storage/marzi-media-signer.service';
+import { PLACEHOLDER_EMERGENCY_PHONES } from '../society/society-seeder.service';
 
 @Injectable()
 export class ResidentService {
@@ -36,18 +37,43 @@ export class ResidentService {
     return resident;
   }
 
-  /** Society residents with a date of birth (frontend groups Today / This Week / Next Week). */
+  /**
+   * Society residents' birthdays (the app groups Today / This Week / Next Week).
+   *
+   * - Reads the date from either record: onboarding writes User.dateOfBirth, so
+   *   residents added through the app or a CSV import were never listed.
+   * - Only current, active residents.
+   * - Month and day only: the full date of birth (age) went to every resident.
+   *   The year is fixed to 2000 and the time to midday UTC, so the shipped app
+   *   (`new Date(date)`, then month/day in IST) shows the same day.
+   */
   async getBirthdays(societyId: string) {
     const residents = await this.prisma.resident.findMany({
-      where: { flat: { societyId }, dateOfBirth: { not: null } },
-      include: { user: { select: { name: true } }, flat: { select: { block: true, number: true } } },
+      where: {
+        flat: { societyId },
+        deletedAt: null,
+        user: { status: UserStatus.ACTIVE },
+        OR: [{ dateOfBirth: { not: null } }, { user: { dateOfBirth: { not: null } } }],
+      },
+      select: {
+        id: true,
+        dateOfBirth: true,
+        user: { select: { name: true, dateOfBirth: true } },
+        flat: { select: { block: true, number: true } },
+      },
     });
-    return residents.map((r) => ({
-      id: r.id,
-      name: r.user?.name ?? 'Resident',
-      flat: `${r.flat.block}-${r.flat.number}`,
-      date: r.dateOfBirth,
-    }));
+    return residents.flatMap((r) => {
+      const dob = r.dateOfBirth ?? r.user?.dateOfBirth;
+      if (!dob) return [];
+      return [
+        {
+          id: r.id,
+          name: r.user?.name ?? 'Resident',
+          flat: `${r.flat.block}-${r.flat.number}`,
+          date: birthdayWithoutYear(dob),
+        },
+      ];
+    });
   }
 
   async updateProfile(
@@ -274,7 +300,9 @@ export class ResidentService {
     const society = await this.prisma.society.findUnique({ where: { id: societyId } });
     if (!society) throw new NotFoundException('Society not found');
     const config = (society.config as Record<string, unknown> | null) ?? {};
-    const contacts = (config.emergencyContacts as unknown[] | undefined) ?? [];
+    const contacts = ((config.emergencyContacts as { phone?: unknown }[] | undefined) ?? []).filter(
+      (c) => !PLACEHOLDER_EMERGENCY_PHONES.has(String(c?.phone ?? '').trim()),
+    );
     // Surface a shape consistent with admin-web's existing settings UI.
     return { id: society.id, config: { emergencyContacts: contacts } };
   }
@@ -288,4 +316,16 @@ export class ResidentService {
       select: { id: true, showInDirectory: true },
     });
   }
+}
+
+const IST_OFFSET_MS = 330 * 60 * 1000;
+
+/** A birthday's month and day as an ISO date in the year 2000 (no age). */
+export function birthdayWithoutYear(dob: Date): string {
+  // Read the calendar day in IST: rows hold either UTC midnight or an IST
+  // midnight sent as UTC (18:30 the day before), and both land on the right day.
+  const ist = new Date(dob.getTime() + IST_OFFSET_MS);
+  const mm = String(ist.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(ist.getUTCDate()).padStart(2, '0');
+  return `2000-${mm}-${dd}T12:00:00.000Z`;
 }

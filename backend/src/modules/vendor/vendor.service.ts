@@ -87,27 +87,35 @@ export class VendorService {
     await this.getVendor(vendorId);
     const resident = await requireResidentByUserId(this.prisma, userId);
 
-    const totalAmount = dto.items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
+    const items = dto.items.map((i) => ({ name: i.name, quantity: i.quantity, unitPrice: i.unitPrice ?? i.price ?? 0 }));
+    const totalAmount = items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
+    const deliveryAt = dto.deliveryAt ?? dto.deliveryDate;
 
     return this.prisma.vendorOrder.create({
       data: {
         vendorId,
         residentId: resident.id,
         societyId,
-        items: dto.items as any,
+        items: items as any,
         totalAmount,
         status: 'PENDING',
         notes: dto.notes,
-        deliveryAt: dto.deliveryAt ? new Date(dto.deliveryAt) : undefined,
+        deliveryAt: deliveryAt ? new Date(deliveryAt) : undefined,
       },
     });
   }
 
-  async myOrders(userId: string, page = 1, limit = 20) {
+  /**
+   * The resident's orders, optionally for one vendor (`vendorId` was ignored,
+   * so each vendor page listed every vendor's orders). Rows carry `total` as a
+   * number: the shipped app formats `order.total`, and with only the Decimal
+   * `totalAmount` (a string) the screen crashed for anyone with an order.
+   */
+  async myOrders(userId: string, page = 1, limit = 20, vendorId?: string) {
     const resident = await requireResidentByUserId(this.prisma, userId);
     const take = Math.min(limit, 100);
     const skip = (page - 1) * take;
-    const where = { residentId: resident.id };
+    const where = { residentId: resident.id, ...(vendorId ? { vendorId } : {}) };
     const [data, total] = await Promise.all([
       this.prisma.vendorOrder.findMany({
         where,
@@ -122,7 +130,10 @@ export class VendorService {
       }),
       this.prisma.vendorOrder.count({ where }),
     ]);
-    return { data, meta: { total, page, limit: take, totalPages: Math.ceil(total / take) } };
+    return {
+      data: data.map((o) => ({ ...o, total: Number(o.totalAmount) })),
+      meta: { total, page, limit: take, totalPages: Math.ceil(total / take) },
+    };
   }
 
   async allOrders(societyId: string, status?: string, vendorId?: string, page = 1, limit = 20) {

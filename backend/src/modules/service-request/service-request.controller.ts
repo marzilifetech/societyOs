@@ -134,10 +134,22 @@ export class ServiceRequestController {
 
   @Get(':id')
   @Roles(UserRole.RESIDENT, UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.STAFF)
-  findOne(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
-    return user.role === UserRole.RESIDENT
-      ? this.srService.findOne(id, { residentUserId: user.sub, societyId: user.societyId })
-      : this.srService.findOne(id, { societyId: user.societyId });
+  findOne(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @SocietyId() societyId: string,
+  ) {
+    // @SocietyId(), not the token's home society: a super admin who switched
+    // society got SOCIETY_MISMATCH opening every request in the list.
+    if (user.role === UserRole.RESIDENT) {
+      return this.srService.findOne(id, { residentUserId: user.sub, societyId });
+    }
+    // Staff only see tasks assigned to them (with the resident's contact
+    // details); this returned any request in the society.
+    if (user.role === UserRole.STAFF) {
+      return this.srService.findOneForStaff(id, user.sub, societyId);
+    }
+    return this.srService.findOne(id, { societyId });
   }
 
   /**
@@ -228,10 +240,11 @@ export class ServiceRequestController {
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.STAFF)
   updateStatus(
     @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
     @SocietyId() societyId: string,
     @Body() dto: UpdateServiceRequestStatusDto,
   ) {
-    return this.srService.updateStatus(id, societyId, dto);
+    return this.srService.updateStatus(id, societyId, dto, { userId: user.sub, role: user.role });
   }
 
   @Patch(':id/assign')

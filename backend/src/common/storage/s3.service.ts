@@ -62,6 +62,18 @@ export class S3Service {
     };
   }
 
+  /**
+   * Where a stored photo/file reference points. Clients send either an S3 key
+   * (from a presigned upload) or the full https URL the Marzi /media proxy
+   * returned. Wrapping a full URL as a key produced
+   * `https://bucket.s3…/https://cdn…` — every task photo uploaded through the
+   * media proxy was stored as a broken link. Only https URLs are accepted as-is.
+   */
+  publicUrlFor(keyOrUrl: string): string {
+    if (/^https:\/\//i.test(keyOrUrl)) return keyOrUrl;
+    return this.getPublicUrl(keyOrUrl.replace(/^\/+/, ''));
+  }
+
   getPublicUrl(key: string): string {
     if (this.isFake) {
       return `https://${this.bucket}/${key}`;

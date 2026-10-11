@@ -1,4 +1,4 @@
-import { PushService, PushNotification } from './push.service';
+import { PushService, PushNotification, isDeadTokenError, clampForPush } from './push.service';
 
 // --- firebase-admin mock --------------------------------------------------
 // admin.apps.length truthy => PushService marks itself initialized in the ctor.
@@ -272,7 +272,7 @@ describe('PushService', () => {
     expect(arg.apns.payload.aps.category).toBe('complaints');
   });
 
-  it('routes via the registry channelId with a 30-min TTL for approval-style pushes', async () => {
+  it('routes via the registry channelId with a 30-min TTL for a gate approval prompt', async () => {
     const prisma = makePrisma();
     prisma.user.findUnique.mockResolvedValue({ id: 'u1', phone: '+910000000000' });
     prisma.device.findMany.mockResolvedValue([{ token: 'tok' }]);
@@ -280,7 +280,12 @@ describe('PushService', () => {
     const svc = makeService(prisma);
     await (svc as any).sendNow(
       'u1',
-      { title: 'Guest', body: 'At gate', category: 'visitors_gate' },
+      {
+        title: 'Guest',
+        body: 'At gate',
+        category: 'visitors_gate',
+        actions: [{ id: 'APPROVE', title: 'Approve' }],
+      },
       undefined,
     );
 
@@ -292,6 +297,30 @@ describe('PushService', () => {
     expect(arg.android.ttl).toBe(30 * 60 * 1000);
     expect(arg.apns.headers['apns-expiration']).toBeDefined();
     expect(arg.apns.payload.aps['thread-id']).toBe('approvals');
+  });
+
+  it('does NOT expire informational pushes on the approvals channel (task, outcome, parcel)', async () => {
+    const prisma = makePrisma();
+    prisma.user.findUnique.mockResolvedValue({ id: 'u1', phone: '+910000000000' });
+    prisma.device.findMany.mockResolvedValue([{ token: 'tok' }]);
+
+    const svc = makeService(prisma);
+    await (svc as any).sendNow(
+      'u1',
+      {
+        title: 'New task',
+        body: 'Plumbing',
+        category: 'staff_tasks',
+        actions: [{ id: 'ACCEPT', title: 'Accept' }],
+      },
+      undefined,
+    );
+    await (svc as any).sendNow('u1', { title: 'Parcel', body: 'At gate', category: 'deliveries' }, undefined);
+
+    for (const [arg] of mockSendEachForMulticast.mock.calls) {
+      expect(arg.android.ttl).toBeUndefined();
+      expect(arg.apns.headers?.['apns-expiration']).toBeUndefined();
+    }
   });
 
   it('sets aps.badge + android notificationCount to unread count + 1', async () => {
@@ -346,17 +375,49 @@ describe('PushService', () => {
     );
   });
 
-  it('applies collapse key to both android and apns headers', async () => {
+  it('de-duplicates with the notification tag + apns-collapse-id, never android.collapseKey', async () => {
     const prisma = makePrisma();
     prisma.user.findUnique.mockResolvedValue({ id: 'u1', phone: '+910000000000' });
     prisma.device.findMany.mockResolvedValue([{ token: 'tok' }]);
 
     const svc = makeService(prisma);
     await (svc as any).sendNow('u1', { ...baseNotification, collapseKey: 'visitor-42' }, undefined);
+    await (svc as any).sendNow(
+      'u1',
+      { ...baseNotification, collapseKey: 'task-7', actions: [{ id: 'ACCEPT', title: 'Accept' }] },
+      undefined,
+    );
 
-    const arg = mockSendEachForMulticast.mock.calls[0][0];
-    expect(arg.android.collapseKey).toBe('visitor-42');
-    expect(arg.apns.headers['apns-collapse-id']).toBe('visitor-42');
+    const [[simple], [dataOnly]] = mockSendEachForMulticast.mock.calls;
+    // FCM keeps only 4 collapse keys per offline device; per-record keys made
+    // it drop pushes.
+    expect(simple.android.collapseKey).toBeUndefined();
+    expect(simple.android.notification.tag).toBe('visitor-42');
+    expect(simple.apns.headers['apns-collapse-id']).toBe('visitor-42');
+    expect(dataOnly.android.collapseKey).toBeUndefined();
+    expect(dataOnly.android.notification.tag).toBe('task-7');
+  });
+
+  it('never lets a category mute suppress a push that asks for a decision', async () => {
+    const prisma = makePrisma();
+    prisma.user.findUnique.mockResolvedValue({ id: 'u1', phone: '+910000000000' });
+    prisma.device.findMany.mockResolvedValue([{ token: 'tok' }]);
+    prisma.notificationPreference.findUnique.mockResolvedValue({ enabled: false });
+
+    const svc = makeService(prisma);
+    const muted = await (svc as any).sendNow(
+      'u1',
+      { title: 'Guest', body: 'x', category: 'visitors_gate' },
+      undefined,
+    );
+    expect(muted).toEqual({ ok: false, reason: 'opted_out' });
+
+    const prompt = await (svc as any).sendNow(
+      'u1',
+      { title: 'Guest', body: 'x', category: 'visitors_gate', actions: [{ id: 'APPROVE', title: 'Approve' }] },
+      undefined,
+    );
+    expect(prompt).toEqual({ ok: true });
   });
 
   it('returns user_not_found early', async () => {
@@ -526,5 +587,97 @@ describe('PushService', () => {
       expect(res.ok).toBe(true);
       expect(mockSendEachForMulticast).toHaveBeenCalled();
     });
+
+    it('delivers a task assignment at night instead of holding it until 07:00', async () => {
+      jest.useFakeTimers({ now: QUIET_NOW });
+      const prisma = makePrisma();
+      prisma.user.findUnique.mockResolvedValue({ id: 'u1', phone: '+910000000000' });
+      prisma.device.findMany.mockResolvedValue([{ token: 'tok' }]);
+      const svc = makeService(prisma);
+      const add = jest.fn().mockResolvedValue({});
+      (svc as any).deferQueue = { add };
+
+      const res = await svc.send('u1', {
+        title: 'New task assigned',
+        body: 'Plumbing',
+        category: 'staff_tasks',
+        actions: [{ id: 'ACCEPT', title: 'Accept' }],
+      });
+
+      expect(add).not.toHaveBeenCalled();
+      expect(res.ok).toBe(true);
+      expect(mockSendEachForMulticast).toHaveBeenCalled();
+    });
+
+    it('does not hang when the defer queue never answers (Redis down)', async () => {
+      jest.useFakeTimers({ now: QUIET_NOW });
+      const prisma = makePrisma();
+      prisma.user.findUnique.mockResolvedValue({ id: 'u1', phone: '+910000000000' });
+      prisma.device.findMany.mockResolvedValue([{ token: 'tok' }]);
+      const svc = makeService(prisma);
+      (svc as any).deferQueue = { add: jest.fn(() => new Promise(() => {})) };
+
+      const pending = svc.send('u1', baseNotification, undefined);
+      await jest.advanceTimersByTimeAsync(2000);
+      const res = await pending;
+
+      expect(res.ok).toBe(true);
+      expect(mockSendEachForMulticast).toHaveBeenCalled();
+    });
+  });
+
+  describe('SOS fan-out', () => {
+    it('sends critical pushes as parallel multicast chunks, skipping inactive users', async () => {
+      const prisma = makePrisma();
+      prisma.user.findMany.mockResolvedValue([
+        { id: 'g1', fcmToken: null, notificationPrefs: {} },
+        { id: 'g2', fcmToken: null, notificationPrefs: {} },
+      ]);
+      prisma.device.findMany.mockResolvedValue([
+        { userId: 'g1', token: 't1' },
+        { userId: 'g2', token: 't2' },
+      ]);
+      const svc = makeService(prisma);
+
+      await svc.sendToSociety('soc', ['STAFF', 'ADMIN'], {
+        title: 'SOS',
+        body: 'Help',
+        category: 'emergency_sos',
+        critical: true,
+      });
+
+      const where = prisma.user.findMany.mock.calls[0][0].where;
+      expect(where.role).toEqual({ in: ['STAFF', 'ADMIN'] });
+      expect(where.status).toEqual({ notIn: ['INACTIVE', 'SUSPENDED', 'REJECTED'] });
+      // One multicast for both tokens, no per-recipient badge queries.
+      expect(mockSendEachForMulticast).toHaveBeenCalledTimes(1);
+      expect(mockSendEachForMulticast.mock.calls[0][0].tokens.sort()).toEqual(['t1', 't2']);
+      expect(prisma.notificationLog.groupBy).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe('isDeadTokenError', () => {
+  it.each([
+    ['messaging/registration-token-not-registered', '', true],
+    ['messaging/invalid-registration-token', '', true],
+    ['Unregistered', '', true],
+    ['messaging/invalid-argument', 'The registration token is not a valid FCM registration token', true],
+    // A MESSAGE problem (e.g. payload over 4 KB) — the token is fine. This
+    // used to wipe every recipient's device row on one oversized broadcast.
+    ['messaging/invalid-argument', 'Message payload exceeds 4096 bytes', false],
+    ['messaging/internal-error', '', false],
+    [undefined, undefined, false],
+  ])('%s / %s → %s', (code, message, dead) => {
+    expect(isDeadTokenError(code, message)).toBe(dead);
+  });
+});
+
+describe('clampForPush', () => {
+  it('leaves short text alone and shortens long text with an ellipsis', () => {
+    expect(clampForPush('short', 10)).toBe('short');
+    const out = clampForPush('x'.repeat(5000), 900);
+    expect(out).toHaveLength(900);
+    expect(out.endsWith('…')).toBe(true);
   });
 });

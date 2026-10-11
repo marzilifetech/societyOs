@@ -6,6 +6,8 @@ import { makePrismaMock } from './helpers/prisma-mock';
 describe('Audit interceptor', () => {
   const prisma = makePrismaMock(['auditLog']);
 
+  beforeEach(() => jest.clearAllMocks());
+
   it('writes an audit row with actor, ip, action, target', async () => {
     prisma.auditLog.create.mockResolvedValue({ id: 'al1' });
     const intercept = async (ctx: { userId: string; ip: string; method: string; path: string; targetId?: string }) => {

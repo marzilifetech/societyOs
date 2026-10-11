@@ -1,15 +1,4 @@
-import {
-  IsString,
-  IsOptional,
-  IsInt,
-  IsDateString,
-  IsNumber,
-  Min,
-  Max,
-  IsBoolean,
-  Length,
-  Matches,
-} from 'class-validator';
+import { IsString, IsOptional, IsInt, IsDateString, IsNumber, Min, Max, IsBoolean, Length, Matches, ValidateIf, MaxLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 
@@ -113,6 +102,10 @@ export class UpdateAmenityDto {
   isActive?: boolean;
 }
 
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+/** An end time may be midnight at the end of the day (the app's last slot ends "24:00"). */
+const END_HHMM = /^(([01]\d|2[0-3]):[0-5]\d|24:00)$/;
+
 export class CreateAmenityBookingDto {
   @ApiProperty()
   @IsString()
@@ -122,13 +115,34 @@ export class CreateAmenityBookingDto {
   @IsDateString()
   date: string;
 
-  @ApiProperty()
-  @IsString()
+  @ApiProperty({ example: '18:00' })
+  @ValidateIf((o) => o.startTime === undefined || o.startSlot !== undefined)
+  @Matches(HHMM)
   startSlot: string;
 
-  @ApiProperty()
-  @IsString()
+  @ApiProperty({ example: '19:00' })
+  @ValidateIf((o) => o.endTime === undefined || o.endSlot !== undefined)
+  @Matches(END_HHMM)
   endSlot: string;
+
+  // The shipped app's names for the slots, and a note. Every booking from it
+  // was a 400 because these were unknown fields.
+  @ApiPropertyOptional({ example: '18:00' })
+  @IsOptional()
+  @Matches(HHMM)
+  startTime?: string;
+
+  @ApiPropertyOptional({ example: '19:00' })
+  @IsOptional()
+  @Matches(END_HHMM)
+  endTime?: string;
+
+  /** Accepted from the app; bookings have no notes column yet. */
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  notes?: string;
 
   @ApiPropertyOptional()
   @IsInt()

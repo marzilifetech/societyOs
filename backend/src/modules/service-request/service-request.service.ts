@@ -7,7 +7,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { ServiceRequestStatus, ServicePhase } from '@prisma/client';
+import { ServiceRequestStatus, ServicePhase, UserRole } from '@prisma/client';
 import {
   CreateServiceRequestDto,
   AdminCreateServiceRequestDto,
@@ -23,8 +23,21 @@ import { S3Service } from '../../common/storage/s3.service';
 import { ServiceRequestGateway } from './service-request.gateway';
 import { NotificationService } from '../notification/notification.service';
 import { PushService } from '../../common/notification/push.service';
+import { RESIDENT_BRIEF, PERSON_BRIEF_SELECT } from '../../common/prisma-selects';
 
 const SOCIETY_MISMATCH = { code: 'SERVICE_REQUEST_SOCIETY_MISMATCH', message: 'Service request belongs to another society' };
+
+/**
+ * What a resident sees of the staff member on their request. A bare
+ * `include` sent residents the staff member's salary structure, family
+ * details and emergency contact.
+ */
+const ASSIGNED_STAFF_SELECT = {
+  id: true,
+  designation: true,
+  photoUrl: true,
+  user: { select: PERSON_BRIEF_SELECT },
+} as const;
 
 @Injectable()
 export class ServiceRequestService {
@@ -41,8 +54,13 @@ export class ServiceRequestService {
     return this.prisma.serviceRequest.findUnique({
       where: { id },
       include: {
-        resident: { include: { user: true, flat: true } },
-        photos: true,
+        resident: RESIDENT_BRIEF,
+        photos: { orderBy: { takenAt: 'asc' } },
+        // The task screen shows the notes history; it was never included.
+        notes: {
+          orderBy: { createdAt: 'asc' },
+          select: { id: true, body: true, voiceUrl: true, createdAt: true, staffId: true },
+        },
       },
     });
   }
@@ -52,7 +70,7 @@ export class ServiceRequestService {
     if (!ids.length) return { ...req, assignedTo: null, assignedStaff: [] };
     const staff = await this.prisma.staffMember.findMany({
       where: { id: { in: ids } },
-      include: { user: true },
+      select: ASSIGNED_STAFF_SELECT,
     });
     const byId = new Map(staff.map((s) => [s.id, s]));
     const ordered = ids.map((id) => byId.get(id)).filter(Boolean);
@@ -64,7 +82,7 @@ export class ServiceRequestService {
     if (!allIds.length) return rows.map((r) => ({ ...r, assignedTo: null, assignedStaff: [] }));
     const staff = await this.prisma.staffMember.findMany({
       where: { id: { in: allIds } },
-      include: { user: true },
+      select: ASSIGNED_STAFF_SELECT,
     });
     const byId = new Map(staff.map((s) => [s.id, s]));
     return rows.map((r) => {
@@ -102,6 +120,47 @@ export class ServiceRequestService {
     if (!sr.assignedToIds.includes(staffId)) {
       throw new ForbiddenException({ code: 'NOT_ASSIGNED_STAFF', message: 'Not assigned to you' });
     }
+  }
+
+  /**
+   * What a STAFF member may do through the generic status route: start work
+   * on a task assigned to them. Nothing else.
+   *
+   * The route used to accept STAFF with no further check, and its DTO carries
+   * `assignedToIds` and `adminNote` — so any staff member could reassign,
+   * close, reject or complete ANY request in the society, skipping the photo
+   * proof the complete flow requires. Completing goes through
+   * `PATCH /:id/complete` (with after-photos), declining through
+   * `POST /:id/reject`.
+   */
+  private async assertStaffStatusChange(
+    sr: { societyId: string; assignedToIds: string[]; status: ServiceRequestStatus },
+    userId: string,
+    societyId: string,
+    dto: UpdateServiceRequestStatusDto,
+  ) {
+    const staffId = await this.resolveStaffId(userId);
+    this.assertStaffCanAccessTask(sr, staffId, societyId);
+    if (dto.assignedToIds !== undefined || dto.assignedToId !== undefined || dto.adminNote !== undefined) {
+      throw new ForbiddenException({
+        code: 'STAFF_FIELD_NOT_ALLOWED',
+        message: 'Staff cannot change who a task is assigned to or its admin note',
+      });
+    }
+    if (dto.status === sr.status) return;
+    if (sr.status === ServiceRequestStatus.ASSIGNED && dto.status === ServiceRequestStatus.IN_PROGRESS) {
+      return;
+    }
+    if (dto.status === ServiceRequestStatus.COMPLETED) {
+      throw new ConflictException({
+        code: 'USE_COMPLETE_FLOW',
+        message: 'Open the task and complete it with an after photo.',
+      });
+    }
+    throw new ForbiddenException({
+      code: 'STAFF_TRANSITION_NOT_ALLOWED',
+      message: `Staff cannot move a task from ${sr.status} to ${dto.status}`,
+    });
   }
 
   async create(userId: string, societyId: string, dto: CreateServiceRequestDto) {
@@ -215,7 +274,7 @@ export class ServiceRequestService {
           ...(slaDeadline && { slaDeadline }),
         },
         include: {
-          resident: { include: { user: true, flat: true } },
+          resident: RESIDENT_BRIEF,
         },
       }),
     );
@@ -240,7 +299,7 @@ export class ServiceRequestService {
     const updated = await this.prisma.serviceRequest.update({
       where: { id },
       data: data as any,
-      include: { resident: { include: { user: true, flat: true } }, photos: true },
+      include: { resident: RESIDENT_BRIEF, photos: true },
     });
     return this.enrichWithAssignedStaff(updated);
   }
@@ -266,7 +325,7 @@ export class ServiceRequestService {
     const rows = await this.prisma.serviceRequest.findMany({
       where: { societyId, deletedAt: null, ...(status && { status }), ...blockWhere },
       include: {
-        resident: { include: { user: true, flat: true } },
+        resident: RESIDENT_BRIEF,
         photos: true,
       },
       orderBy: { createdAt: 'desc' },
@@ -323,7 +382,7 @@ export class ServiceRequestService {
         ...blockWhere,
       },
       include: {
-        resident: { include: { user: true, flat: true } },
+        resident: RESIDENT_BRIEF,
         photos: true,
         notes: { orderBy: { createdAt: 'asc' } },
       },
@@ -497,7 +556,7 @@ export class ServiceRequestService {
     const rows = await this.prisma.serviceRequest.findMany({
       where: { assignedToIds: { has: staffId }, societyId, deletedAt: null },
       include: {
-        resident: { include: { user: true, flat: true } },
+        resident: RESIDENT_BRIEF,
         photos: true,
       },
       orderBy: { createdAt: 'desc' },
@@ -523,10 +582,26 @@ export class ServiceRequestService {
     return this.enrichWithAssignedStaff(req);
   }
 
-  async updateStatus(id: string, societyId: string, dto: UpdateServiceRequestStatusDto) {
+  async findOneForStaff(id: string, userId: string, societyId: string) {
+    const staffId = await this.resolveStaffId(userId);
+    const req = await this.findOneRaw(id);
+    if (!req || req.deletedAt) throw new NotFoundException('Service request not found');
+    this.assertStaffCanAccessTask(req, staffId, societyId);
+    return this.enrichWithAssignedStaff(req);
+  }
+
+  async updateStatus(
+    id: string,
+    societyId: string,
+    dto: UpdateServiceRequestStatusDto,
+    actor?: { userId: string; role: UserRole | string },
+  ) {
     const existing = await this.prisma.serviceRequest.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Service request not found');
     this.assertSocietyMatch(existing.societyId, societyId);
+    if (actor?.role === UserRole.STAFF) {
+      await this.assertStaffStatusChange(existing, actor.userId, societyId, dto);
+    }
 
     const assignedIds =
       dto.assignedToIds ??
@@ -1023,7 +1098,7 @@ export class ServiceRequestService {
       data: {
         serviceRequestId: requestId,
         phase: dbPhase,
-        url: this.s3.getPublicUrl(key),
+        url: this.s3.publicUrlFor(key),
         lat,
         lng,
         takenAt: takenAt ? new Date(takenAt) : new Date(),
@@ -1043,7 +1118,7 @@ export class ServiceRequestService {
         serviceRequestId: requestId,
         staffId,
         body,
-        voiceUrl: voiceUrl ? this.s3.getPublicUrl(voiceUrl) : undefined,
+        voiceUrl: voiceUrl ? this.s3.publicUrlFor(voiceUrl) : undefined,
       },
     });
   }
@@ -1071,7 +1146,7 @@ export class ServiceRequestService {
           data: {
             serviceRequestId: requestId,
             phase: ServicePhase.AFTER,
-            url: this.s3.getPublicUrl(key),
+            url: this.s3.publicUrlFor(key),
             takenAt: new Date(),
           },
         });
@@ -1114,7 +1189,7 @@ export class ServiceRequestService {
           data: {
             serviceRequestId: requestId,
             phase: ServicePhase.DURING,
-            url: this.s3.getPublicUrl(key),
+            url: this.s3.publicUrlFor(key),
             takenAt: new Date(),
           },
         });

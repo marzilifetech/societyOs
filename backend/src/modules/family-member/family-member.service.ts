@@ -13,10 +13,13 @@ export class FamilyMemberService {
       data: {
         residentId: resident.id,
         name: dto.name,
-        phone: dto.phone,
+        phone: dto.phone || null,
         relationship: dto.relationship,
         permissions: (dto.permissions ?? {}) as any,
         isVerified: false,
+        dateOfBirth: dto.dateOfBirth ? new Date(dto.dateOfBirth) : null,
+        bloodGroup: dto.bloodGroup ?? null,
+        isEmergencyContact: dto.isEmergencyContact ?? false,
       },
     });
   }
@@ -39,6 +42,9 @@ export class FamilyMemberService {
       data: {
         ...(dto.name && { name: dto.name }),
         ...(dto.phone && { phone: dto.phone }),
+        ...(dto.dateOfBirth !== undefined && { dateOfBirth: dto.dateOfBirth ? new Date(dto.dateOfBirth) : null }),
+        ...(dto.bloodGroup !== undefined && { bloodGroup: dto.bloodGroup }),
+        ...(dto.isEmergencyContact !== undefined && { isEmergencyContact: dto.isEmergencyContact }),
         ...(dto.relationship && { relationship: dto.relationship }),
         ...(dto.permissions && { permissions: dto.permissions as any }),
       },

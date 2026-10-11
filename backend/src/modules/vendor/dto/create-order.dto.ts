@@ -7,6 +7,7 @@ import {
   IsOptional,
   IsString,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -23,9 +24,17 @@ export class VendorOrderItemDto {
   quantity: number;
 
   @ApiProperty()
+  @ValidateIf((o) => o.price === undefined || o.unitPrice !== undefined)
   @IsNumber()
   @Min(0)
   unitPrice: number;
+
+  /** What the shipped app calls `unitPrice`; either is accepted. */
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  price?: number;
 }
 
 export class CreateVendorOrderDto {
@@ -44,6 +53,12 @@ export class CreateVendorOrderDto {
   @IsOptional()
   @IsDateString()
   deliveryAt?: string;
+
+  /** What the shipped app calls `deliveryAt` (a date, YYYY-MM-DD). */
+  @ApiPropertyOptional({ example: '2025-06-15' })
+  @IsOptional()
+  @IsDateString()
+  deliveryDate?: string;
 }
 
 export enum VendorOrderStatus {

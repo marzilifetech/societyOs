@@ -36,6 +36,7 @@ const mockS3 = {
     publicUrl: 'https://bucket/public/k1',
   }),
   getPublicUrl: jest.fn((k: string) => `https://bucket/${k}`),
+  publicUrlFor: jest.fn((k: string) => (/^https:\/\//.test(k) ? k : `https://bucket/${k}`)),
 };
 
 const mockGateway = {
@@ -168,6 +169,78 @@ describe('ServiceRequestService', () => {
       await expect(
         service.updateStatus('sr-1', 'soc-1', { status: ServiceRequestStatus.PENDING }),
       ).rejects.toThrow(ConflictException);
+    });
+  });
+
+  describe('updateStatus as STAFF', () => {
+    const staff = { userId: 'staff-user', role: 'STAFF' };
+    const assigned = (status: ServiceRequestStatus, assignedToIds = ['sm-1']) => ({
+      id: 'sr-1',
+      societyId: 'soc-1',
+      status,
+      assignedToIds,
+    });
+
+    beforeEach(() => {
+      mockPrisma.staffMember.findUnique.mockResolvedValue({ id: 'sm-1', userId: 'staff-user' });
+      mockPrisma.serviceRequest.update.mockResolvedValue({ id: 'sr-1' });
+    });
+
+    it('lets the assigned staff member start work', async () => {
+      mockPrisma.serviceRequest.findUnique.mockResolvedValue(assigned(ServiceRequestStatus.ASSIGNED));
+      await service.updateStatus('sr-1', 'soc-1', { status: ServiceRequestStatus.IN_PROGRESS }, staff);
+      expect(mockPrisma.serviceRequest.update).toHaveBeenCalled();
+    });
+
+    it("refuses a task that isn't assigned to them", async () => {
+      mockPrisma.serviceRequest.findUnique.mockResolvedValue(
+        assigned(ServiceRequestStatus.ASSIGNED, ['someone-else']),
+      );
+      await expect(
+        service.updateStatus('sr-1', 'soc-1', { status: ServiceRequestStatus.IN_PROGRESS }, staff),
+      ).rejects.toThrow(ForbiddenException);
+      expect(mockPrisma.serviceRequest.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses reassignment and admin notes', async () => {
+      mockPrisma.serviceRequest.findUnique.mockResolvedValue(assigned(ServiceRequestStatus.ASSIGNED));
+      await expect(
+        service.updateStatus(
+          'sr-1',
+          'soc-1',
+          { status: ServiceRequestStatus.ASSIGNED, assignedToIds: ['sm-1', 'sm-2'] },
+          staff,
+        ),
+      ).rejects.toMatchObject({ response: expect.objectContaining({ code: 'STAFF_FIELD_NOT_ALLOWED' }) });
+    });
+
+    it('sends completion through the photo-proof flow', async () => {
+      mockPrisma.serviceRequest.findUnique.mockResolvedValue(assigned(ServiceRequestStatus.IN_PROGRESS));
+      await expect(
+        service.updateStatus('sr-1', 'soc-1', { status: ServiceRequestStatus.COMPLETED }, staff),
+      ).rejects.toMatchObject({ response: expect.objectContaining({ code: 'USE_COMPLETE_FLOW' }) });
+    });
+
+    it('refuses closing or rejecting through the status route', async () => {
+      mockPrisma.serviceRequest.findUnique.mockResolvedValue(assigned(ServiceRequestStatus.ASSIGNED));
+      await expect(
+        service.updateStatus('sr-1', 'soc-1', { status: ServiceRequestStatus.CLOSED }, staff),
+      ).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe('task photo references', () => {
+    it('stores a media-proxy https URL as-is instead of wrapping it as an S3 key', async () => {
+      mockPrisma.staffMember.findUnique.mockResolvedValue({ id: 'sm-1' });
+      mockPrisma.serviceRequest.findUnique.mockResolvedValue({
+        id: 'sr-1',
+        societyId: 'soc-1',
+        status: ServiceRequestStatus.IN_PROGRESS,
+        assignedToIds: ['sm-1'],
+      });
+      mockPrisma.servicePhoto.create.mockResolvedValue({});
+      await service.confirmPhoto('sr-1', 'staff-user', 'soc-1', 'https://cdn.example/p.jpg', 'BEFORE');
+      expect(mockPrisma.servicePhoto.create.mock.calls[0][0].data.url).toBe('https://cdn.example/p.jpg');
     });
   });
 

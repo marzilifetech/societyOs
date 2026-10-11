@@ -36,22 +36,14 @@ export class VehicleService {
     return this.prisma.vehicle.update({ where: { id }, data: { isActive: false } });
   }
 
-  async getEntryLog() {
-    const entries = await this.prisma.vehicle.findMany({
-      where: { isActive: true },
-      include: { resident: { include: { user: true, flat: true } } },
-      orderBy: { createdAt: 'desc' },
-    });
-    return { entries };
-  }
-
-  async getEntryLogForResident(userId: string) {
-    const resident = await requireResidentByUserId(this.prisma, userId);
-    const vehicles = await this.prisma.vehicle.findMany({
-      where: { residentId: resident.id },
-      orderBy: { createdAt: 'desc' },
-      include: { resident: { include: { user: true, flat: true } } },
-    });
-    return { entries: vehicles };
+  /**
+   * Gate entries for the resident's vehicles. Nothing records vehicle entries
+   * yet, so this is empty: it used to return the resident's own vehicles
+   * (with their full user and flat rows) wrapped as `{ entries }`, which the
+   * app could not read. The app expects an array.
+   */
+  async getEntryLogForResident(userId: string): Promise<unknown[]> {
+    await requireResidentByUserId(this.prisma, userId);
+    return [];
   }
 }

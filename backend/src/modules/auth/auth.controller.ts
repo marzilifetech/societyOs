@@ -13,7 +13,7 @@ import { ApiTags, ApiBearerAuth, ApiProperty, ApiPropertyOptional } from '@nestj
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { TotpService } from './totp.service';
-import { SendOtpDto, VerifyOtpDto, CareHandoffExchangeDto } from './dto/auth.dto';
+import { SendOtpDto, VerifyOtpDto, CareHandoffExchangeDto, LogoutDto } from './dto/auth.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { LocalOtpEnabledGuard } from '../../common/guards/local-otp-enabled.guard';
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
@@ -155,9 +155,13 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @HttpCode(200)
-  logout(@Headers('authorization') auth?: string) {
+  logout(
+    @Headers('authorization') auth: string | undefined,
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: LogoutDto,
+  ) {
     const token = (auth || '').replace(/^Bearer\s+/, '');
-    return this.authService.logout(token);
+    return this.authService.logout(token, dto?.refreshToken, user?.sub);
   }
 
   @Post('delete')

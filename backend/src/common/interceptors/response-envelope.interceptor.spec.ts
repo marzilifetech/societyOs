@@ -32,6 +32,22 @@ describe('ResponseEnvelopeInterceptor', () => {
     expect(out.meta).toBeDefined();
   });
 
+  it('strips secrets from every response, wrapped or already enveloped', async () => {
+    const leaky = { id: 'sr-1', resident: { user: { name: 'Asha', totpSecret: 'x', fcmToken: 'y' } } };
+    const wrapped: any = await lastValueFrom(
+      interceptor.intercept(ctx('/v1/service-requests/sr-1'), handlerOf(leaky)),
+    );
+    expect(wrapped.data.resident.user).toEqual({ name: 'Asha' });
+
+    const preEnveloped: any = await lastValueFrom(
+      interceptor.intercept(
+        ctx('/v1/admin/staff'),
+        handlerOf({ data: [{ user: { id: 'u', deviceToken: 'z' } }], meta: { page: 1 } }),
+      ),
+    );
+    expect(preEnveloped.data[0].user).toEqual({ id: 'u' });
+  });
+
   it('skips the envelope for health/probe paths', async () => {
     const out = await lastValueFrom(
       interceptor.intercept(ctx('/health'), handlerOf({ ok: true })),

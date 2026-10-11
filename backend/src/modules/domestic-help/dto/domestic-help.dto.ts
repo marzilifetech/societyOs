@@ -1,13 +1,19 @@
-import { IsString, IsOptional, IsEnum, IsDateString, IsBoolean } from 'class-validator';
+import { IsString, IsOptional, IsEnum, IsDateString, IsBoolean, IsNumber, IsPositive, Max, ValidateIf } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { DomesticHelpRole, DomesticAttendanceStatus } from '@prisma/client';
+import { EnumLabel } from '../../../common/utils/dto-transforms';
+
+/** The app offers "Security", which has no role of its own. */
+const ROLE_ALIASES = { SECURITY: 'OTHER', HOUSEKEEPER: 'MAID', NANNY: 'OTHER' };
 
 export class CreateDomesticHelpDto {
   @ApiProperty()
   @IsString()
   name: string;
 
+  /** A label ("Cook") or the enum key; the shipped app sends labels. */
   @ApiProperty({ enum: DomesticHelpRole })
+  @EnumLabel(ROLE_ALIASES)
   @IsEnum(DomesticHelpRole)
   role: DomesticHelpRole;
 
@@ -19,6 +25,11 @@ export class CreateDomesticHelpDto {
   @IsString()
   @IsOptional()
   photoUrl?: string;
+
+  @ApiPropertyOptional()
+  @IsBoolean()
+  @IsOptional()
+  gateAccess?: boolean;
 }
 
 export class UpdateDomesticHelpDto {
@@ -28,6 +39,7 @@ export class UpdateDomesticHelpDto {
   name?: string;
 
   @ApiPropertyOptional({ enum: DomesticHelpRole })
+  @EnumLabel(ROLE_ALIASES)
   @IsEnum(DomesticHelpRole)
   @IsOptional()
   role?: DomesticHelpRole;
@@ -46,6 +58,11 @@ export class UpdateDomesticHelpDto {
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;
+
+  @ApiPropertyOptional()
+  @IsBoolean()
+  @IsOptional()
+  gateAccess?: boolean;
 }
 
 export class MarkAttendanceDto {
@@ -53,12 +70,32 @@ export class MarkAttendanceDto {
   @IsDateString()
   date: string;
 
-  @ApiProperty({ enum: DomesticAttendanceStatus })
+  /** Required unless `present` is sent (what the shipped app sends). */
+  @ApiPropertyOptional({ enum: DomesticAttendanceStatus })
+  @ValidateIf((o) => o.present === undefined || o.status !== undefined)
   @IsEnum(DomesticAttendanceStatus)
-  status: DomesticAttendanceStatus;
+  status?: DomesticAttendanceStatus;
+
+  @ApiPropertyOptional({ description: 'Shorthand for status PRESENT / ABSENT' })
+  @IsBoolean()
+  @IsOptional()
+  present?: boolean;
 
   @ApiPropertyOptional()
   @IsString()
   @IsOptional()
   notes?: string;
+}
+
+export class LogSalaryPaymentDto {
+  @ApiProperty({ description: 'Rupees paid to the helper' })
+  @IsNumber()
+  @IsPositive()
+  @Max(10_000_000)
+  amount: number;
+
+  @ApiPropertyOptional()
+  @IsDateString()
+  @IsOptional()
+  paidAt?: string;
 }

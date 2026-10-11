@@ -15,7 +15,7 @@ describe('VisitorService.createAtGate — guest vs delivery', () => {
   };
 
   const mockPrisma = {
-    resident: { findFirst: jest.fn() },
+    resident: { findFirst: jest.fn(), findMany: jest.fn() },
     visitor: { create: jest.fn() },
   };
   const mockGateway = { emitVisitorArrived: jest.fn() };
@@ -32,6 +32,30 @@ describe('VisitorService.createAtGate — guest vs delivery', () => {
       ...data,
       resident: { ...baseResident, user: baseResident.user },
     }));
+  });
+
+  it('asks every active member of the flat, once each', async () => {
+    mockPrisma.visitor.create.mockImplementationOnce(async ({ data }: any) => ({
+      id: 'v-new',
+      ...data,
+      resident: { ...baseResident, flatId: 'flat-1' },
+    }));
+    mockPrisma.resident.findMany.mockResolvedValueOnce([
+      { userId: 'resident-user-1' },
+      { userId: 'spouse-user' },
+    ]);
+
+    await service.createAtGate('guard-1', 'soc1', { residentId: 'r1', name: 'Courier', phone: '+919999000009' });
+    await new Promise((r) => setImmediate(r));
+
+    expect(mockPrisma.resident.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        // Approved, current members only — never a pending sign-up on that flat.
+        where: expect.objectContaining({ flatId: 'flat-1', deletedAt: null, user: { status: 'ACTIVE' } }),
+      }),
+    );
+    const recipients = mockPush.send.mock.calls.map(([uid]) => uid).sort();
+    expect(recipients).toEqual(['resident-user-1', 'spouse-user']);
   });
 
   it('GUEST entry persists type=GUEST + creates a 2-button visitor_approval push', async () => {

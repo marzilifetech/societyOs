@@ -38,6 +38,9 @@ export class ParkingService {
         purpose: 'PARKING',
         vehicleNo: dto.vehicleNumber,
         status: 'EXPECTED',
+        // The host asked for it: approved. Left PENDING, the resident's own
+        // request showed up as a "Guest at gate" approval card forever.
+        approvalStatus: 'APPROVED',
         validFrom: new Date(dto.date),
       },
     });
@@ -59,7 +62,8 @@ export class ParkingService {
       where: { residentId: resident.id, purpose: 'PARKING' },
       orderBy: { createdAt: 'desc' },
     });
-    return visitors;
+    // `vehiclePlate` / `visitorName` are the names the app reads.
+    return visitors.map((v) => ({ ...v, vehiclePlate: v.vehicleNo, visitorName: v.name }));
   }
 
   async getAllSlots(societyId: string) {
@@ -106,10 +110,14 @@ export class ParkingService {
     const visitor = await this.prisma.visitor.create({
       data: {
         residentId: resident.id,
-        name: dto.visitorName ?? 'Guest',
-        purpose: dto.notes ?? 'PARKING',
+        // `||`, not `??`: the app sends '' for a blank name, which saved a
+        // nameless visitor, and its notes replaced the PARKING purpose, so
+        // the request never appeared in the resident's parking history.
+        name: dto.visitorName?.trim() || 'Guest',
+        purpose: 'PARKING',
         vehicleNo: dto.vehiclePlate,
         status: 'EXPECTED',
+        approvalStatus: 'APPROVED',
       },
     });
     return {

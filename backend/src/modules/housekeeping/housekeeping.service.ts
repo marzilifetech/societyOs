@@ -7,6 +7,7 @@ import { requireOwnedById } from '../../common/tenancy/require-owned.util';
 import { CreateHousekeepingDto } from './dto/create-housekeeping.dto';
 import { RateHousekeepingDto } from './dto/rate-housekeeping.dto';
 import { UpdateHousekeepingStatusDto } from './dto/update-housekeeping-status.dto';
+import { RESIDENT_BRIEF } from '../../common/prisma-selects';
 
 @Injectable()
 export class HousekeepingService {
@@ -59,9 +60,25 @@ export class HousekeepingService {
     return { data, meta: { total, page, limit: take, totalPages: Math.ceil(total / take) } };
   }
 
-  async findForAdmin(societyId: string, status?: string, date?: string, page = 1, limit = 20) {
+  /**
+   * The society's housekeeping requests, or — with `assignedStaffId` — only
+   * those assigned to one staff member (what staff see).
+   *
+   * Rows carry `resident.name`, `resident.unit.flatNumber` and `staffName`,
+   * which is what the admin page renders; it read those and got nothing, so
+   * the resident, flat and staff columns were always blank.
+   */
+  async findForAdmin(
+    societyId: string,
+    status?: string,
+    date?: string,
+    page = 1,
+    limit = 20,
+    assignedStaffId?: string,
+  ) {
     const where: any = { societyId };
     if (status) where.status = status;
+    if (assignedStaffId) where.staffId = assignedStaffId;
     if (date) {
       const start = new Date(date);
       start.setHours(0, 0, 0, 0);
@@ -71,17 +88,17 @@ export class HousekeepingService {
     }
     const take = Math.min(limit, 100);
     const skip = (page - 1) * take;
-    const [data, total] = await Promise.all([
+    const [rows, total] = await Promise.all([
       this.prisma.housekeepingRequest.findMany({
         where,
         select: {
           id: true, type: true, scheduledAt: true, status: true,
-          notes: true, rating: true, createdAt: true,
+          notes: true, rating: true, createdAt: true, staffId: true,
           resident: {
             select: {
               id: true,
               user: { select: { id: true, name: true, phone: true } },
-              flat: { select: { id: true, number: true, floor: true } },
+              flat: { select: { id: true, block: true, number: true, floor: true } },
             },
           },
         },
@@ -91,7 +108,45 @@ export class HousekeepingService {
       }),
       this.prisma.housekeepingRequest.count({ where }),
     ]);
+
+    const staffIds = [...new Set(rows.map((r) => r.staffId).filter((x): x is string => !!x))];
+    const staff = staffIds.length
+      ? await this.prisma.staffMember.findMany({
+          where: { id: { in: staffIds } },
+          select: { id: true, user: { select: { name: true } } },
+        })
+      : [];
+    const staffName = new Map(staff.map((s) => [s.id, s.user?.name ?? null]));
+
+    const data = rows.map((r) => {
+      const flat = r.resident?.flat;
+      return {
+        ...r,
+        staffName: r.staffId ? staffName.get(r.staffId) ?? null : null,
+        resident: r.resident && {
+          ...r.resident,
+          name: r.resident.user?.name ?? null,
+          unit: { flatNumber: flat ? [flat.block, flat.number].filter(Boolean).join('-') : null },
+        },
+      };
+    });
     return { data, meta: { total, page, limit: take, totalPages: Math.ceil(total / take) } };
+  }
+
+  async findForStaff(userId: string, societyId: string, status?: string, page = 1, limit = 20) {
+    const me = await this.prisma.staffMember.findUnique({ where: { userId }, select: { id: true } });
+    if (!me) throw new NotFoundException('Staff profile not found');
+    return this.findForAdmin(societyId, status, undefined, page, limit, me.id);
+  }
+
+  async findOneAsStaff(id: string, userId: string, societyId: string) {
+    const me = await this.prisma.staffMember.findUnique({ where: { userId }, select: { id: true } });
+    const request = await this.prisma.housekeepingRequest.findFirst({
+      where: { id, societyId, ...(me ? { staffId: me.id } : { id: '__none__' }) },
+      include: { resident: RESIDENT_BRIEF },
+    });
+    if (!request) throw new NotFoundException('Housekeeping request not found');
+    return request;
   }
 
   async findOne(id: string, userId: string) {
@@ -140,13 +195,43 @@ export class HousekeepingService {
     });
   }
 
-  async updateStatus(id: string, societyId: string, dto: UpdateHousekeepingStatusDto) {
+  /**
+   * Change a request's status — and, for admins, who is assigned.
+   *
+   * Staff could update ANY request in the society before; now only the one
+   * assigned to them, and they cannot reassign it. Admin assignment was a
+   * free-text field the API rejected with a 400 on every save.
+   */
+  async updateStatus(
+    id: string,
+    societyId: string,
+    dto: UpdateHousekeepingStatusDto,
+    actor?: { userId: string; role: string },
+  ) {
     const request = await this.findOneAsAdmin(id, societyId);
+    if (actor?.role === 'STAFF') {
+      const me = await this.prisma.staffMember.findUnique({ where: { userId: actor.userId }, select: { id: true } });
+      if (!me || request.staffId !== me.id) {
+        throw new ForbiddenException({ code: 'NOT_YOUR_REQUEST', message: 'This request is not assigned to you.' });
+      }
+      if (dto.staffId !== undefined) {
+        throw new ForbiddenException({ code: 'STAFF_FIELD_NOT_ALLOWED', message: 'Staff cannot reassign requests.' });
+      }
+    }
+    let assignTo: { id: string; userId: string } | null = null;
+    if (dto.staffId) {
+      assignTo = await this.prisma.staffMember.findFirst({
+        where: { id: dto.staffId, societyId, deletedAt: null },
+        select: { id: true, userId: true },
+      });
+      if (!assignTo) throw new BadRequestException({ code: 'STAFF_NOT_FOUND', message: 'Pick a staff member from this society.' });
+    }
     const isCompleting = String(dto.status) === 'COMPLETED';
     const updated = await this.prisma.housekeepingRequest.update({
       where: { id: request.id },
       data: {
         status: dto.status as any,
+        ...(assignTo ? { staffId: assignTo.id } : {}),
         // Persist the evidence the staff app has always sent. Only overwrite
         // when a value is supplied, so a later status change cannot wipe the
         // photos captured at completion.
@@ -172,6 +257,21 @@ export class HousekeepingService {
           { type: mapped.type, entityId: request.id, requestId: request.id, status: String(dto.status) },
         )
         .catch((e) => this.logger.warn(`housekeeping push failed id=${request.id}: ${(e as Error).message}`));
+    }
+
+    if (assignTo && assignTo.id !== request.staffId) {
+      void this.push
+        .send(
+          assignTo.userId,
+          {
+            title: 'Housekeeping assigned',
+            body: `New housekeeping job: ${request.type.replace(/_/g, ' ').toLowerCase()}.`,
+            category: 'staff_tasks',
+            collapseKey: `housekeeping:${request.id}`,
+          },
+          { type: 'HOUSEKEEPING_ASSIGNED', entityId: request.id },
+        )
+        .catch((e) => this.logger.warn(`housekeeping assign push failed id=${request.id}: ${(e as Error).message}`));
     }
 
     return updated;

@@ -114,6 +114,17 @@ describe('AuthService app activation', () => {
     ).rejects.toThrow(UnauthorizedException);
   });
 
+  it.each(['staff', 'admin'] as const)(
+    'refuses an unknown number signing into the %s app instead of creating a pending resident',
+    async (client) => {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+      await expect(
+        service.verifyOtp({ phone: '9999999999', otp: '123456', societyId: 'soc-1', client }),
+      ).rejects.toMatchObject({ response: expect.objectContaining({ code: 'NOT_REGISTERED' }) });
+      expect(mockPrisma.user.create).not.toHaveBeenCalled();
+    },
+  );
+
   // Hardcoded QA test number: fixed 0000 code, no SMS dispatched.
   describe('hardcoded test number (9999999001 → 0000)', () => {
     it('sendOtp does not dispatch an SMS for the test number', async () => {

@@ -11,6 +11,9 @@ import { RealtimeGateway } from '../../common/realtime/realtime.gateway';
 import { requireLeavePendingInSociety } from '../../common/utils/leave-admin.util';
 import { VisitorService } from '../visitor/visitor.service';
 import type { StaffMember } from '@prisma/client';
+import { RESIDENT_BRIEF } from '../../common/prisma-selects';
+import { istDateOf, isEarlyCheckOut, isLateCheckIn, resolveShift } from './attendance-time';
+import { normalizeIndianPhone } from '../../common/utils/phone';
 
 const LEAVE_ENTITLEMENTS: Record<string, number> = {
   CASUAL: 12,
@@ -20,6 +23,21 @@ const LEAVE_ENTITLEMENTS: Record<string, number> = {
   ANNUAL: 15,
   EMERGENCY: 5,
 };
+
+/**
+ * The spellings one Indian mobile number is stored under: as typed, canonical
+ * (+91XXXXXXXXXX) and bare 10 digits (visitor phones are stored as the guard
+ * typed them).
+ */
+/** Document types staff can upload (AADHAAR is stored with the admin spelling AADHAR). */
+const STAFF_DOCUMENT_TYPES = new Set(['AADHAAR', 'AADHAR', 'PAN', 'CONTRACT', 'CERTIFICATION', 'OTHER']);
+
+function phoneVariants(raw: string): string[] {
+  const canonical = normalizeIndianPhone(raw);
+  const digits = canonical.replace(/\D/g, '');
+  const national = digits.length > 10 ? digits.slice(-10) : digits;
+  return [...new Set([raw, canonical, national, `0${national}`])];
+}
 
 @Injectable()
 export class StaffService {
@@ -36,13 +54,45 @@ export class StaffService {
     return staff.id;
   }
 
+  /**
+   * The staff member's own profile, with the summary figures the Profile
+   * screen shows. The screen read `team`, `employeeId`, `joinedAt`, `society`,
+   * `presentDays`, `tasksDone` and `leaveBalance`, none of which were
+   * returned, so every one of them displayed "—".
+   */
   async getProfile(userId: string) {
     const staff = await this.prisma.staffMember.findUnique({
       where: { userId },
-      include: { user: true },
+      include: { user: true, society: { select: { id: true, name: true } } },
     });
     if (!staff) throw new NotFoundException('Staff profile not found');
-    return staff;
+
+    const today = istDateOf(new Date());
+    const monthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
+    const [presentDays, tasksDone, balance] = await Promise.all([
+      this.prisma.staffAttendance.count({
+        where: { staffId: staff.id, date: { gte: monthStart }, checkIn: { not: null } },
+      }),
+      this.prisma.serviceRequest.count({
+        where: { assignedToIds: { has: staff.id }, status: 'COMPLETED', resolvedAt: { gte: monthStart } },
+      }),
+      this.getLeaveBalance(userId),
+    ]);
+    const leaveBalance = ['CASUAL', 'MEDICAL', 'PRIVILEGE'].reduce((sum, k) => {
+      const e = (balance as Record<string, { used: number; total: number }>)[k];
+      return sum + (e ? Math.max(0, e.total - e.used) : 0);
+    }, 0);
+
+    return {
+      ...staff,
+      team: staff.department,
+      // No separate employee number exists; the record id is the stable one.
+      employeeId: staff.id.slice(0, 8).toUpperCase(),
+      joinedAt: staff.joiningDate ?? staff.createdAt,
+      presentDays,
+      tasksDone,
+      leaveBalance,
+    };
   }
 
   async findBySociety(societyId: string) {
@@ -67,22 +117,31 @@ export class StaffService {
     if (!staff) throw new NotFoundException('Staff profile not found');
     const staffId = staff.id;
 
-    if (lat != null && lng != null) {
-      const ok = this.validateGeofence(staff.society as any, lat, lng);
-      if (!ok) throw new BadRequestException('Outside society geofence');
+    // With a geofence configured, a check-in must prove where it was made.
+    // Omitting the coordinates used to skip the check entirely.
+    const hasGeofence = !!((staff.society?.config as any) || {}).geofence;
+    if (lat == null || lng == null) {
+      if (hasGeofence) {
+        throw new BadRequestException({
+          code: 'LOCATION_REQUIRED',
+          message: 'Turn on location to check in — it confirms you are on society premises.',
+        });
+      }
+    } else if (!this.validateGeofence(staff.society as any, lat, lng)) {
+      throw new BadRequestException({ code: 'OUTSIDE_GEOFENCE', message: 'Outside society geofence' });
     }
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const isLate = await this.isLateForToday(staffId, new Date());
+    const now = new Date();
+    const today = istDateOf(now);
+    const { shift, graceMinutes } = resolveShift(staff.society?.config, staff.shiftTemplateId);
+    const isLate = isLateCheckIn(now, shift, graceMinutes);
 
     return this.prisma.staffAttendance.upsert({
       where: { staffId_date: { staffId, date: today } },
       create: {
         staffId,
         date: today,
-        checkIn: new Date(),
+        checkIn: now,
         checkInLat: lat,
         checkInLng: lng,
         photoUrl,
@@ -91,7 +150,7 @@ export class StaffService {
         deviceId,
       },
       update: {
-        checkIn: new Date(),
+        checkIn: now,
         checkInLat: lat,
         checkInLng: lng,
         photoUrl,
@@ -102,21 +161,44 @@ export class StaffService {
     });
   }
 
+  /**
+   * Close the guard's open shift. Finds the most recent check-in without a
+   * check-out from today or yesterday (IST) — a night shift checks out the
+   * morning after it started, and looking up "today's" row by date used to
+   * fail with a 404 for every one of them.
+   */
   async checkOut(userId: string, lat?: number, lng?: number) {
-    const staffId = await this.resolveStaffId(userId);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const shiftEnd = new Date();
-    shiftEnd.setHours(18, 0, 0, 0);
-    const isEarlyDeparture = new Date() < shiftEnd;
-
+    const staff = await this.prisma.staffMember.findUnique({
+      where: { userId },
+      select: { id: true, shiftTemplateId: true, society: { select: { config: true } } },
+    });
+    if (!staff) throw new NotFoundException('Staff profile not found');
+    const now = new Date();
+    const today = istDateOf(now);
+    const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
+    const open = await this.prisma.staffAttendance.findFirst({
+      where: {
+        staffId: staff.id,
+        date: { gte: yesterday, lte: today },
+        checkIn: { not: null },
+        checkOut: null,
+      },
+      orderBy: { date: 'desc' },
+    });
+    if (!open) {
+      throw new NotFoundException({
+        code: 'NOT_CHECKED_IN',
+        message: 'You are not checked in.',
+      });
+    }
+    const { shift } = resolveShift(staff.society?.config, staff.shiftTemplateId);
     return this.prisma.staffAttendance.update({
-      where: { staffId_date: { staffId, date: today } },
+      where: { id: open.id },
       data: {
-        checkOut: new Date(),
+        checkOut: now,
         checkOutLat: lat,
         checkOutLng: lng,
-        isEarlyDeparture,
+        isEarlyDeparture: isEarlyCheckOut(now, shift),
       },
     });
   }
@@ -137,16 +219,27 @@ export class StaffService {
   ) {
     const staffId = await this.resolveStaffId(userId);
 
-    const balance = await this.getLeaveBalance(userId);
-    const entry = (balance as any)[dto.type];
-    if (entry && entry.total - entry.used <= 0) {
-      throw new BadRequestException(`No ${dto.type} leave balance remaining`);
-    }
-
     const start = new Date(dto.startDate);
     const end = new Date(dto.endDate);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const requestedDays = Math.max(
+      1,
+      Math.round((end.getTime() - start.getTime()) / (24 * 3600 * 1000)) + 1,
+    );
+
+    // Enough left for the WHOLE request — this only checked that at least one
+    // day remained, so a 5-day request with 1 day left went through.
+    const balance = await this.getLeaveBalance(userId);
+    const entry = (balance as any)[dto.type];
+    if (entry && entry.total - entry.used < requestedDays) {
+      const left = Math.max(0, entry.total - entry.used);
+      throw new BadRequestException({
+        code: 'INSUFFICIENT_LEAVE_BALANCE',
+        message: `Only ${left} ${dto.type.toLowerCase()} leave day${left === 1 ? '' : 's'} left this year.`,
+      });
+    }
+    // IST calendar day: in server (UTC) time, a leave starting "today" was
+    // refused as "in the past" between midnight and 05:30 IST.
+    const today = istDateOf(new Date());
     if (start < today) {
       throw new BadRequestException({ code: 'PAST_DATE', message: 'Leave cannot start in the past' });
     }
@@ -201,30 +294,45 @@ export class StaffService {
     });
   }
 
+  /**
+   * Today's attendance — or, for a night shift still running past midnight,
+   * the open record from yesterday, so the app keeps showing "checked in".
+   */
   async getTodayAttendance(userId: string) {
     const staffId = await this.resolveStaffId(userId);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    return this.prisma.staffAttendance.findUnique({
+    const today = istDateOf(new Date());
+    const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
+    const todays = await this.prisma.staffAttendance.findUnique({
       where: { staffId_date: { staffId, date: today } },
+    });
+    if (todays) return todays;
+    return this.prisma.staffAttendance.findFirst({
+      where: { staffId, date: yesterday, checkIn: { not: null }, checkOut: null },
     });
   }
 
   async getSummary(userId: string) {
     const staffId = await this.resolveStaffId(userId);
-    const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = istDateOf(new Date());
+    const monthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
+    const monthEnd = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 0));
 
     const [attendance, leaves, todayRecord] = await Promise.all([
       this.prisma.staffAttendance.count({ where: { staffId, date: { gte: monthStart, lte: monthEnd } } }),
       this.prisma.leaveRequest.count({ where: { staffId, status: 'APPROVED', startDate: { gte: monthStart } } }),
-      this.prisma.staffAttendance.findUnique({ where: { staffId_date: { staffId, date: today } } }),
+      this.getTodayAttendance(userId),
     ]);
 
-    return { attendanceCount: attendance, approvedLeaves: leaves, todayRecord };
+    // `checkedIn` / `checkInTime` are what Home renders; they were never
+    // returned, so Home said "Not checked in" all day for everyone.
+    const checkedIn = !!todayRecord?.checkIn && !todayRecord.checkOut;
+    return {
+      attendanceCount: attendance,
+      approvedLeaves: leaves,
+      todayRecord,
+      checkedIn,
+      checkInTime: checkedIn ? todayRecord!.checkIn : null,
+    };
   }
 
   // ─── Geofence + biometric (tasks 9-13) ─────────────────────────────────
@@ -266,31 +374,16 @@ export class StaffService {
     return R * c;
   }
 
-  private async isLateForToday(staffId: string, now: Date): Promise<boolean> {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const shift = await this.prisma.shift.findFirst({
-      where: { staffId, date: today },
-      orderBy: { startTime: 'asc' },
-    });
-    let h = 9;
-    let m = 0;
-    if (shift?.startTime) {
-      const parts = shift.startTime.split(':');
-      h = parseInt(parts[0] || '9', 10);
-      m = parseInt(parts[1] || '0', 10);
-    }
-    const cutoff = new Date();
-    cutoff.setHours(h, m, 0, 0);
-    return now > cutoff;
-  }
-
   async submitLateReason(userId: string, reason: string) {
     const staffId = await this.resolveStaffId(userId);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const record = await this.prisma.staffAttendance.findUnique({
+      where: { staffId_date: { staffId, date: istDateOf(new Date()) } },
+    });
+    if (!record) {
+      throw new NotFoundException({ code: 'NOT_CHECKED_IN', message: 'Check in before adding a late reason.' });
+    }
     return this.prisma.staffAttendance.update({
-      where: { staffId_date: { staffId, date: today } },
+      where: { id: record.id },
       data: { lateReason: reason },
     });
   }
@@ -336,69 +429,11 @@ export class StaffService {
     });
   }
 
-  // ─── Tasks/SR extension (tasks 19-24) ───────────────────────────────
-
-  async acceptTask(userId: string, requestId: string) {
-    const staffId = await this.resolveStaffId(userId);
-    const sr = await this.prisma.serviceRequest.findUnique({ where: { id: requestId } });
-    if (!sr) throw new NotFoundException('Service request not found');
-    if (sr.assignedToIds?.length && !sr.assignedToIds.includes(staffId)) {
-      throw new ForbiddenException('Not assigned to you');
-    }
-    const assignedToIds = sr.assignedToIds?.includes(staffId)
-      ? sr.assignedToIds
-      : [...(sr.assignedToIds ?? []), staffId];
-    return this.prisma.serviceRequest.update({
-      where: { id: requestId },
-      data: { status: 'IN_PROGRESS', acceptedAt: new Date(), assignedToIds },
-    });
-  }
-
-  async rejectTask(userId: string, requestId: string, reason: string) {
-    const staffId = await this.resolveStaffId(userId);
-    const sr = await this.prisma.serviceRequest.findUnique({ where: { id: requestId } });
-    if (!sr) throw new NotFoundException('Service request not found');
-    if (sr.assignedToIds?.length && !sr.assignedToIds.includes(staffId)) {
-      throw new ForbiddenException('Not assigned to you');
-    }
-    const updated = await this.prisma.serviceRequest.update({
-      where: { id: requestId },
-      data: { status: 'PENDING', rejectedReason: reason, assignedToIds: [] },
-    });
-    this.realtime.emit(`society:${sr.societyId}:admin`, 'task:rejected', { requestId, reason, staffId });
-    return updated;
-  }
-
-  async addTaskNote(userId: string, requestId: string, body: string, voiceUrl?: string) {
-    const staffId = await this.resolveStaffId(userId);
-    return this.prisma.taskNote.create({
-      data: { serviceRequestId: requestId, staffId, body, voiceUrl },
-    });
-  }
-
-  async getPresignedTaskUploadUrl(requestId: string, phase: 'BEFORE' | 'DURING' | 'AFTER', contentType?: string) {
-    return this.s3.getPresignedUploadUrl(`service-requests/${requestId}/${phase.toLowerCase()}`, contentType);
-  }
-
-  async confirmTaskPhoto(
-    requestId: string,
-    key: string,
-    phase: 'BEFORE' | 'DURING' | 'AFTER',
-    lat?: number,
-    lng?: number,
-    takenAt?: string,
-  ) {
-    return this.prisma.servicePhoto.create({
-      data: {
-        serviceRequestId: requestId,
-        phase,
-        url: this.s3.getPublicUrl(key),
-        lat,
-        lng,
-        takenAt: takenAt ? new Date(takenAt) : new Date(),
-      },
-    });
-  }
+  // ─── Tasks ──────────────────────────────────────────────────────────
+  // Accepting, rejecting, notes and photos live on /service-requests/:id/*,
+  // which check the task belongs to the caller's society and is assigned to
+  // them. The /staff/tasks/* copies here did neither (an unassigned request
+  // from ANY society could be self-assigned) and were removed.
 
   async getMyTaskHistory(userId: string, status?: string, page = 1, pageSize = 20) {
     const staffId = await this.resolveStaffId(userId);
@@ -408,7 +443,7 @@ export class StaffService {
     const [items, total] = await Promise.all([
       this.prisma.serviceRequest.findMany({
         where,
-        include: { resident: { include: { user: true, flat: true } }, photos: true },
+        include: { resident: RESIDENT_BRIEF, photos: true },
         orderBy: { createdAt: 'desc' },
         skip,
         take: pageSize,
@@ -442,7 +477,7 @@ export class StaffService {
     const residents = residentIds.length
       ? await this.prisma.resident.findMany({
           where: { id: { in: residentIds } },
-          include: { user: true, flat: true },
+          select: RESIDENT_BRIEF.select,
         })
       : [];
     const rmap = new Map(residents.map((r) => [r.id, r]));
@@ -524,9 +559,10 @@ export class StaffService {
       since = new Date(now.getFullYear(), now.getMonth(), 1);
     }
 
+    // Current staff only — people who have left don't belong on a leaderboard.
     const allStaff = await this.prisma.staffMember.findMany({
-      where: { societyId },
-      include: { user: true },
+      where: { societyId, deletedAt: null },
+      include: { user: { select: { id: true, name: true } } },
     });
     const staffIds = allStaff.map((s) => s.id);
     if (!staffIds.length) return [];
@@ -639,13 +675,22 @@ export class StaffService {
       where: { staffMemberId: staffId },
       orderBy: { uploadedAt: 'desc' },
     });
-    return docs.map((d) => ({
-      id: d.id,
-      type: d.documentType,
-      url: d.fileUrl,
-      uploadedAt: d.uploadedAt,
-      status: d.verifiedAt ? 'VERIFIED' : 'UPLOADED',
-    }));
+    return docs.map((d) => {
+      // Private uploads (IDs, contracts) are stored as a media key with no
+      // public address; only https URLs can be previewed.
+      const viewable = /^https:\/\//i.test(d.fileUrl);
+      return {
+        id: d.id,
+        // Stored as 'AADHAR' (admin spelling); the app's icons use 'AADHAAR'.
+        type: d.documentType === 'AADHAR' ? 'AADHAAR' : d.documentType,
+        // `fileUrl` is what the app reads; `url` kept for older builds.
+        fileUrl: viewable ? d.fileUrl : null,
+        url: viewable ? d.fileUrl : null,
+        isPrivate: !viewable,
+        uploadedAt: d.uploadedAt,
+        status: d.verifiedAt ? 'VERIFIED' : 'UPLOADED',
+      };
+    });
   }
 
   async getDocumentUploadUrl(userId: string, dto: { type: string; contentType?: string }) {
@@ -653,12 +698,23 @@ export class StaffService {
     return this.s3.getPresignedUploadUrl(`staff/${staffId}/documents/${dto.type}`, dto.contentType);
   }
 
-  async getSalarySlips(userId: string) {
+  /**
+   * Salary slips, optionally for one year. Amounts are converted to plain
+   * numbers: Prisma Decimals serialise as strings, so the app's yearly total
+   * concatenated them ("₹015000.0016000.00") instead of adding them.
+   */
+  async getSalarySlips(userId: string, year?: number) {
     const staffId = await this.resolveStaffId(userId);
-    return this.prisma.salarySlip.findMany({
-      where: { staffId },
+    const slips = await this.prisma.salarySlip.findMany({
+      where: { staffId, ...(year ? { period: { startsWith: `${year}-` } } : {}) },
       orderBy: { period: 'desc' },
     });
+    return slips.map((s) => ({
+      ...s,
+      grossPay: Number(s.grossPay),
+      deductions: Number(s.deductions),
+      netPay: Number(s.netPay),
+    }));
   }
 
   async getEmergencyContact(userId: string) {
@@ -709,22 +765,35 @@ export class StaffService {
     return { ok: true, photoUrl: updated.photoUrl };
   }
 
+  /**
+   * Record a document the app uploaded through /media (private visibility).
+   *
+   * Only a media KEY is accepted, never a URL: the record shows up in the admin
+   * portal, and accepting arbitrary URLs let any staff member plant a link
+   * there.
+   */
   async confirmDocumentUpload(
     userId: string,
     body: { documentId?: string; key: string; type?: string },
   ) {
     const staffId = await this.resolveStaffId(userId);
-    const documentType = (body.type ?? 'OTHER').toUpperCase().replace(/AADHAAR/g, 'AADHAR');
-    const fileUrl = this.s3.getPublicUrl(body.key);
+    const key = String(body.key ?? '').trim();
+    if (!key || key.length > 512 || key.includes('://') || key.startsWith('/')) {
+      throw new BadRequestException({ code: 'INVALID_DOCUMENT_KEY', message: 'Upload the file first.' });
+    }
+    const requested = (body.type ?? 'OTHER').toUpperCase();
+    const documentType = STAFF_DOCUMENT_TYPES.has(requested)
+      ? requested.replace(/^AADHAAR$/, 'AADHAR')
+      : 'OTHER';
     const doc = await this.prisma.staffDocument.create({
       data: {
         staffMemberId: staffId,
         documentType,
-        fileUrl,
+        fileUrl: key,
         uploadedBy: 'staff',
       },
     });
-    return { ok: true, key: body.key, documentId: doc.id };
+    return { ok: true, key, documentId: doc.id };
   }
 
   async registerDevice(userId: string, token: string, _platform: 'ios' | 'android') {
@@ -740,11 +809,26 @@ export class StaffService {
     if (!staff || !staff.society) {
       return { id: null, name: null, geofence: null, geofenceRadius: null };
     }
+    // The geofence lives in society.config (see validateGeofence); this read
+    // two columns that do not exist, so the app's own geofence check never
+    // ran. Normalised to what the app draws: a polygon of {lat,lng}, or a
+    // centre and radius.
+    const geo = ((staff.society.config as any) || {}).geofence;
+    const polygon = Array.isArray(geo?.polygon)
+      ? (geo.polygon as Array<[number, number] | { lat: number; lng: number }>).map((p) =>
+          Array.isArray(p) ? { lat: p[0], lng: p[1] } : { lat: p.lat, lng: p.lng },
+        )
+      : null;
+    const center =
+      geo?.center && typeof geo.center.lat === 'number' && typeof geo.center.lng === 'number'
+        ? { lat: geo.center.lat, lng: geo.center.lng }
+        : null;
     return {
       id: staff.society.id,
       name: staff.society.name,
-      geofence: (staff.society as any).geofence,
-      geofenceRadius: (staff.society as any).geofenceRadius,
+      geofence: polygon && polygon.length >= 3 ? polygon : null,
+      geofenceCenter: center,
+      geofenceRadius: center && typeof geo.radius === 'number' ? geo.radius : null,
     };
   }
 
@@ -840,7 +924,10 @@ export class StaffService {
         flat: { societyId },
         deletedAt: null,
         isAnonymised: false,
-        user: { phone: trimmed, status: 'ACTIVE' },
+        // Users are stored as +91XXXXXXXXXX; a guard types 10 digits. The raw
+        // string never matched, so every lookup by a normal number said "no
+        // resident has that phone".
+        user: { phone: { in: phoneVariants(trimmed) }, status: 'ACTIVE' },
       },
       include: { flat: true, user: { select: { name: true } } },
     });
@@ -868,7 +955,7 @@ export class StaffService {
   async getVisitorById(societyId: string, visitorId: string) {
     const visitor = await this.prisma.visitor.findFirst({
       where: { id: visitorId, resident: { flat: { societyId } } },
-      include: { resident: { include: { user: true, flat: true } } },
+      include: { resident: RESIDENT_BRIEF },
     });
     if (!visitor) {
       throw new NotFoundException({
@@ -894,7 +981,7 @@ export class StaffService {
       });
     }
     const visitor = await this.prisma.visitor.findFirst({
-      where: { phone: trimmed, resident: { flat: { societyId } } },
+      where: { phone: { in: phoneVariants(trimmed) }, resident: { flat: { societyId } } },
       orderBy: { createdAt: 'desc' },
       select: { name: true, photoUrl: true, type: true, deliveryPartner: true },
     });

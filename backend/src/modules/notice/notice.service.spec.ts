@@ -97,7 +97,7 @@ describe('NoticeService', () => {
 
       expect(mockPush.sendToSociety).toHaveBeenCalledWith(
         'society-1',
-        'RESIDENT',
+        ['RESIDENT', 'ADMIN', 'BUILDING_ADMIN'],
         expect.objectContaining({ category: 'notices' }),
         expect.objectContaining({ type: 'NOTICE_PUBLISHED' }),
       );
@@ -116,6 +116,49 @@ describe('NoticeService', () => {
         'RESIDENT',
         expect.objectContaining({ category: 'notices' }),
         expect.objectContaining({ type: 'NOTICE_PUBLISHED' }),
+      );
+    });
+  });
+
+  describe('getNotices visibility', () => {
+    it('hides scheduled-push rows and notices published in the future', async () => {
+      mockPrisma.notice.findMany.mockResolvedValue([]);
+      await service.getNotices('society-1');
+
+      const { where } = mockPrisma.notice.findMany.mock.calls[0][0];
+      expect(where.AND).toEqual(
+        expect.arrayContaining([
+          { OR: [{ category: null }, { category: { not: 'PUSH_SCHEDULED' } }] },
+          { OR: [{ publishedAt: null }, { publishedAt: { lte: expect.any(Date) } }] },
+        ]),
+      );
+    });
+  });
+
+  describe('broadcastEmergency', () => {
+    beforeEach(() => {
+      mockPrisma.notice.create.mockResolvedValue({ id: 'n-1', publishedAt: new Date() });
+    });
+
+    it('sends INFO/WARNING on the urgent-notices channel, not as an SOS', async () => {
+      await service.broadcastEmergency('society-1', { title: 'Water', message: 'No water 10-12', severity: 'WARNING' as any });
+
+      expect(mockPush.sendToSociety).toHaveBeenCalledWith(
+        'society-1',
+        ['RESIDENT', 'ADMIN', 'BUILDING_ADMIN', 'STAFF'],
+        expect.objectContaining({ category: 'notices_urgent', critical: false }),
+        expect.objectContaining({ type: 'EMERGENCY_BROADCAST', entityId: 'n-1' }),
+      );
+    });
+
+    it('sends EMERGENCY as critical, to residents, admins and staff', async () => {
+      await service.broadcastEmergency('society-1', { title: 'Fire', message: 'Evacuate', severity: 'EMERGENCY' as any });
+
+      expect(mockPush.sendToSociety).toHaveBeenCalledWith(
+        'society-1',
+        ['RESIDENT', 'ADMIN', 'BUILDING_ADMIN', 'STAFF'],
+        expect.objectContaining({ category: 'emergency_sos', critical: true }),
+        expect.anything(),
       );
     });
   });

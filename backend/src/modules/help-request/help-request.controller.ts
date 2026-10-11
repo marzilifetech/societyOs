@@ -1,7 +1,22 @@
-import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  ForbiddenException,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { HelpRequestService } from './help-request.service';
-import { CreateHelpRequestDto, UpdateHelpRequestStatusDto } from './dto/help-request.dto';
+import { StaffHelpService } from './staff-help.service';
+import {
+  CompleteHelpRequestDto,
+  CreateHelpRequestDto,
+  UpdateHelpRequestStatusDto,
+} from './dto/help-request.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
@@ -78,63 +93,52 @@ export class HelpRequestController {
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('staff/help-requests')
+@Roles(UserRole.STAFF)
 export class StaffHelpRequestController {
-  constructor(private helpService: HelpRequestService) {}
+  constructor(private staffHelp: StaffHelpService) {}
 
   @Get()
-  @Roles(UserRole.STAFF)
-  getMyHelpRequests(@CurrentUser() user: JwtPayload) {
-    return this.helpService.getMyHelpRequests(user.sub);
+  list(@CurrentUser() user: JwtPayload, @SocietyId() societyId: string) {
+    return this.staffHelp.list(user.sub, societyId);
   }
 
   @Get(':id')
-  @Roles(UserRole.STAFF)
-  getMyHelpRequestById(
-    @CurrentUser() user: JwtPayload,
-    @SocietyId() societyId: string,
-    @Param('id') id: string,
-  ) {
-    return this.helpService.getMyHelpRequestById(user.sub, id, societyId);
+  get(@CurrentUser() user: JwtPayload, @SocietyId() societyId: string, @Param('id') id: string) {
+    return this.staffHelp.get(user.sub, id, societyId);
   }
 
   @Post(':id/accept')
-  @Roles(UserRole.STAFF)
-  accept(
-    @CurrentUser() user: JwtPayload,
-    @SocietyId() societyId: string,
-    @Param('id') id: string,
-  ) {
-    return this.helpService.acceptHelpRequest(user.sub, id, societyId);
+  accept(@CurrentUser() user: JwtPayload, @SocietyId() societyId: string, @Param('id') id: string) {
+    return this.staffHelp.accept(user.sub, id, societyId);
   }
 
   @Post(':id/decline')
-  @Roles(UserRole.STAFF)
-  decline(
-    @CurrentUser() user: JwtPayload,
-    @SocietyId() societyId: string,
-    @Param('id') id: string,
-  ) {
-    return this.helpService.declineHelpRequest(user.sub, id, societyId);
+  decline(@CurrentUser() user: JwtPayload, @SocietyId() societyId: string, @Param('id') id: string) {
+    return this.staffHelp.decline(user.sub, id, societyId);
   }
 
   @Patch(':id/status')
-  @Roles(UserRole.STAFF)
   updateStatus(
     @CurrentUser() user: JwtPayload,
     @SocietyId() societyId: string,
     @Param('id') id: string,
     @Body() dto: UpdateHelpRequestStatusDto,
   ) {
-    return this.helpService.updateHelpRequestStatus(user.sub, id, societyId, dto.status);
+    if (dto.status === 'IN_PROGRESS') return this.staffHelp.start(user.sub, id, societyId);
+    if (dto.status === 'COMPLETED') return this.staffHelp.complete(user.sub, id, societyId, {});
+    throw new ForbiddenException({
+      code: 'STAFF_CANNOT_CANCEL',
+      message: 'Decline the request instead; only the resident or an admin can cancel it.',
+    });
   }
 
   @Post(':id/complete')
-  @Roles(UserRole.STAFF)
   complete(
     @CurrentUser() user: JwtPayload,
     @SocietyId() societyId: string,
     @Param('id') id: string,
+    @Body() dto: CompleteHelpRequestDto,
   ) {
-    return this.helpService.completeHelpRequest(user.sub, id, societyId);
+    return this.staffHelp.complete(user.sub, id, societyId, dto);
   }
 }

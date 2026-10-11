@@ -10,6 +10,7 @@ import { Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { Server, Socket } from 'socket.io';
+import { SOS_RESPONDER_ROLES } from '../../common/realtime/realtime.gateway';
 
 /**
  * SOS alerts carry a resident's name, flat and location, so this namespace is
@@ -37,12 +38,13 @@ export class SosGateway implements OnGatewayConnection {
         (client.handshake.auth?.token as string) ||
         (client.handshake.headers?.authorization || '').replace(/^Bearer\s+/, '');
       if (!token) throw new Error('missing token');
-      const payload = this.jwt.verify<{ sub: string; societyId?: string }>(token, {
+      const payload = this.jwt.verify<{ sub: string; societyId?: string; role?: string }>(token, {
         secret: this.config.get('JWT_SECRET'),
       });
       if (!payload?.societyId) throw new Error('token has no society');
       client.data.userId = payload.sub;
       client.data.societyId = payload.societyId;
+      client.data.role = payload.role;
     } catch (err) {
       this.logger.warn(`sos socket rejected: ${(err as Error).message}`);
       client.disconnect(true);
@@ -53,6 +55,11 @@ export class SosGateway implements OnGatewayConnection {
   handleJoin(@MessageBody() societyId: string, @ConnectedSocket() client: Socket) {
     const own = client.data?.societyId as string | undefined;
     if (!own || societyId !== own) {
+      return { joined: null, error: 'FORBIDDEN' };
+    }
+    // The room carries every alert's name, flat and location: responders
+    // only. A resident hears about their own alert on the /events socket.
+    if (!SOS_RESPONDER_ROLES.includes(String(client.data?.role))) {
       return { joined: null, error: 'FORBIDDEN' };
     }
     client.join(`society:${own}`);

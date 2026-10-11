@@ -9,7 +9,7 @@ import { makePrismaMock } from './helpers/prisma-mock';
 
 describe('Community moderation', () => {
   const prisma = makePrismaMock(['communityPost', 'resident']);
-  const service = new CommunityService(prisma as any);
+  const service = new CommunityService(prisma as any, { send: jest.fn().mockResolvedValue({ ok: true }) } as any);
 
   beforeEach(() => jest.clearAllMocks());
 

@@ -49,7 +49,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       // require provisioning to have happened upstream.
       throw new UnauthorizedException({ code: 'USER_REVOKED' });
     }
-    if (user.status === UserStatus.SUSPENDED) {
+    // Deactivated (INACTIVE: dismissed staff, moved-out residents, archived
+    // societies) is as final as SUSPENDED. Only SUSPENDED was checked, so a
+    // deactivated guard kept full API access — gate, visitor and resident data
+    // included — until their 7-day access token happened to expire.
+    if (user.status === UserStatus.SUSPENDED || user.status === UserStatus.INACTIVE) {
       throw new UnauthorizedException({ code: 'USER_REVOKED' });
     }
     // FK-orphan defence: a stale token may reference a deleted/missing society.

@@ -5,6 +5,31 @@ import {
 } from '@nestjs/throttler';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ExecutionContext, Injectable } from '@nestjs/common';
+import { verify } from 'jsonwebtoken';
+
+/**
+ * The `sub` claim of the request's bearer token, for rate-limit bucketing
+ * only. The signature IS checked: this guard runs before JwtAuthGuard, and an
+ * unverified subject let anyone fill another user's bucket (a resident could
+ * 429 a guard by sending unsigned tokens carrying the guard's id). Undefined
+ * when absent, malformed, expired or not signed by us — the caller then falls
+ * back to the IP.
+ */
+export function bearerSubject(
+  req: { headers?: Record<string, unknown> },
+  secret: string | undefined = process.env.JWT_SECRET,
+): string | undefined {
+  const header = req.headers?.authorization;
+  if (!secret || typeof header !== 'string' || !header.startsWith('Bearer ')) return undefined;
+  try {
+    const claims = verify(header.slice(7), secret) as { sub?: unknown };
+    return typeof claims?.sub === 'string' && claims.sub.length > 0 && claims.sub.length <= 64
+      ? claims.sub
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 // Custom guard: per-route quotas + IP+phone composite key for OTP routes.
 @Injectable()
@@ -26,11 +51,18 @@ export class AppThrottlerGuard extends ThrottlerGuard {
 
     // SOS: composite IP + userId (sub) when authenticated
     if (path.includes('/sos/trigger')) {
-      const userId = req.user?.sub ?? req.user?.id ?? '';
+      const userId = req.user?.sub ?? req.user?.id ?? bearerSubject(req) ?? '';
       return `${ip}|${userId}`;
     }
 
-    return ip;
+    // Signed-in requests are counted per USER, not per IP. Most Indian mobile
+    // users sit behind carrier-grade NAT (Jio especially), and a society's
+    // guards share the gate Wi-Fi, so hundreds of unrelated phones can present
+    // one public IP. Keyed by IP, they shared a single 100/min budget and the
+    // apps failed with 429s at random. Only a token we signed counts; anything
+    // else is bucketed by IP.
+    const sub = bearerSubject(req);
+    return sub ? `user:${sub}` : ip;
   }
 
   protected async shouldSkip(context: ExecutionContext): Promise<boolean> {

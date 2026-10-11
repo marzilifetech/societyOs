@@ -23,7 +23,7 @@ export class ConciergeService {
     // knows the resident asked for e.g. "Heavy Lifting" and not just "OTHER".
     const parts = [dto.description?.trim(), type === 'OTHER' && label && label.toUpperCase() !== 'OTHER' ? `Category: ${label}` : '', dto.preferredTime?.trim() ? `Preferred: ${dto.preferredTime.trim()}` : ''].filter(Boolean);
 
-    return this.prisma.conciergeRequest.create({
+    const created = await this.prisma.conciergeRequest.create({
       data: {
         societyId,
         residentId: resident.id,
@@ -32,15 +32,93 @@ export class ConciergeService {
       },
       include: { resident: { include: { user: true, flat: true } } },
     });
+    void this.notifyStaffOfNewRequest(created).catch((e) =>
+      this.logger.warn(`help request staff push failed id=${created.id}: ${(e as Error).message}`),
+    );
+    return created;
+  }
+
+  /**
+   * Tell staff a resident needs help, with Accept / Decline on the
+   * notification. Nothing was sent before — requests waited, unseen, until
+   * someone happened to open the admin portal.
+   *
+   * Who: active staff of the society, preferring everyone who is NOT on gate
+   * duty (guards can't leave the gate to carry a parcel); if the society only
+   * has security staff, they get it. First to accept takes it (see
+   * StaffHelpService.accept).
+   */
+  private async notifyStaffOfNewRequest(req: {
+    id: string;
+    societyId: string;
+    type: string;
+    description: string;
+    resident?: { user?: { name: string | null } | null; flat?: { block: string; number: string } | null } | null;
+  }) {
+    const staff = await this.prisma.staffMember.findMany({
+      where: {
+        societyId: req.societyId,
+        deletedAt: null,
+        user: { status: { notIn: ['INACTIVE', 'SUSPENDED', 'REJECTED'] } },
+      },
+      select: { userId: true, department: true, categories: true },
+    });
+    const isSecurity = (s: { department: string | null; categories: string[] }) =>
+      s.department?.toUpperCase() === 'SECURITY' || s.categories.some((c) => c.toUpperCase() === 'SECURITY');
+    const helpers = staff.filter((s) => !isSecurity(s));
+    const recipients = (helpers.length ? helpers : staff).map((s) => s.userId);
+    if (!recipients.length) return;
+
+    const flat = req.resident?.flat ? `${req.resident.flat.block}-${req.resident.flat.number}` : null;
+    const who = [req.resident?.user?.name, flat ? `Flat ${flat}` : null].filter(Boolean).join(', ');
+    const notification = {
+      title: 'Resident needs help',
+      body: `${who ? `${who}: ` : ''}${req.description}`.slice(0, 300),
+      category: 'staff_help_requests',
+      collapseKey: `help:${req.id}`,
+      actions: [
+        { id: 'ACCEPT', title: 'Accept' },
+        { id: 'DECLINE', title: 'Decline', destructive: true },
+      ],
+    };
+    const data = {
+      type: 'HELP_REQUEST',
+      entityId: req.id,
+      requestId: req.id,
+      actionGroup: 'help_request',
+    };
+    await Promise.allSettled(recipients.map((userId) => this.push.send(userId, notification, data)));
   }
 
   async getMyRequests(userId: string) {
     const resident = await this.prisma.resident.findFirst({ where: { user: { id: userId } } });
     if (!resident) return [];
-    return this.prisma.conciergeRequest.findMany({
+    const rows = await this.prisma.conciergeRequest.findMany({
       where: { residentId: resident.id },
       orderBy: { createdAt: 'desc' },
     });
+    return this.withStaffNames(rows);
+  }
+
+  /**
+   * Adds what the resident's screens show: who is helping (`staffName`) and
+   * the preferred time, which is stored inside the description as
+   * "Preferred: …". Both always read "Not specified / Not assigned" before.
+   */
+  private async withStaffNames<T extends { assignedStaffId: string | null; description: string | null }>(rows: T[]) {
+    const ids = [...new Set(rows.map((r) => r.assignedStaffId).filter((x): x is string => !!x))];
+    const staff = ids.length
+      ? await this.prisma.staffMember.findMany({
+          where: { id: { in: ids } },
+          select: { id: true, user: { select: { name: true } } },
+        })
+      : [];
+    const nameById = new Map(staff.map((s) => [s.id, s.user?.name ?? null]));
+    return rows.map((r) => ({
+      ...r,
+      staffName: r.assignedStaffId ? nameById.get(r.assignedStaffId) ?? null : null,
+      preferredTime: /(?:^|\n|\s)Preferred: ([^\n]+)/.exec(r.description ?? '')?.[1]?.trim() ?? null,
+    }));
   }
 
   async cancelRequest(userId: string, id: string, societyId: string) {
@@ -103,7 +181,8 @@ export class ConciergeService {
       'Request',
     );
     if (req.residentId !== resident.id) throw new NotFoundException('Request not found');
-    return req;
+    const [withNames] = await this.withStaffNames([req]);
+    return withNames;
   }
 
   async rateRequest(userId: string, id: string, societyId: string, dto: RateConciergeDto) {
@@ -116,7 +195,7 @@ export class ConciergeService {
     }
     return this.prisma.conciergeRequest.update({
       where: { id },
-      data: { rating: dto.rating, ratingText: dto.review ?? null },
+      data: { rating: dto.rating, ratingText: dto.review ?? dto.comment ?? null },
     });
   }
 }

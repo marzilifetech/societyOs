@@ -17,10 +17,6 @@ import {
   LateReasonDto,
   ShiftRangeDto,
   HolidayQueryDto,
-  RejectTaskDto,
-  AddTaskNoteDto,
-  PresignedUploadQueryDto,
-  ConfirmTaskPhotoDto,
   TaskHistoryQueryDto,
   FlagReviewDto,
   EmergencyContactDto,
@@ -143,36 +139,6 @@ export class StaffController {
 
   // ─── Tasks (service-request) extensions ─────────────────
 
-  @Post('tasks/:id/accept')
-  @Roles(UserRole.STAFF)
-  acceptTask(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
-    return this.staffService.acceptTask(user.sub, id);
-  }
-
-  @Post('tasks/:id/reject')
-  @Roles(UserRole.STAFF)
-  rejectTask(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() dto: RejectTaskDto) {
-    return this.staffService.rejectTask(user.sub, id, dto.reason);
-  }
-
-  @Post('tasks/:id/notes')
-  @Roles(UserRole.STAFF)
-  addTaskNote(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() dto: AddTaskNoteDto) {
-    return this.staffService.addTaskNote(user.sub, id, dto.body, dto.voiceUrl);
-  }
-
-  @Get('tasks/:id/upload-url')
-  @Roles(UserRole.STAFF)
-  getTaskUploadUrl(@Param('id') id: string, @Query() q: PresignedUploadQueryDto) {
-    return this.staffService.getPresignedTaskUploadUrl(id, q.phase, q.contentType);
-  }
-
-  @Post('tasks/:id/photos')
-  @Roles(UserRole.STAFF)
-  confirmTaskPhoto(@Param('id') id: string, @Body() dto: ConfirmTaskPhotoDto) {
-    return this.staffService.confirmTaskPhoto(id, dto.key, dto.phase, dto.lat, dto.lng, dto.takenAt);
-  }
-
   @Get('tasks/history')
   @Roles(UserRole.STAFF)
   getMyTaskHistory(@CurrentUser() user: JwtPayload, @Query() q: TaskHistoryQueryDto) {
@@ -231,8 +197,10 @@ export class StaffController {
 
   @Get('salary')
   @Roles(UserRole.STAFF)
-  getSalarySlips(@CurrentUser() user: JwtPayload) {
-    return this.staffService.getSalarySlips(user.sub);
+  getSalarySlips(@CurrentUser() user: JwtPayload, @Query('year') year?: string) {
+    // `?year=` was sent by the app and silently ignored.
+    const y = year ? parseInt(year, 10) : NaN;
+    return this.staffService.getSalarySlips(user.sub, y >= 2000 && y <= 2100 ? y : undefined);
   }
 
   @Get('emergency-contact')

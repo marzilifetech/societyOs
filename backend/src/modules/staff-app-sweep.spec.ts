@@ -10,7 +10,6 @@
  */
 import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ServiceRequestService } from './service-request/service-request.service';
-import { HelpRequestService } from './help-request/help-request.service';
 import { LaundryService } from './laundry/laundry.service';
 import { HousekeepingService } from './housekeeping/housekeeping.service';
 
@@ -101,38 +100,6 @@ describe('ServiceRequestService.acceptTask', () => {
         data: expect.objectContaining({ assignedToIds: ['sm-2'], status: 'ASSIGNED' }),
       }),
     );
-  });
-});
-
-// ── Help-request decline: the "Decline" button had no route at all ─────────
-describe('HelpRequestService.declineHelpRequest', () => {
-  const makePrisma = (sr: any) => ({
-    staffMember: { findUnique: jest.fn().mockResolvedValue({ id: 'sm-1' }) },
-    serviceRequest: {
-      findUnique: jest.fn().mockResolvedValue(sr),
-      update: jest.fn().mockImplementation(({ data }: any) => Promise.resolve({ ...sr, ...data })),
-    },
-  });
-  const svc = (prisma: any) => new HelpRequestService(prisma, noopGateway, noopS3);
-
-  it('unassigns the staff member and reopens the request', async () => {
-    const prisma: any = makePrisma({
-      id: 'hr-1', societyId: 'soc-1', assignedToIds: ['sm-1'], status: 'ASSIGNED', acceptedAt: new Date(),
-    });
-    await svc(prisma).declineHelpRequest('u-staff', 'hr-1', 'soc-1');
-    expect(prisma.serviceRequest.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ assignedToIds: [], status: 'PENDING', acceptedAt: null }),
-      }),
-    );
-  });
-
-  it('is a no-op when it is not theirs — the push hits every device', async () => {
-    const prisma: any = makePrisma({
-      id: 'hr-1', societyId: 'soc-1', assignedToIds: ['other'], status: 'ASSIGNED',
-    });
-    await svc(prisma).declineHelpRequest('u-staff', 'hr-1', 'soc-1');
-    expect(prisma.serviceRequest.update).not.toHaveBeenCalled();
   });
 });
 

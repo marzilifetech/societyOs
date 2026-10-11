@@ -37,7 +37,7 @@ export class CanteenService {
       include: {
         menu: true,
         dishRatings: {
-          include: { resident: { include: { user: true } } },
+          include: { resident: { select: { user: { select: { name: true } } } } },
           orderBy: { createdAt: 'desc' },
           take: 10,
         },
@@ -49,12 +49,15 @@ export class CanteenService {
     const ratingCount = all.length;
     const avgRating = ratingCount === 0 ? 0 : all.reduce((s, r) => s + Number(r.rating), 0) / ratingCount;
 
+    // The raw rating rows carried each reviewer's whole user record (phone,
+    // email); only the mapped `reviews` below go out.
+    const { dishRatings, ...rest } = dish;
     return {
-      ...dish,
+      ...rest,
       price: Number(dish.price),
       avgRating,
       ratingCount,
-      reviews: dish.dishRatings.map((r) => ({
+      reviews: dishRatings.map((r) => ({
         id: r.id,
         rating: Number(r.rating),
         comment: r.comment ?? undefined,

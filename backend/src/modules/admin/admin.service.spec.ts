@@ -30,10 +30,12 @@ const mockPrisma: Record<string, any> = {
   domesticHelp: { findMany: jest.fn() },
   pestControlSchedule: { findMany: jest.fn() },
   infrastructureItem: { findFirst: jest.fn(), findMany: jest.fn(), create: jest.fn() },
+  notice: { create: jest.fn() },
 };
 const mockPush = {
   send: jest.fn().mockResolvedValue({ ok: true }),
   sendToSociety: jest.fn().mockResolvedValue({ sent: 0, failed: 0, cleaned: 0 }),
+  scheduleAt: jest.fn().mockResolvedValue({ jobId: 'job-1' }),
 };
 mockPrisma.$transaction = jest.fn((arg: unknown) => {
   if (typeof arg === 'function') return (arg as (tx: typeof mockPrisma) => unknown)(mockPrisma);
@@ -489,39 +491,28 @@ describe('AdminService', () => {
     });
   });
 
-  describe('approveLeave resignation flow', () => {
-    it('auto-dismisses staff on RESIGNATION approval', async () => {
-      mockPrisma.leaveRequest.findUnique.mockResolvedValue({
-        id: 'lv1',
-        status: LeaveStatus.PENDING,
-        type: 'RESIGNATION',
-        staffId: 'sm-1',
-        staff: { societyId: 'soc-1', userId: 'u-staff' },
-      });
-      mockPrisma.leaveRequest.update.mockResolvedValue({ id: 'lv1', status: LeaveStatus.APPROVED });
-      mockPrisma.staffMember.findUnique.mockResolvedValue({ id: 'sm-1', userId: 'u-staff' });
-      mockPrisma.staffMember.update.mockResolvedValue({});
-      mockPrisma.user.update.mockResolvedValue({});
+  describe('approveLeave never dismisses', () => {
+    // Dismissal is the explicit, permission-checked "Mark as left" action.
+    // Approving an EMERGENCY leave used to soft-delete the staff member.
+    it.each(['EMERGENCY', 'LEAVE_REQUESTED', 'RESIGNATION', 'CASUAL'])(
+      'approving a %s leave only approves it',
+      async (type) => {
+        mockPrisma.leaveRequest.findUnique.mockResolvedValue({
+          id: 'lv1',
+          status: LeaveStatus.PENDING,
+          type,
+          staffId: 'sm-1',
+          staff: { societyId: 'soc-1', userId: 'u-staff' },
+        });
+        mockPrisma.leaveRequest.update.mockResolvedValue({ id: 'lv1', status: LeaveStatus.APPROVED });
 
-      await service.approveLeave('lv1', 'soc-1');
+        await service.approveLeave('lv1', 'soc-1');
 
-      expect(mockPrisma.staffMember.update).toHaveBeenCalled();
-    });
-
-    it('skips dismiss for CASUAL leave', async () => {
-      mockPrisma.leaveRequest.findUnique.mockResolvedValue({
-        id: 'lv2',
-        status: LeaveStatus.PENDING,
-        type: 'CASUAL',
-        staffId: 'sm-1',
-        staff: { societyId: 'soc-1' },
-      });
-      mockPrisma.leaveRequest.update.mockResolvedValue({ id: 'lv2', status: LeaveStatus.APPROVED });
-
-      await service.approveLeave('lv2', 'soc-1');
-
-      expect(mockPrisma.staffMember.update).not.toHaveBeenCalled();
-    });
+        expect(mockPrisma.leaveRequest.update).toHaveBeenCalled();
+        expect(mockPrisma.staffMember.update).not.toHaveBeenCalled();
+        expect(mockPrisma.user.update).not.toHaveBeenCalled();
+      },
+    );
   });
 
   describe('getStaffDetail', () => {
@@ -1943,6 +1934,79 @@ describe('AdminService', () => {
 
       const arg = mockPrisma.user.create.mock.calls[0][0];
       expect(arg.data.dateOfBirth).toBeUndefined();
+    });
+  });
+  describe('sendPushNotification', () => {
+    const inAnHour = () => new Date(Date.now() + 60 * 60 * 1000).toISOString();
+
+    it('books a scheduled push on the queue instead of saving a public notice', async () => {
+      const res = await service.sendPushNotification('soc-a', {
+        title: 'Water cut',
+        body: 'Tomorrow 10-12',
+        targetType: 'ALL',
+        scheduledAt: inAnHour(),
+      });
+
+      expect(res).toMatchObject({ scheduled: true, jobId: 'job-1' });
+      expect(mockPush.scheduleAt).toHaveBeenCalledWith(
+        expect.any(Date),
+        { societyId: 'soc-a', role: null },
+        expect.objectContaining({ title: 'Water cut', category: 'admin_push' }),
+        { type: 'ADMIN_PUSH' },
+      );
+      expect(mockPrisma.notice.create).not.toHaveBeenCalled();
+      expect(mockPush.sendToSociety).not.toHaveBeenCalled();
+    });
+
+    it('refuses to schedule when the queue is unavailable', async () => {
+      mockPush.scheduleAt.mockResolvedValueOnce(null);
+      await expect(
+        service.sendPushNotification('soc-a', { title: 't', body: 'b', targetType: 'ALL', scheduledAt: inAnHour() }),
+      ).rejects.toMatchObject({ response: expect.objectContaining({ code: 'SCHEDULING_UNAVAILABLE' }) });
+    });
+
+    it('rejects a schedule more than 30 days ahead', async () => {
+      const far = new Date(Date.now() + 31 * 24 * 60 * 60 * 1000).toISOString();
+      await expect(
+        service.sendPushNotification('soc-a', { title: 't', body: 'b', targetType: 'ALL', scheduledAt: far }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('only messages INDIVIDUAL users who belong to this society', async () => {
+      mockPrisma.user.findMany.mockResolvedValueOnce([{ id: 'u-mine' }]);
+
+      const res = await service.sendPushNotification('soc-a', {
+        title: 't',
+        body: 'b',
+        targetType: 'INDIVIDUAL',
+        targetIds: ['u-mine', 'u-other-society'],
+      });
+
+      expect(mockPrisma.user.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ id: { in: ['u-mine', 'u-other-society'] }, societyId: 'soc-a' }),
+        }),
+      );
+      expect(mockPush.send).toHaveBeenCalledTimes(1);
+      expect(mockPush.send).toHaveBeenCalledWith('u-mine', expect.anything(), { type: 'ADMIN_PUSH' });
+      expect(res).toMatchObject({ scheduled: false, sent: 1 });
+    });
+
+    it('matches "A-101" as block A flat 101, or a flat numbered "A-101"', async () => {
+      mockPrisma.resident.findMany.mockResolvedValueOnce([{ userId: 'u1' }]);
+
+      await service.sendPushNotification('soc-a', { title: 't', body: 'b', targetType: 'FLAT', targetIds: ['A-101'] });
+
+      expect(mockPrisma.resident.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            flat: {
+              societyId: 'soc-a',
+              OR: [{ OR: [{ block: 'A', number: '101' }, { number: 'A-101' }] }],
+            },
+          }),
+        }),
+      );
     });
   });
 });

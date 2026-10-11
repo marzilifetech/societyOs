@@ -27,6 +27,7 @@ describe('notification-categories', () => {
         'approvals',
         'deliveries',
         'community',
+        'notices_urgent',
         'payments',
         'system',
       ];
@@ -42,7 +43,7 @@ describe('notification-categories', () => {
       expect(getCategory('staff_tasks')?.channelId).toBe('approvals');
       expect(getCategory('deliveries')?.channelId).toBe('deliveries');
       expect(getCategory('notices')?.channelId).toBe('community');
-      expect(getCategory('notices_urgent')?.channelId).toBe('community');
+      expect(getCategory('notices_urgent')?.channelId).toBe('notices_urgent');
       expect(getCategory('payments_dues')?.channelId).toBe('payments');
       expect(getCategory('account_auth')?.channelId).toBe('system');
     });

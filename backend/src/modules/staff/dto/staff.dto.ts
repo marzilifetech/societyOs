@@ -157,8 +157,9 @@ export class CheckOutDto {
 }
 
 export class LateReasonDto {
-  @ApiProperty()
+  @ApiProperty({ maxLength: 500 })
   @IsString()
+  @MaxLength(500)
   reason: string;
 
   @ApiPropertyOptional()
@@ -195,59 +196,6 @@ export class CreateHolidayDto {
   @IsOptional()
   @IsBoolean()
   isOptional?: boolean;
-}
-
-export class RejectTaskDto {
-  @ApiProperty()
-  @IsString()
-  reason: string;
-}
-
-export class AddTaskNoteDto {
-  @ApiProperty()
-  @IsString()
-  body: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  voiceUrl?: string;
-}
-
-export class PresignedUploadQueryDto {
-  @ApiProperty({ enum: ['BEFORE', 'DURING', 'AFTER'] })
-  @IsEnum(['BEFORE', 'DURING', 'AFTER'])
-  phase: 'BEFORE' | 'DURING' | 'AFTER';
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  contentType?: string;
-}
-
-export class ConfirmTaskPhotoDto {
-  @ApiProperty()
-  @IsString()
-  key: string;
-
-  @ApiProperty({ enum: ['BEFORE', 'DURING', 'AFTER'] })
-  @IsEnum(['BEFORE', 'DURING', 'AFTER'])
-  phase: 'BEFORE' | 'DURING' | 'AFTER';
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsNumber()
-  lat?: number;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsNumber()
-  lng?: number;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsDateString()
-  takenAt?: string;
 }
 
 export class TaskHistoryQueryDto {

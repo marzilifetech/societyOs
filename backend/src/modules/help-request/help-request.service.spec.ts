@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { NotFoundException } from '@nestjs/common';
 import { HelpRequestService } from './help-request.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { S3Service } from '../../common/storage/s3.service';
@@ -15,7 +15,7 @@ const mockPrisma = {
 const mockS3 = { getPresignedUploadUrl: jest.fn().mockResolvedValue({ uploadUrl: 'u', key: 'k' }) };
 const mockRealtime = { emit: jest.fn() };
 
-describe('HelpRequestService assignedToIds flows', () => {
+describe('HelpRequestService (resident help requests)', () => {
   let service: HelpRequestService;
 
   beforeEach(async () => {
@@ -30,88 +30,6 @@ describe('HelpRequestService assignedToIds flows', () => {
     service = module.get(HelpRequestService);
     jest.clearAllMocks();
     mockPrisma.staffMember.findUnique.mockResolvedValue({ id: 'staff-1', userId: 'u-staff' });
-  });
-
-  it('getMyHelpRequests filters by assignedToIds has staffId', async () => {
-    mockPrisma.serviceRequest.findMany.mockResolvedValue([]);
-    await service.getMyHelpRequests('u-staff');
-    expect(mockPrisma.serviceRequest.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ assignedToIds: { has: 'staff-1' } }),
-      }),
-    );
-  });
-
-  it('acceptHelpRequest sets assignedToIds array', async () => {
-    mockPrisma.serviceRequest.findUnique.mockResolvedValue({ id: 'hr-1', societyId: 'soc-1' });
-    mockPrisma.serviceRequest.update.mockResolvedValue({ id: 'hr-1', assignedToIds: ['staff-1'] });
-    await service.acceptHelpRequest('u-staff', 'hr-1', 'soc-1');
-    expect(mockPrisma.serviceRequest.update).toHaveBeenCalledWith({
-      where: { id: 'hr-1' },
-      data: expect.objectContaining({ assignedToIds: ['staff-1'] }),
-    });
-  });
-
-  it('getMyHelpRequestById throws when staff not in assignedToIds', async () => {
-    mockPrisma.serviceRequest.findUnique.mockResolvedValue({
-      id: 'hr-1',
-      societyId: 'soc-1',
-      assignedToIds: ['other'],
-    });
-    await expect(service.getMyHelpRequestById('u-staff', 'hr-1', 'soc-1')).rejects.toThrow(NotFoundException);
-  });
-
-  it('updateHelpRequestStatus rejects wrong assignee', async () => {
-    mockPrisma.serviceRequest.findUnique.mockResolvedValue({
-      id: 'hr-1',
-      societyId: 'soc-1',
-      assignedToIds: ['other'],
-    });
-    await expect(
-      service.updateHelpRequestStatus('u-staff', 'hr-1', 'soc-1', 'IN_PROGRESS'),
-    ).rejects.toThrow(NotFoundException);
-  });
-
-  it('completeHelpRequest emits realtime event', async () => {
-    mockPrisma.serviceRequest.findUnique.mockResolvedValue({ id: 'hr-1', societyId: 'soc-1', residentId: 'res-1' });
-    mockPrisma.serviceRequest.update.mockResolvedValue({ id: 'hr-1', status: 'COMPLETED' });
-    await service.completeHelpRequest('u-staff', 'hr-1', 'soc-1');
-    expect(mockRealtime.emit).toHaveBeenCalledWith(
-      'resident:res-1',
-      'help:completed',
-      expect.objectContaining({ requestId: 'hr-1' }),
-    );
-  });
-
-  it('completeHelpRequest throws when request missing', async () => {
-    mockPrisma.serviceRequest.findUnique.mockResolvedValue(null);
-    await expect(service.completeHelpRequest('u-staff', 'missing', 'soc-1')).rejects.toThrow(NotFoundException);
-  });
-
-  it('completeHelpRequest throws CROSS_TENANT_ACCESS on society mismatch', async () => {
-    mockPrisma.serviceRequest.findUnique.mockResolvedValue({ id: 'hr-1', societyId: 'soc-other', residentId: 'res-1' });
-    await expect(service.completeHelpRequest('u-staff', 'hr-1', 'soc-1')).rejects.toThrow(ForbiddenException);
-  });
-
-  it('acceptHelpRequest throws when request missing', async () => {
-    mockPrisma.serviceRequest.findUnique.mockResolvedValue(null);
-    await expect(service.acceptHelpRequest('u-staff', 'missing', 'soc-1')).rejects.toThrow(NotFoundException);
-  });
-
-  it('updateHelpRequestStatus allows update when no assignees yet', async () => {
-    mockPrisma.serviceRequest.findUnique.mockResolvedValue({
-      id: 'hr-1',
-      societyId: 'soc-1',
-      assignedToIds: [],
-    });
-    mockPrisma.serviceRequest.update.mockResolvedValue({ id: 'hr-1', status: 'IN_PROGRESS' });
-
-    await service.updateHelpRequestStatus('u-staff', 'hr-1', 'soc-1', 'IN_PROGRESS');
-
-    expect(mockPrisma.serviceRequest.update).toHaveBeenCalledWith({
-      where: { id: 'hr-1' },
-      data: { status: 'IN_PROGRESS' },
-    });
   });
 
   it('getHelpRequestPhotoUploadUrl delegates to S3', async () => {
@@ -169,34 +87,4 @@ describe('HelpRequestService assignedToIds flows', () => {
     });
   });
 
-  it('getMyHelpRequestById returns request when staff is assignee', async () => {
-    mockPrisma.serviceRequest.findUnique.mockResolvedValue({
-      id: 'hr-1',
-      societyId: 'soc-1',
-      assignedToIds: ['staff-1'],
-    });
-    const req = await service.getMyHelpRequestById('u-staff', 'hr-1', 'soc-1');
-    expect(req).toMatchObject({ id: 'hr-1' });
-  });
-
-  it('updateHelpRequestStatus sets resolvedAt on COMPLETED', async () => {
-    mockPrisma.serviceRequest.findUnique.mockResolvedValue({
-      id: 'hr-1',
-      societyId: 'soc-1',
-      assignedToIds: ['staff-1'],
-    });
-    mockPrisma.serviceRequest.update.mockResolvedValue({ id: 'hr-1', status: 'COMPLETED' });
-
-    await service.updateHelpRequestStatus('u-staff', 'hr-1', 'soc-1', 'COMPLETED');
-
-    expect(mockPrisma.serviceRequest.update).toHaveBeenCalledWith({
-      where: { id: 'hr-1' },
-      data: expect.objectContaining({ status: 'COMPLETED', resolvedAt: expect.any(Date) }),
-    });
-  });
-
-  it('resolveStaffId throws when staff profile missing', async () => {
-    mockPrisma.staffMember.findUnique.mockResolvedValue(null);
-    await expect(service.getMyHelpRequests('unknown')).rejects.toThrow(NotFoundException);
-  });
 });

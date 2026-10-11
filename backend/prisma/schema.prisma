@@ -808,6 +808,8 @@ model Complaint {
   // assigned to a specific staffer. Decoupled from adminNote so admins keep
   // free-text notes; previously assignment overwrote the note field (H1).
   assignedToId String?
+  /// Optional photo the resident attached (a /media key or URL).
+  photoUrl     String?
   resolvedAt   DateTime?
   rating       Decimal?        @db.Decimal(3, 2)
   ratingText   String?
@@ -1408,10 +1410,14 @@ model FamilyMember {
   id           String   @id @default(cuid())
   residentId   String
   name         String
-  phone        String
+  /// Optional: young children and elders often have no phone of their own.
+  phone        String?
   relationship String
   permissions  Json     @default("{}")
   isVerified   Boolean  @default(false)
+  dateOfBirth        DateTime?
+  bloodGroup         String?
+  isEmergencyContact Boolean  @default(false)
   createdAt    DateTime @default(now())
 
   resident Resident @relation(fields: [residentId], references: [id])
@@ -1481,11 +1487,14 @@ model DomesticHelp {
   phone      String
   photoUrl   String?
   salary     Decimal?
+  /// May the guard let this helper in without calling the flat?
+  gateAccess Boolean          @default(false)
   isActive   Boolean          @default(true)
   createdAt  DateTime         @default(now())
 
   resident   Resident             @relation(fields: [residentId], references: [id])
   attendance DomesticAttendance[]
+  payments   DomesticHelpPayment[]
 
   @@index([residentId])
   @@map("domestic_helps")
@@ -1503,6 +1512,20 @@ model DomesticAttendance {
 
   @@index([domesticHelpId])
   @@map("domestic_attendance")
+}
+
+/// Cash a resident paid their helper — their own record, not an online payment.
+model DomesticHelpPayment {
+  id             String   @id @default(cuid())
+  domesticHelpId String
+  amount         Decimal  @db.Decimal(10, 2)
+  paidAt         DateTime @default(now())
+  createdAt      DateTime @default(now())
+
+  domesticHelp DomesticHelp @relation(fields: [domesticHelpId], references: [id], onDelete: Cascade)
+
+  @@index([domesticHelpId, paidAt])
+  @@map("domestic_help_payments")
 }
 
 // ─── Parking & Vehicles ───────────────────────────────────────────────────────
@@ -1680,6 +1703,8 @@ model Subscription {
   startDate  DateTime
   isPaused   Boolean               @default(false)
   pauseUntil DateTime?
+  /// Set when the resident stops the subscription for good.
+  cancelledAt DateTime?
   createdAt  DateTime              @default(now())
 
   resident Resident @relation(fields: [residentId], references: [id])

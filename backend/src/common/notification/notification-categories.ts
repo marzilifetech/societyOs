@@ -36,6 +36,7 @@ export type NotificationType = 'MARKETING' | 'DELIVERY' | 'EMERGENCY';
  *   approvals     — HIGH; visitor/delivery/help/task approvals + approval_results
  *   deliveries    — HIGH
  *   community     — DEFAULT; notices, events, polls, welfare (replaces legacy 'marketing')
+ *   notices_urgent — HIGH; admin broadcasts (water, power, safety) that are not SOS
  *   payments      — DEFAULT
  *   system        — DEFAULT/LOW; account_auth, app updates, misc
  */
@@ -44,6 +45,7 @@ export type NotificationChannelId =
   | 'approvals'
   | 'deliveries'
   | 'community'
+  | 'notices_urgent'
   | 'payments'
   | 'system';
 
@@ -148,7 +150,9 @@ export const NOTIFICATION_CATEGORIES: NotificationCategory[] = [
   },
   {
     key: 'notices_urgent',
-    channelId: 'community',
+    // Its own HIGH channel: on 'community' (DEFAULT importance) an urgent
+    // notice arrived silently, with no heads-up.
+    channelId: 'notices_urgent',
     // Urgent notices reach residents loudly but they are NOT emergencies in
     // the SOS sense — the user opted into society-admin authored "critical"
     // notices. Route them as DELIVERY (lockscreen + heads-up) so they break
@@ -203,14 +207,31 @@ export const NOTIFICATION_CATEGORIES: NotificationCategory[] = [
   {
     key: 'staff_tasks',
     channelId: 'approvals',
-    type: 'MARKETING',
+    // DELIVERY, not MARKETING: a task is work someone is waiting on. As
+    // MARKETING it went out at normal FCM priority, which Android Doze holds
+    // back (often for many minutes) on an idle guard phone, and it was not
+    // time-sensitive, so assignments made after 22:00 reached the night shift
+    // at 07:00.
+    type: 'DELIVERY',
     label: 'Duty & tasks',
     description: 'Patrol reminders, shift handovers and task assignments.',
     defaultEnabled: true,
     mutable: true,
-    importance: 'default',
-    actionable: false,
+    importance: 'high',
+    actionable: true,
     audiences: ['staff', 'admin'],
+  },
+  {
+    key: 'staff_help_requests',
+    channelId: 'approvals',
+    type: 'DELIVERY',
+    label: 'Resident help requests',
+    description: 'A resident needs a hand: a parcel, a document, a taxi.',
+    defaultEnabled: true,
+    mutable: true,
+    importance: 'high',
+    actionable: true,
+    audiences: ['staff'],
   },
   {
     key: 'approval_results',
