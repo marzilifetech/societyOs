@@ -35,7 +35,7 @@ export default function NewConciergeScreen() {
   const mutation = useMutation({
     mutationFn: (body: object) => api.post('/concierge', body),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['concierge'] });
+      qc.invalidateQueries({ queryKey: ['concierge-requests'] });
       Alert.alert('Request Submitted', 'Our concierge team will be in touch shortly.', [
         { text: 'OK', onPress: () => router.back() },
       ]);

@@ -7,6 +7,8 @@ import { useQuery } from '@tanstack/react-query';
 
 import { api } from '../../src/lib/api';
 import { useTheme } from '../../src/hooks/useTheme';
+import { ErrorCard } from '../../src/components/ErrorCard';
+import { conciergeStatus, conciergeTypeLabel, isConciergeActive } from '../../src/utils/concierge';
 import {
   ScreenHeader,
   Display,
@@ -16,15 +18,15 @@ import {
   StatusPill,
   IconCircle,
   rd,
-  type RdStatusTone,
 } from '../../src/components/ui';
 
 // Request History screen — Figma SegmentedTabs (All / Active / Past)
-// Fetches GET /help-requests and filters client-side — no separate history endpoint needed.
+// Fetches GET /concierge/my and filters client-side — no separate history endpoint needed.
 
 type HelpRequest = {
   id: string;
-  category: string;
+  category?: string;
+  type?: string;
   description: string;
   urgency?: string;
   status: string;
@@ -34,20 +36,6 @@ type HelpRequest = {
 };
 
 type Tab = 'all' | 'active' | 'past';
-
-function mapStatus(raw: string): { tone: RdStatusTone; label: string } {
-  const s = raw?.toUpperCase() ?? '';
-  if (s === 'RESOLVED' || s === 'COMPLETED') return { tone: 'resolved', label: 'Completed' };
-  if (s === 'CANCELLED' || s === 'CANCELED') return { tone: 'cancelled', label: 'Cancelled' };
-  if (s === 'ASSIGNED' || s === 'IN_PROGRESS' || s === 'ACKNOWLEDGED') return { tone: 'active', label: 'In Progress' };
-  if (s === 'OPEN') return { tone: 'pending', label: 'Requested' };
-  return { tone: 'neutral', label: raw ?? 'Unknown' };
-}
-
-function isActiveStatus(status: string): boolean {
-  const s = status?.toUpperCase() ?? '';
-  return s === 'OPEN' || s === 'ASSIGNED' || s === 'IN_PROGRESS' || s === 'ACKNOWLEDGED';
-}
 
 function fmtDate(iso: string): string {
   if (!iso) return '';
@@ -60,19 +48,19 @@ export default function HelpRequestHistoryScreen() {
   const t = useTheme();
   const [tab, setTab] = useState<Tab>('all');
 
-  const { data, isLoading } = useQuery<HelpRequest[]>({
+  const { data, isPlaceholderData, isError, refetch } = useQuery<HelpRequest[]>({
     queryKey: ['concierge-requests'],
     queryFn: () => api.get<HelpRequest[]>('/concierge/my'),
-    retry: false,
-    initialData: [],
+    placeholderData: [],
   });
+  const isLoading = isPlaceholderData && !isError;
 
   const items = Array.isArray(data) ? data : [];
 
   const filtered = items.filter((item) => {
     if (tab === 'all') return true;
-    if (tab === 'active') return isActiveStatus(item.status);
-    return !isActiveStatus(item.status);
+    if (tab === 'active') return isConciergeActive(item.status);
+    return !isConciergeActive(item.status);
   });
 
   return (
@@ -83,6 +71,11 @@ export default function HelpRequestHistoryScreen() {
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <Text style={{ color: t.textMuted, fontSize: t.fontBase }}>Loading…</Text>
         </View>
+      ) : isError && items.length === 0 ? (
+        <ErrorCard
+          message="Your requests couldn't be loaded. Please try again — your requests are safe."
+          onRetry={() => refetch()}
+        />
       ) : items.length === 0 ? (
         /* Empty state */
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40 }}>
@@ -128,8 +121,8 @@ export default function HelpRequestHistoryScreen() {
           ) : (
             <View style={{ gap: 12 }}>
               {filtered.map((item) => {
-                const status = mapStatus(item.status);
-                const active = isActiveStatus(item.status);
+                const status = conciergeStatus(item.status);
+                const active = isConciergeActive(item.status);
                 return (
                   <RoundCard
                     key={item.id}
@@ -150,7 +143,7 @@ export default function HelpRequestHistoryScreen() {
                           numberOfLines={1}
                           style={{ fontSize: t.fontBase, fontWeight: '700', color: t.textPrimary }}
                         >
-                          {item.category ?? (item as any).type ?? 'Request'}
+                          {item.category ?? conciergeTypeLabel(item.type)}
                         </Text>
                         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 4 }}>
                           <Ionicons name="calendar-outline" size={13} color={t.textMuted} />

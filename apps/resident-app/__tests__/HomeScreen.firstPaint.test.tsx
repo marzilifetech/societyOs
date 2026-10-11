@@ -25,6 +25,8 @@ jest.mock('@tanstack/react-query', () => ({
   }),
   useMutation: () => ({ mutate: jest.fn(), isPending: false }),
   useQueryClient: () => ({ invalidateQueries: jest.fn() }),
+  // The auth store holds the app's client (sign-out clears it).
+  QueryClient: jest.fn(() => ({ clear: jest.fn() })),
 }));
 
 import HomeScreen from '../app/(tabs)/index';

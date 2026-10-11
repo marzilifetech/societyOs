@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
+import { localDateString } from '../../src/utils/date';
 import { ErrorCard } from '../../src/components/ErrorCard';
 import { SkeletonPlaceholder } from '../../src/components/common/SkeletonPlaceholder';
 
@@ -12,8 +13,8 @@ type AmenityBooking = {
   id: string;
   amenity: { name: string };
   date: string;
-  startTime: string;
-  endTime: string;
+  startSlot: string;
+  endSlot: string;
   status: string;
   totalPrice: number;
 };
@@ -22,6 +23,7 @@ const STATUS_META: Record<string, { bgClass: string; textClass: string; label: s
   PENDING: { bgClass: 'bg-amber-100', textClass: 'text-amber-700', label: 'Pending' },
   CONFIRMED: { bgClass: 'bg-green-100', textClass: 'text-green-700', label: 'Confirmed' },
   CANCELLED: { bgClass: 'bg-red-100', textClass: 'text-red-700', label: 'Cancelled' },
+  COMPLETED: { bgClass: 'bg-gray-100', textClass: 'text-gray-700', label: 'Completed' },
 };
 
 export default function AmenityBookingsScreen() {
@@ -45,7 +47,16 @@ export default function AmenityBookingsScreen() {
     setRefreshing(false);
   };
 
-  const today = new Date().toISOString().split('T')[0];
+  const confirmCancel = (id: string) => {
+    if (cancelMutation.isPending) return;
+    Alert.alert('Cancel booking?', 'Are you sure you want to cancel this booking?', [
+      { text: 'No', style: 'cancel' },
+      { text: 'Yes, Cancel', style: 'destructive', onPress: () => cancelMutation.mutate(id) },
+    ]);
+  };
+
+  // `date` is a calendar date (YYYY-MM-DDT00:00Z); compare with today's local date.
+  const today = localDateString();
   const upcoming = data?.filter((b: any) => b.date >= today && b.status !== 'CANCELLED') ?? [];
   const past = data?.filter((b: any) => b.date < today || b.status === 'CANCELLED') ?? [];
 
@@ -87,7 +98,15 @@ export default function AmenityBookingsScreen() {
         {upcoming.length > 0 && (
           <>
             <Text className="text-xs font-semibold text-gray-500 mb-2.5 mt-2">UPCOMING</Text>
-            {upcoming.map((b: any) => <BookingCard key={b.id} booking={b} onCancel={() => cancelMutation.mutate(b.id)} />)}
+            {upcoming.map((b: any) => (
+              <BookingCard
+                key={b.id}
+                booking={b}
+                onCancel={() => confirmCancel(b.id)}
+                cancelling={cancelMutation.isPending && cancelMutation.variables === b.id}
+                disabled={cancelMutation.isPending}
+              />
+            ))}
           </>
         )}
 
@@ -102,7 +121,17 @@ export default function AmenityBookingsScreen() {
   );
 }
 
-function BookingCard({ booking, onCancel }: { booking: AmenityBooking; onCancel?: () => void }) {
+function BookingCard({
+  booking,
+  onCancel,
+  cancelling,
+  disabled,
+}: {
+  booking: AmenityBooking;
+  onCancel?: () => void;
+  cancelling?: boolean;
+  disabled?: boolean;
+}) {
   const meta = STATUS_META[booking.status] ?? STATUS_META.PENDING;
   return (
     <View className="bg-gray-50 border border-gray-200 rounded-2xl p-4 mb-2.5">
@@ -116,7 +145,7 @@ function BookingCard({ booking, onCancel }: { booking: AmenityBooking; onCancel?
             <Text className="text-sm text-gray-500 mt-1">
               {new Date(booking.date).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}
             </Text>
-            <Text className="text-sm text-gray-500 mt-0.5">{booking.startTime} – {booking.endTime}</Text>
+            <Text className="text-sm text-gray-500 mt-0.5">{booking.startSlot} – {booking.endSlot}</Text>
             {booking.totalPrice > 0 && (
               <Text className="text-sm text-primary-500 font-semibold mt-1">₹{booking.totalPrice}</Text>
             )}
@@ -129,9 +158,10 @@ function BookingCard({ booking, onCancel }: { booking: AmenityBooking; onCancel?
       {onCancel && booking.status !== 'CANCELLED' && (
         <TouchableOpacity
           onPress={onCancel}
+          disabled={disabled}
           className="mt-3 rounded-xl py-2.5 items-center border border-red-200 bg-red-50"
         >
-          <Text className="text-red-700 font-semibold text-sm">Cancel Booking</Text>
+          <Text className="text-red-700 font-semibold text-sm">{cancelling ? 'Cancelling…' : 'Cancel Booking'}</Text>
         </TouchableOpacity>
       )}
     </View>

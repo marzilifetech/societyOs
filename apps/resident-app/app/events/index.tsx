@@ -1,5 +1,6 @@
 import { View, Text, FlatList, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
 import { useTheme } from '../../src/hooks/useTheme';
@@ -122,7 +123,11 @@ export default function EventsScreen() {
             const isPast = eventDate < new Date();
 
             return (
-              <RoundCard tone="white" padding={t.cardPaddingLg}>
+              <RoundCard
+                tone="white"
+                padding={t.cardPaddingLg}
+                onPress={() => router.push(`/events/${item.id}` as any)}
+              >
                 {/* Title row */}
                 <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 12 }}>
                   <IconCircle size={48} bg={meta.iconBg}>

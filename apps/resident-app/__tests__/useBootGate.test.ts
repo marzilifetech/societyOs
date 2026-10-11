@@ -1,5 +1,5 @@
 import { renderHook, act } from '@testing-library/react-native';
-import { useBootGate, FONT_WAIT_MS } from '../src/hooks/useBootGate';
+import { useBootGate, FONT_WAIT_MS } from '@societyos/mobile-core';
 
 type Props = { isHydrated: boolean; fontsSettled: boolean };
 

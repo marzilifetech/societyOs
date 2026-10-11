@@ -74,8 +74,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // for the full rationale.
       './plugins/withAndroidNoSystemSplash',
       // Stops split screen / pop-up view / fold-unfold (everyday on Samsung)
-      // from destroying the activity and rebooting the whole app.
-      './plugins/withAndroidActivityConfigChanges',
+      // from destroying the activity and rebooting the whole app. Shared with
+      // the staff app.
+      '@societyos/mobile-core/plugins/withAndroidActivityConfigChanges',
       // Same reasoning: release signing was a hand edit in the gitignored
       // android/ folder, so `expo prebuild` kept reverting local release builds
       // to the debug keystore. Credentials stay out of git — see the plugin.

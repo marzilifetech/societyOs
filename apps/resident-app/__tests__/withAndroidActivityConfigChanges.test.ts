@@ -4,7 +4,7 @@
  * checked here rather than on a device.
  */
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const plugin = require('../plugins/withAndroidActivityConfigChanges');
+const plugin = require('@societyos/mobile-core/plugins/withAndroidActivityConfigChanges');
 
 const { mergeConfigChanges } = plugin;
 

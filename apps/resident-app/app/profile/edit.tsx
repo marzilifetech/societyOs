@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
+import { ErrorCard } from '../../src/components/ErrorCard';
 
 type Profile = {
   user?: { name?: string; email?: string; phone?: string };
@@ -15,7 +16,7 @@ export default function EditProfileScreen() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
 
-  const { data, isLoading } = useQuery<Profile>({
+  const { data, isLoading, isError, refetch } = useQuery<Profile>({
     queryKey: ['resident-profile'],
     queryFn: () => api.get<Profile>('/residents/me'),
   });
@@ -55,6 +56,9 @@ export default function EditProfileScreen() {
 
       {isLoading ? (
         <ActivityIndicator color="#821A52" size="large" style={{ marginTop: 64 }} />
+      ) : isError && !data ? (
+        // Don't offer an empty form to save over the real profile.
+        <ErrorCard message="Your profile couldn't be loaded. Please try again." onRetry={() => refetch()} />
       ) : (
         <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 48, paddingTop: 8 }}>
           <Text className="text-gray-500 text-xs font-semibold mb-2 uppercase tracking-wide">Full Name *</Text>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
@@ -30,16 +30,21 @@ import {
   PlayfairDisplay_700Bold,
 } from '@expo-google-fonts/playfair-display';
 import { QueryClientProvider } from '@tanstack/react-query';
+import {
+  notificationEntityId,
+  readNotificationData,
+  toBannerPayload,
+  useBootGate,
+} from '@societyos/mobile-core';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { bootstrapWindowMetrics } from '../src/lib/safe-area-bootstrap';
-import { queryClient } from '../src/lib/query-client';
+import { queryClient, startQueryLifecycle } from '../src/lib/query-client';
 import { useAuthStore } from '../src/store/auth.store';
 import { initSentry, setSentryUser } from '../src/lib/sentry';
 import { ErrorBoundary } from '../src/components/ErrorBoundary';
 import { NetworkBanner } from '../src/components/NetworkBanner';
 import { useRealtime } from '../src/hooks/useRealtime';
-import { useBootGate } from '../src/hooks/useBootGate';
 import { primeReducedMotion } from '../src/hooks/useReducedMotion';
 import { BootScreen } from '../src/components/BootScreen';
 import { startOfflineDrainListener } from '../src/lib/offline-queue';
@@ -95,53 +100,37 @@ function ForegroundBannerBridge({
     if (!active) return;
     const sub = subscribeToForegroundReceived((n) => {
       const c = n.request.content;
-      const data = (c.data && typeof c.data === 'object' ? c.data : {}) as Record<string, unknown>;
-      const imageUrl =
-        typeof data.imageUrl === 'string'
-          ? data.imageUrl
-          : (c as any).attachments?.[0]?.url ?? undefined;
-
-      const dataType = typeof data.type === 'string' ? data.type : undefined;
+      const banner = toBannerPayload({
+        identifier: n.request.identifier,
+        title: c.title,
+        body: c.body,
+        data: c.data,
+        attachments: (c as { attachments?: { url?: string }[] }).attachments,
+      });
+      const data = readNotificationData(c.data);
 
       // Delivery → full-screen takeover. Pull out the fields the modal needs;
       // the banner queue is skipped so the resident isn't distracted by
       // two competing UIs. Match BOTH the legacy payload key and the current
       // category-registry key ('deliveries') the backend now sends, otherwise a
       // real delivery arriving in the foreground falls through to the plain
-      // banner instead of the forced-decision modal.
-      if (dataType === 'DELIVERY_APPROVAL_REQUEST' || dataType === 'deliveries') {
-        const visitId =
-          typeof data.entityId === 'string'
-            ? data.entityId
-            : typeof data.visitId === 'string'
-            ? data.visitId
-            : null;
-        if (visitId) {
-          onDelivery({
-            visitId,
-            visitorName: typeof data.visitorName === 'string' ? data.visitorName : c.title ?? 'Delivery',
-            deliveryPartner: typeof data.deliveryPartner === 'string' ? data.deliveryPartner : null,
-            photoUrl: imageUrl ?? null,
-          });
-          return;
-        }
+      // banner instead of the forced-decision modal. A parcel left at the gate
+      // (packageId) is filed under 'deliveries' too but has nothing to decide.
+      const isDeliveryDecision =
+        (banner.type === 'DELIVERY_APPROVAL_REQUEST' || banner.type === 'deliveries') &&
+        typeof data.packageId !== 'string';
+      const visitId = isDeliveryDecision ? notificationEntityId(data) : undefined;
+      if (visitId) {
+        onDelivery({
+          visitId,
+          visitorName: typeof data.visitorName === 'string' ? data.visitorName : c.title ?? 'Delivery',
+          deliveryPartner: typeof data.deliveryPartner === 'string' ? data.deliveryPartner : null,
+          photoUrl: banner.imageUrl ?? null,
+        });
+        return;
       }
 
-      showBanner({
-        id: n.request.identifier,
-        title: c.title ?? 'Notification',
-        body: c.body ?? '',
-        imageUrl,
-        type: dataType,
-        entityId:
-          typeof data.entityId === 'string'
-            ? data.entityId
-            : typeof data.visitId === 'string'
-            ? data.visitId
-            : undefined,
-        actionGroup: typeof data.actionGroup === 'string' ? data.actionGroup : undefined,
-        data,
-      });
+      showBanner(banner);
     });
     return () => sub.remove();
   }, [active, showBanner, onDelivery]);
@@ -151,6 +140,7 @@ function ForegroundBannerBridge({
 export default function RootLayout() {
   const isHydrated = useAuthStore((s) => s.isHydrated);
   const token = useAuthStore((s) => s.token);
+  const userId = useAuthStore((s) => s.user?.id ?? null);
 
   const [fontsLoaded, fontError] = useFonts({
     Montserrat_400Regular,
@@ -169,6 +159,8 @@ export default function RootLayout() {
   // closed the BootScreen — a continuation of the native splash with a
   // spinner once launch is slow — is what the resident sees.
   const bootReady = useBootGate({ isHydrated, fontsSettled: fontsLoaded || !!fontError });
+
+  useEffect(() => startQueryLifecycle(), []);
 
   useEffect(() => {
     // Deferred — calling NetInfo.addEventListener at module scope freezes the
@@ -198,11 +190,13 @@ export default function RootLayout() {
     return () => sub.remove();
   }, []);
 
-  // Register the NATIVE FCM device token with the backend once per token, and
-  // re-register whenever the token rotates. Runs only after auth has hydrated
-  // AND we have a session — otherwise the /notifications/devices call would 401.
+  // Register the NATIVE FCM device token for whoever is signed in, and
+  // re-register whenever FCM rotates it. Keyed on the USER, not the access
+  // token: keyed on the token it re-ran on every refresh, and a refresh landing
+  // mid-setup left the rotation listener subscribed with nothing to remove it.
   useEffect(() => {
-    if (!isHydrated || !token) return;
+    if (!isHydrated || !userId) return;
+    let cancelled = false;
     let sub: ReturnType<typeof subscribeToTokenRotation> | undefined;
     (async () => {
       // Channels must exist before requesting the token so the first push
@@ -211,11 +205,18 @@ export default function RootLayout() {
       // iOS action categories — must be registered before any actionable
       // push arrives or the buttons won't render. Idempotent.
       await setupNotificationCategories();
+      if (cancelled) return;
       await registerDeviceToken();
+      if (cancelled) return;
       sub = subscribeToTokenRotation();
-    })();
-    return () => sub?.remove();
-  }, [isHydrated, token]);
+    })().catch(() => {
+      /* best-effort: push setup must never break the app */
+    });
+    return () => {
+      cancelled = true;
+      sub?.remove();
+    };
+  }, [isHydrated, userId]);
 
   if (!bootReady) return <BootScreen />;
 
@@ -250,7 +251,20 @@ export default function RootLayout() {
  * isolation here keeps Stack remount-free.
  */
 function RootShell({ token }: { token: string | null }) {
-  const [deliveryPayload, setDeliveryPayload] = useState<DeliveryPayload | null>(null);
+  // Deliveries waiting for a decision, oldest first; the modal shows the head.
+  // A second delivery used to replace the first one's modal, and that decision
+  // was never made.
+  const [deliveries, setDeliveries] = useState<DeliveryPayload[]>([]);
+  const queueDelivery = useCallback((payload: DeliveryPayload) => {
+    setDeliveries((queue) =>
+      queue.some((d) => d.visitId === payload.visitId) ? queue : [...queue, payload],
+    );
+  }, []);
+  const resolveDelivery = useCallback(() => setDeliveries((queue) => queue.slice(1)), []);
+  // Signed out: those decisions belonged to the previous session.
+  useEffect(() => {
+    if (!token) setDeliveries([]);
+  }, [token]);
   // The tabs and sign-in layouts settle the window background as soon as
   // they are up; this covers a launch that goes straight elsewhere (e.g. a
   // deep link). See src/lib/window-background.ts.
@@ -291,12 +305,9 @@ function RootShell({ token }: { token: string | null }) {
       {/* InAppBanner is mounted last so it overlays every screen, including
           bottom tabs and modals. Delivery pushes are diverted from the
           banner into a full-screen modal (DeliveryApprovalModal) below. */}
-      <ForegroundBannerBridge active={!!token} onDelivery={setDeliveryPayload} />
+      <ForegroundBannerBridge active={!!token} onDelivery={queueDelivery} />
       <InAppBanner />
-      <DeliveryApprovalModal
-        payload={deliveryPayload}
-        onResolved={() => setDeliveryPayload(null)}
-      />
+      <DeliveryApprovalModal payload={deliveries[0] ?? null} onResolved={resolveDelivery} />
     </>
   );
 }

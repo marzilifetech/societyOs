@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Animated, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Animated, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Tappable } from './ui/Tappable';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -67,6 +67,9 @@ export function PendingVisitorsPill() {
     onMutate: async (action) => {
       setBusy(action);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    },
+    onError: (err: any) => {
+      Alert.alert('Not sent', err?.message ?? 'Your answer did not reach security. Please try again.');
     },
     onSettled: () => {
       setBusy(null);

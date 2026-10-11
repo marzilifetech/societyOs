@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '../../src/lib/api';
 import { useTheme } from '../../src/hooks/useTheme';
+import { ErrorCard } from '../../src/components/ErrorCard';
 import {
   ScreenHeader,
   Display,
@@ -77,10 +78,9 @@ function initials(name: string): string {
 export default function BirthdaysScreen() {
   const t = useTheme();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['birthdays'],
     queryFn: () => api.get<Birthday[]>('/residents/birthdays'),
-    retry: false,
   });
 
   const list: Birthday[] = Array.isArray(data) ? data : [];
@@ -95,6 +95,8 @@ export default function BirthdaysScreen() {
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <ActivityIndicator color={t.accentPrimary} />
         </View>
+      ) : isError && !data ? (
+        <ErrorCard message="Birthdays couldn't be loaded. Please try again." onRetry={() => refetch()} />
       ) : !hasAny ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 }}>
           <Display size="md" align="center">No birthdays</Display>

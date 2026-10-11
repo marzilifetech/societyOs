@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../../src/lib/api';
 import { useTheme } from '../../../src/hooks/useTheme';
+import { ErrorCard } from '../../../src/components/ErrorCard';
 import {
   ScreenHeader,
   Display,
@@ -47,7 +48,7 @@ export default function EventDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const qc = useQueryClient();
 
-  const { data: event, isLoading } = useQuery<ResidentEvent>({
+  const { data: event, isLoading, isError, refetch } = useQuery<ResidentEvent>({
     queryKey: ['event', id],
     queryFn: () => api.get<ResidentEvent>(`/events/${id}`),
     enabled: !!id,
@@ -70,6 +71,15 @@ export default function EventDetailScreen() {
     },
     onError: (err) => Alert.alert('Error', err.message),
   });
+
+  if (!event && (isError || !id)) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+        <ScreenHeader title="Event Details" />
+        <ErrorCard message="This event couldn't be loaded. Please try again." onRetry={id ? () => refetch() : undefined} />
+      </View>
+    );
+  }
 
   if (isLoading || !event) {
     return (

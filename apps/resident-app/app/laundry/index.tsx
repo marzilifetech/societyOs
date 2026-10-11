@@ -10,31 +10,32 @@ import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
 import { ErrorCard } from '../../src/components/ErrorCard';
 import { DateField } from '../../src/components/common/DateField';
+import { localDateString } from '../../src/utils/date';
 
 type Slot = string;
 type LaundryBooking = {
   id: string; date: string; timeSlot: string; type: string; status: string; createdAt: string;
 };
 
-const TYPE_OPTIONS = ['WASH', 'DRY', 'WASH_AND_DRY', 'IRON'] as const;
+// The backend's LaundryType and LaundryBookingStatus values.
+const TYPE_OPTIONS = ['WASH_AND_FOLD', 'WASH_AND_IRON', 'IRON_ONLY', 'DRY_CLEAN'] as const;
 const TYPE_LABELS: Record<string, string> = {
-  WASH: 'Wash', DRY: 'Dry', WASH_AND_DRY: 'Wash & Dry', IRON: 'Iron',
+  WASH_AND_FOLD: 'Wash & Fold', WASH_AND_IRON: 'Wash & Iron', IRON_ONLY: 'Iron', DRY_CLEAN: 'Dry Clean',
 };
 const STATUS_META: Record<string, { bgClass: string; textClass: string; label: string }> = {
-  PENDING:   { bgClass: 'bg-amber-100', textClass: 'text-amber-700', label: 'Pending' },
-  CONFIRMED: { bgClass: 'bg-blue-100', textClass: 'text-blue-700', label: 'Confirmed' },
-  COMPLETED: { bgClass: 'bg-green-100', textClass: 'text-green-700', label: 'Completed' },
-  CANCELLED: { bgClass: 'bg-red-100', textClass: 'text-red-700', label: 'Cancelled' },
+  SCHEDULED:   { bgClass: 'bg-amber-100', textClass: 'text-amber-700', label: 'Scheduled' },
+  PICKED_UP:   { bgClass: 'bg-blue-100', textClass: 'text-blue-700', label: 'Picked up' },
+  IN_PROGRESS: { bgClass: 'bg-blue-100', textClass: 'text-blue-700', label: 'In progress' },
+  READY:       { bgClass: 'bg-green-100', textClass: 'text-green-700', label: 'Ready' },
+  DELIVERED:   { bgClass: 'bg-green-100', textClass: 'text-green-700', label: 'Delivered' },
+  CANCELLED:   { bgClass: 'bg-red-100', textClass: 'text-red-700', label: 'Cancelled' },
 };
-
-function todayStr() {
-  return new Date().toISOString().slice(0, 10);
-}
+const DONE_STATUSES = ['DELIVERED', 'CANCELLED'];
 
 export default function LaundryScreen() {
   const qc = useQueryClient();
-  const [date, setDate] = useState(todayStr());
-  const [type, setType] = useState<string>('WASH_AND_DRY');
+  const [date, setDate] = useState(() => localDateString());
+  const [type, setType] = useState<string>('WASH_AND_FOLD');
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
   const [showBook, setShowBook] = useState(false);
 
@@ -84,8 +85,8 @@ export default function LaundryScreen() {
     ]);
   };
 
-  const activeBookings = (bookings ?? []).filter((b: any) => ['PENDING', 'CONFIRMED'].includes(b.status));
-  const pastBookings = (bookings ?? []).filter((b: any) => ['COMPLETED', 'CANCELLED'].includes(b.status));
+  const activeBookings = (bookings ?? []).filter((b: any) => !DONE_STATUSES.includes(b.status));
+  const pastBookings = (bookings ?? []).filter((b: any) => DONE_STATUSES.includes(b.status));
 
   return (
     <SafeAreaView className="flex-1 bg-white">
@@ -119,7 +120,7 @@ export default function LaundryScreen() {
             </View>
 
             <View className="mb-3.5">
-              <DateField label="Date" value={date} onChange={(iso) => setDate(iso.slice(0, 10))} mode="date" minimumDate={new Date()} />
+              <DateField label="Date" value={date} onChange={setDate} mode="date" minimumDate={new Date()} />
             </View>
 
             <Text className="text-gray-500 text-xs font-semibold mb-2">SERVICE TYPE</Text>
@@ -193,7 +194,7 @@ export default function LaundryScreen() {
                 <Text className="text-gray-400 text-sm text-center mt-1">Tap "Book Slot" to schedule laundry.</Text>
               </View>
             ) : activeBookings.map((b: any) => {
-              const meta = STATUS_META[b.status] ?? STATUS_META.PENDING;
+              const meta = STATUS_META[b.status] ?? STATUS_META.SCHEDULED;
               return (
                 <View key={b.id} className="bg-gray-50 rounded-2xl border border-gray-200 p-3.5 mb-2.5">
                   <View className="flex-row justify-between items-center mb-1.5">
@@ -210,7 +211,7 @@ export default function LaundryScreen() {
                   <Text className="text-gray-500 text-sm mb-2">
                     {TYPE_LABELS[b.type] ?? b.type}
                   </Text>
-                  {b.status === 'PENDING' && (
+                  {b.status === 'SCHEDULED' && (
                     <TouchableOpacity
                       onPress={() => handleCancel(b.id)}
                       className="self-start px-3 py-2 rounded-lg border border-red-200 min-h-[36px]"
@@ -226,7 +227,7 @@ export default function LaundryScreen() {
             {pastBookings.length === 0 ? (
               <Text className="text-gray-400 text-sm">No past bookings.</Text>
             ) : pastBookings.slice(0, 10).map((b: any) => {
-              const meta = STATUS_META[b.status] ?? STATUS_META.PENDING;
+              const meta = STATUS_META[b.status] ?? STATUS_META.SCHEDULED;
               return (
                 <View key={b.id} className="bg-gray-50 rounded-xl border border-gray-200 p-3 mb-2">
                   <View className="flex-row justify-between items-center">

@@ -5,18 +5,25 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
+import { localDateString } from '../../src/utils/date';
+import { todayAttendance, type AttendanceRow } from '../../src/utils/attendance';
 
 type DomesticHelp = {
   id: string;
   name: string;
   role: string;
   photo?: string;
-  presentToday: boolean | null;
+  /** Not returned by the list endpoint today; used when present. */
+  attendance?: AttendanceRow[];
+  /** From the list endpoint: true came, false absent, null not marked today. */
+  presentToday?: boolean | null;
 };
 
 export default function DomesticHelpScreen() {
   const qc = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
+  // The list doesn't carry attendance, so remember what was marked here today.
+  const [markedToday, setMarkedToday] = useState<Record<string, boolean>>({});
 
   const { data, isLoading, isError, refetch } = useQuery<DomesticHelp[]>({
     queryKey: ['domestic-help'],
@@ -25,8 +32,14 @@ export default function DomesticHelpScreen() {
 
   const { mutate: markAttendance } = useMutation({
     mutationFn: ({ id, present }: { id: string; present: boolean }) =>
-      api.post(`/domestic-help/${id}/attendance`, { present, date: new Date().toISOString().split('T')[0] }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['domestic-help'] }),
+      api.post(`/domestic-help/${id}/attendance`, {
+        date: localDateString(),
+        status: present ? 'PRESENT' : 'ABSENT',
+      }),
+    onSuccess: (_res, { id, present }) => {
+      setMarkedToday((prev) => ({ ...prev, [id]: present }));
+      qc.invalidateQueries({ queryKey: ['domestic-help'] });
+    },
     onError: (err: Error) => Alert.alert('Error', err.message ?? 'Could not mark attendance.'),
   });
 
@@ -84,11 +97,15 @@ export default function DomesticHelpScreen() {
         )}
 
         {data?.map((person) => {
-          const present = person.presentToday;
+          const today = todayAttendance(person.attendance);
+          const present: boolean | null =
+            markedToday[person.id] ??
+            person.presentToday ??
+            (today === 'PRESENT' ? true : today === 'ABSENT' ? false : null);
           const statusBadge =
             present === true ? { bg: 'bg-green-100', text: 'text-green-700', label: 'Present' } :
             present === false ? { bg: 'bg-red-100', text: 'text-red-700', label: 'Absent' } :
-            { bg: 'bg-gray-100', text: 'text-gray-600', label: 'Not marked' };
+            null;
           return (
             <View key={person.id} className="bg-gray-50 border border-gray-200 rounded-2xl px-4 py-4 mb-3">
               <View className="flex-row items-center mb-3">
@@ -104,9 +121,11 @@ export default function DomesticHelpScreen() {
                   <Text className="text-gray-500 text-sm">{person.role}</Text>
                 </TouchableOpacity>
 
-                <View className={`rounded-full px-2.5 py-1 ${statusBadge.bg}`}>
-                  <Text className={`text-xs font-medium ${statusBadge.text}`}>{statusBadge.label}</Text>
-                </View>
+                {statusBadge && (
+                  <View className={`rounded-full px-2.5 py-1 ${statusBadge.bg}`}>
+                    <Text className={`text-xs font-medium ${statusBadge.text}`}>{statusBadge.label}</Text>
+                  </View>
+                )}
               </View>
 
               <View className="flex-row gap-3">

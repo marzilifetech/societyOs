@@ -7,33 +7,36 @@ import { useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
 import { ErrorCard } from '../../src/components/ErrorCard';
+import { conciergeTypeLabel, isConciergeActive } from '../../src/utils/concierge';
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
 
 type ConciergeRequest = {
   id: string;
-  service: string;
+  type?: string;
   description: string;
   status: string;
-  scheduledAt?: string;
-  completedAt?: string;
-  rating?: number;
+  scheduledTime?: string;
+  /** Prisma Decimal — a string when set. */
+  rating?: number | string | null;
 };
 
 const STATUS_META: Record<string, { bgClass: string; textClass: string; label: string }> = {
   PENDING:     { bgClass: 'bg-amber-100', textClass: 'text-amber-700', label: 'Pending' },
+  ASSIGNED:    { bgClass: 'bg-orange-100', textClass: 'text-orange-700', label: 'Assigned' },
+  ACCEPTED:    { bgClass: 'bg-orange-100', textClass: 'text-orange-700', label: 'Accepted' },
   IN_PROGRESS: { bgClass: 'bg-orange-100', textClass: 'text-orange-700', label: 'In Progress' },
   COMPLETED:   { bgClass: 'bg-green-100', textClass: 'text-green-700', label: 'Completed' },
   CANCELLED:   { bgClass: 'bg-red-100', textClass: 'text-red-700', label: 'Cancelled' },
 };
 
+// Keyed by ConciergeRequestType.
 const SERVICE_ICONS: Record<string, IoniconName> = {
-  'Car Booking': 'car',
-  'Airport Transfer': 'airplane',
-  'Errand': 'cube',
-  'Restaurant Booking': 'restaurant',
-  'Delivery Collection': 'mail',
-  'Other': 'notifications',
+  TAXI: 'car',
+  COURIER: 'mail',
+  PHARMACY: 'medkit',
+  FORM_HELP: 'document-text',
+  OTHER: 'notifications',
 };
 
 export default function ConciergeScreen() {
@@ -51,8 +54,8 @@ export default function ConciergeScreen() {
     setRefreshing(false);
   };
 
-  const active = data?.filter((r: any) => r.status === 'PENDING' || r.status === 'IN_PROGRESS') ?? [];
-  const history = data?.filter((r: any) => r.status === 'COMPLETED' || r.status === 'CANCELLED') ?? [];
+  const active = data?.filter((r) => isConciergeActive(r.status)) ?? [];
+  const history = data?.filter((r) => !isConciergeActive(r.status)) ?? [];
 
   return (
     <SafeAreaView className="flex-1 bg-white">
@@ -118,7 +121,8 @@ export default function ConciergeScreen() {
 
 function RequestCard({ request, icons }: { request: ConciergeRequest; icons: Record<string, IoniconName> }) {
   const meta = STATUS_META[request.status] ?? STATUS_META.PENDING;
-  const iconName = icons[request.service] ?? 'notifications';
+  const iconName = icons[String(request.type ?? '').toUpperCase()] ?? 'notifications';
+  const rating = Math.round(Number(request.rating ?? 0));
   return (
     <View className="bg-gray-50 rounded-2xl border border-gray-200 p-4 mb-2.5">
       <View className="flex-row items-start">
@@ -127,22 +131,22 @@ function RequestCard({ request, icons }: { request: ConciergeRequest; icons: Rec
         </View>
         <View className="flex-1">
           <View className="flex-row justify-between items-start">
-            <Text className="text-gray-900 text-base font-bold flex-1 mr-2">{request.service}</Text>
+            <Text className="text-gray-900 text-base font-bold flex-1 mr-2">{conciergeTypeLabel(request.type)}</Text>
             <View className={`${meta.bgClass} rounded-lg px-2.5 py-1`}>
               <Text className={`${meta.textClass} text-xs font-bold`}>{meta.label}</Text>
             </View>
           </View>
           <Text className="text-gray-500 text-sm mt-1" numberOfLines={2}>{request.description}</Text>
-          {request.scheduledAt && (
+          {request.scheduledTime && (
             <View className="flex-row items-center mt-1.5">
               <Ionicons name="time" size={13} color="#9CA3AF" />
               <Text className="text-gray-400 text-xs ml-1">
-                {new Date(request.scheduledAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                {new Date(request.scheduledTime).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
               </Text>
             </View>
           )}
-          {request.rating && (
-            <Text className="text-amber-500 text-sm mt-1">{'★'.repeat(request.rating)}{'☆'.repeat(5 - request.rating)}</Text>
+          {rating > 0 && rating <= 5 && (
+            <Text className="text-amber-500 text-sm mt-1">{'★'.repeat(rating)}{'☆'.repeat(5 - rating)}</Text>
           )}
         </View>
       </View>

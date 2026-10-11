@@ -2,8 +2,15 @@ import { Platform, Linking } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
+import {
+  notificationEntityId,
+  notificationType,
+  readNotificationData,
+  settleWithin,
+  type NotificationData,
+} from '@societyos/mobile-core';
 import { api } from './api';
-import { navigateWhenAppReady } from './deferred-navigation';
+import { appNavigator } from './deferred-navigation';
 
 /** Package name, needed as an extra on the Android settings intents below. */
 const applicationId =
@@ -51,11 +58,33 @@ const IOS_CATEGORIES: Notifications.NotificationCategory[] = [
   },
 ];
 
-// The native device push token last registered with the backend. The backend
-// sends via the Firebase Admin SDK (raw FCM), so it needs the *native* FCM
-// registration token — NOT an Expo push token. We guard with AsyncStorage to
-// avoid redundant POSTs but always re-register when the token rotates.
-const DEVICE_TOKEN_KEY = 'fcm_device_token';
+/**
+ * Legacy AsyncStorage cache of the last registered FCM token. Registration
+ * skipped the POST whenever the token matched it — exactly the case when a
+ * different resident signs in on the same phone, or the server dropped the row
+ * at a forced sign-out — and only a successful DELETE ever cleared it, which a
+ * forced sign-out never attempted. So the next person got no pushes and the
+ * previous one's kept arriving. Only removed now (see unregisterDeviceToken).
+ */
+const LEGACY_DEVICE_TOKEN_KEY = 'fcm_device_token';
+
+/** `${userId}:${token}` last confirmed by the server in THIS process. */
+/** The device-registration POST in flight, if any. */
+let registering: Promise<unknown> | null = null;
+let registeredKey: string | null = null;
+/** The token most recently obtained, for releasing it at sign-out. */
+let lastKnownToken: string | null = null;
+/** A release still in flight; a registration must wait for it or be deleted by it. */
+let releasing: Promise<void> | null = null;
+
+/**
+ * The auth store, required lazily: it imports this module (sign-out releases
+ * the device token), so a top-level import would be a cycle.
+ */
+function authStore(): (typeof import('../store/auth.store'))['useAuthStore'] {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require('../store/auth.store').useAuthStore;
+}
 
 // Android notification channels. The six "primary" channels are the contract
 // the backend routes to via the per-category `channelId` field in
@@ -146,6 +175,16 @@ const ANDROID_CHANNELS: ChannelSpec[] = [
     enableVibrate: true,
   },
   {
+    // Society broadcasts about water, power or safety. HIGH so they show as a
+    // heads-up; on 'community' they arrived silently.
+    id: 'notices_urgent',
+    name: 'Urgent Notices',
+    importance: Notifications.AndroidImportance.HIGH,
+    visibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+    vibrationPattern: [0, 250, 250, 250],
+    enableVibrate: true,
+  },
+  {
     id: 'payments',
     name: 'Payments & Dues',
     importance: Notifications.AndroidImportance.DEFAULT,
@@ -226,10 +265,7 @@ export function setupNotificationHandler() {
     handleNotification: async () => {
       let bannerCoversForeground = false;
       try {
-        // Lazy import — auth.store statically imports this module (logout →
-        // unregisterDeviceToken), so a static import here would be a cycle.
-        const { useAuthStore } = await import('../store/auth.store');
-        bannerCoversForeground = !!useAuthStore.getState().token;
+        bannerCoversForeground = !!authStore().getState().token;
       } catch {
         /* conservative: keep the OS alert */
       }
@@ -340,8 +376,9 @@ export function openChannelSettings(channelId: string): Promise<void> {
 }
 
 /**
- * Register the native FCM device token with the backend. Idempotent: skips the
- * POST when the token is unchanged. Channels + permission must already be set
+ * Register the native FCM device token with the backend. Cheap to repeat: a
+ * token already confirmed for this user in this process is not re-posted.
+ * Channels + permission must already be set
  * up by the caller. Best-effort — swallows errors (e.g. iOS Simulator has no
  * APNS and getDevicePushTokenAsync throws).
  */
@@ -356,8 +393,7 @@ export async function registerDeviceToken(): Promise<void> {
     // getDevicePushTokenAsync returns the NATIVE token: an FCM registration
     // token on Android, an APNS token on iOS. This is what the Firebase Admin
     // SDK needs (Expo push tokens would be rejected).
-    const tokenData = await Notifications.getDevicePushTokenAsync();
-    const token = typeof tokenData.data === 'string' ? tokenData.data : null;
+    const token = await settleWithin(readDevicePushToken(), 10_000, null);
     if (!token) return;
 
     await postDeviceToken(token);
@@ -366,15 +402,42 @@ export async function registerDeviceToken(): Promise<void> {
   }
 }
 
+async function readDevicePushToken(): Promise<string | null> {
+  const tokenData = await Notifications.getDevicePushTokenAsync();
+  return typeof tokenData.data === 'string' ? tokenData.data : null;
+}
+
+/**
+ * POST the device push token (an upsert: the token moves to whoever is signed
+ * in now). Throws on failure so the next call retries.
+ *
+ * Deduplicated per user+token in memory only, so every sign-in and every cold
+ * start confirms the mapping once — cheap, and self-healing if the server
+ * dropped the row (forced sign-out, stale-token cleanup) or another account
+ * on this phone claimed it.
+ */
 async function postDeviceToken(token: string): Promise<void> {
-  const stored = await AsyncStorage.getItem(DEVICE_TOKEN_KEY);
-  if (token === stored) return;
-  await api.post('/notifications/devices', {
+  const userId = authStore().getState().user?.id;
+  if (!userId) return;
+  lastKnownToken = token;
+  const key = `${userId}:${token}`;
+  if (registeredKey === key) return;
+  if (releasing) await releasing;
+  const post = api.post('/notifications/devices', {
     token,
     platform: Platform.OS as 'ios' | 'android',
     appType: 'resident',
   });
-  await AsyncStorage.setItem(DEVICE_TOKEN_KEY, token);
+  // Never rejects: it only tells a sign-out when this POST has finished.
+  const tracked: Promise<unknown> = post
+    .catch(() => undefined)
+    .finally(() => {
+      if (registering === tracked) registering = null;
+    });
+  registering = tracked;
+  await post;
+  // Unless a sign-out released the token while this was in flight.
+  if (lastKnownToken === token) registeredKey = key;
 }
 
 /**
@@ -392,89 +455,166 @@ export function subscribeToTokenRotation(): Notifications.Subscription {
   });
 }
 
-/** Best-effort: tell the backend to forget this device's token on logout. */
-export async function unregisterDeviceToken(): Promise<void> {
-  try {
-    const stored = await AsyncStorage.getItem(DEVICE_TOKEN_KEY);
-    if (stored) {
-      await api.delete(`/notifications/devices/${encodeURIComponent(stored)}`);
+/**
+ * Forget this device's push registration, here and on the server. Called on
+ * EVERY sign-out, including a forced one where the session is already dead:
+ * `/notifications/devices/release` needs no session, so the previous
+ * resident's pushes stop either way.
+ *
+ * Never throws and is bounded, so sign-out can't hang on it. The in-memory
+ * dedupe is dropped at once; a registration made while the release is still
+ * in flight waits for it, rather than being deleted by it.
+ */
+export function unregisterDeviceToken(): Promise<void> {
+  registeredKey = null;
+  const known = lastKnownToken;
+  lastKnownToken = null;
+  // A sign-in registration still on its way would land after the release and
+  // bind the token to the signed-out user again: let it finish first.
+  const pending = registering;
+  const run = (async () => {
+    try {
+      if (pending) await settleWithin(pending, 5000, undefined);
+      const token = known ?? (await settleWithin(readDevicePushToken(), 3000, null));
+      if (token) {
+        await settleWithin(api.post('/notifications/devices/release', { token }), 5000, undefined);
+      }
+    } catch {
+      /* best-effort */
     }
-    await AsyncStorage.removeItem(DEVICE_TOKEN_KEY);
-  } catch {
-    /* best-effort */
-  }
+    await AsyncStorage.removeItem(LEGACY_DEVICE_TOKEN_KEY).catch(() => undefined);
+  })();
+  const tracked: Promise<void> = run.finally(() => {
+    if (releasing === tracked) releasing = null;
+  });
+  releasing = tracked;
+  return tracked;
 }
 
 // ---------------------------------------------------------------------------
 // Tap routing
 // ---------------------------------------------------------------------------
 
-export type PushData = {
-  type?: string;
-  visitId?: string;
-  entityId?: string;
-  actionGroup?: string;
-  [key: string]: unknown;
-};
+/** A push's `data`, as the backend sent it. */
+export type PushData = NotificationData;
 
-function extractData(response: Notifications.NotificationResponse | null): PushData | null {
-  const data = response?.notification.request.content.data;
-  if (data && typeof data === 'object') return data as PushData;
-  return null;
+function str(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
 /**
- * Where a notification tap (no action identifier) should take the resident,
- * or null for nowhere. `data.type` is the backend category-registry key on
- * current builds (visitor_approvals, deliveries, …); the SCREAMING_SNAKE cases
- * are legacy aliases from older payloads and are kept as fallbacks.
+ * Where one notification type goes. `undefined` means "not a type this table
+ * knows", so the caller can try the next key; `null` means "nowhere" (e.g. a
+ * visitor approval without the visit id).
  */
-export function hrefForNotification(data: PushData | null): string | null {
-  if (!data) return null;
-  // visitId is the legacy field; entityId is the canonical one going forward.
-  const id = (data.entityId as string | undefined) ?? data.visitId;
-  switch (data.type) {
+function hrefForType(type: string, data: PushData, id: string | undefined): string | null | undefined {
+  // Families of backend event names (SERVICE_REQUEST_CREATED, …_COMPLETED, …).
+  if (type.startsWith('SERVICE_REQUEST')) {
+    const requestId = str(data.serviceRequestId) ?? id;
+    return requestId ? `/services/${requestId}` : '/(tabs)/services';
+  }
+  if (type.startsWith('AMENITY_BOOKING_')) return '/amenities/bookings';
+  if (type.startsWith('HOUSEKEEPING_')) return '/housekeeping';
+  if (type.startsWith('EVENT_')) return '/(tabs)/events';
+
+  switch (type) {
     // ── Category registry keys ──────────────────────────────────────────
     case 'visitor_approvals':
     case 'visitors_gate':
       return id ? `/visitor/review/${id}` : null;
     case 'deliveries':
+      // A parcel at the gate carries packageId; only a delivery person
+      // waiting for a decision is a visit to review.
+      if (str(data.packageId)) return '/packages';
       return id ? `/visitor/review/${id}` : '/packages';
-    case 'complaints':
+    case 'complaints': {
+      // Service-request updates are filed under this category too.
+      const requestId = str(data.serviceRequestId);
+      if (requestId) return `/services/${requestId}`;
       return id ? `/complaints/${id}` : '/complaints';
+    }
+    case 'service_requests':
+      return id ? `/services/${id}` : '/(tabs)/services';
+    case 'approval_results':
+      return id ? `/visitor/${id}` : '/(tabs)/visitors';
     case 'notices':
     case 'notices_urgent':
     case 'community':
       return '/(tabs)/notices';
+    case 'payments':
+    case 'payments_dues':
+      return '/maintenance';
     case 'emergency_sos':
       return '/medical/sos';
-    // ── Legacy aliases ──────────────────────────────────────────────────
+    // ── Backend event names ─────────────────────────────────────────────
     case 'VISITOR_APPROVAL_REQUEST':
-    case 'DELIVERY_APPROVAL_REQUEST':
-    case 'VISITOR_ARRIVAL':
       return id ? `/visitor/review/${id}` : null;
-    case 'COMPLAINT_UPDATED':
-      return data.entityId ? `/complaints/${data.entityId}` : null;
+    case 'DELIVERY_APPROVAL_REQUEST':
+      return id ? `/visitor/review/${id}` : '/packages';
+    // Sent at check-in, when there is nothing left to decide: the visit itself.
+    case 'VISITOR_ARRIVAL':
+    case 'VISITOR_DECISION_RESULT':
+      return id ? `/visitor/${id}` : '/(tabs)/visitors';
     case 'PACKAGE_ARRIVED':
+    case 'PACKAGE_COLLECTED':
       return '/packages';
+    case 'COMPLAINT':
+    case 'COMPLAINT_UPDATE':
+    case 'COMPLAINT_UPDATED':
+      return id ? `/complaints/${id}` : '/complaints';
+    case 'BILL_GENERATED':
+    case 'PAYMENT_RECEIVED':
+    case 'PAYMENT_FAILED':
+      return '/maintenance';
+    case 'AGM_MEETING_CREATED': {
+      const meetingId = str(data.meetingId) ?? id;
+      return meetingId ? `/agm/${meetingId}` : '/agm';
+    }
     case 'NOTICE_PUBLISHED':
+    case 'EMERGENCY_BROADCAST':
       return '/(tabs)/notices';
+    case 'ADMIN_PUSH':
+      return '/notifications';
     case 'SOS_TRIGGERED':
     case 'SOS':
       return '/medical/sos';
     default:
-      return '/notifications';
+      return undefined;
   }
 }
 
 /**
- * Route the app in response to a notification tap. Deferred until the
- * signed-in app is on screen — see deferred-navigation.ts for why a cold-start
- * tap used to be lost.
+ * Where tapping a notification takes the resident, or null for nowhere. The
+ * ONE routing table: the lockscreen tap, the in-app banner and the inbox all
+ * use it (they each had their own copy, and disagreed).
+ *
+ * `type` is what the caller has: `data.type` for a push, the stored category
+ * for an inbox row. The backend event name in `data.type` is the more specific
+ * of the two (a service-request update is filed under 'complaints'), so it is
+ * tried first. Anything unknown opens the inbox.
  */
-function routeFromData(data: PushData | null) {
-  const href = hrefForNotification(data);
-  if (href) navigateWhenAppReady(href);
+export function hrefForNotification(type: string | undefined | null, data: PushData): string | null {
+  const id = notificationEntityId(data);
+  const specific = notificationType(data);
+  for (const key of [specific, type]) {
+    if (!key) continue;
+    const href = hrefForType(key, data, id);
+    if (href !== undefined) return href;
+  }
+  return '/notifications';
+}
+
+/**
+ * Route the app in response to a notification tap — only into a signed-in
+ * app: a tap that arrives after sign-out points into someone else's session,
+ * and held until the tabs are on screen (see deferred-navigation.ts for why a
+ * cold-start tap used to be lost).
+ */
+async function routeFromData(data: PushData): Promise<void> {
+  await authStore().getState().hydrate();
+  if (!authStore().getState().token) return;
+  const href = hrefForNotification(notificationType(data), data);
+  if (href) appNavigator.navigateWhenReady(href);
 }
 
 /**
@@ -486,16 +626,17 @@ function routeFromData(data: PushData | null) {
 async function handleAction(actionIdentifier: string, data: PushData): Promise<void> {
   // actionGroup is the canonical signal on current payloads; the type checks
   // cover both the category-registry keys and the legacy event names.
+  const type = notificationType(data);
   const isVisitor =
     data.actionGroup === 'visitor_approval' ||
     data.actionGroup === 'delivery_approval' ||
-    data.type === 'visitor_approvals' ||
-    data.type === 'visitors_gate' ||
-    data.type === 'deliveries' ||
-    data.type === 'VISITOR_APPROVAL_REQUEST' ||
-    data.type === 'DELIVERY_APPROVAL_REQUEST';
+    type === 'visitor_approvals' ||
+    type === 'visitors_gate' ||
+    type === 'deliveries' ||
+    type === 'VISITOR_APPROVAL_REQUEST' ||
+    type === 'DELIVERY_APPROVAL_REQUEST';
   if (!isVisitor) return;
-  const id = (data.entityId as string | undefined) ?? (data.visitId as string | undefined);
+  const id = notificationEntityId(data);
   if (!id) return;
   // Maps the lockscreen button identifier to the value the backend's
   // decision endpoint expects. Anything unrecognised falls back to REJECT
@@ -507,16 +648,15 @@ async function handleAction(actionIdentifier: string, data: PushData): Promise<v
       ? 'LEAVE_AT_SECURITY'
       : 'REJECT';
   try {
+    // The API needs the stored session; a button can be tapped on a cold start.
+    await authStore().getState().hydrate();
+    if (!authStore().getState().token) return;
     await api.post(`/visitors/${id}/decision`, { action });
   } catch {
     /* server is the source of truth; user can retry from the visitor screen */
   }
 }
 
-/**
- * Wire tap-routing for warm taps + cold start, AND action-button handling.
- * Returns the listener subscription.
- */
 /**
  * Identifier of the last notification response we already acted on.
  *
@@ -540,6 +680,10 @@ async function markResponseHandled(response: Notifications.NotificationResponse)
   }
 }
 
+/**
+ * Wire tap-routing for warm taps + cold start, AND action-button handling.
+ * Returns the listener subscription.
+ */
 export function setupTapRouting(): Notifications.Subscription {
   // Cold start: only route if this response is one we have NOT already acted on.
   Notifications.getLastNotificationResponseAsync()
@@ -553,13 +697,12 @@ export function setupTapRouting(): Notifications.Subscription {
       if (alreadyHandled === id) return; // stale replay of an old tap — ignore
       await markResponseHandled(response);
 
-      const data = extractData(response);
-      if (!data) return;
+      const data = readNotificationData(response.notification.request.content.data);
       const action = response.actionIdentifier;
       if (action && action !== Notifications.DEFAULT_ACTION_IDENTIFIER) {
         void handleAction(action, data);
       }
-      routeFromData(data);
+      await routeFromData(data);
     })
     .catch(() => {
       /* ignore */
@@ -569,14 +712,13 @@ export function setupTapRouting(): Notifications.Subscription {
   // tap isn't replayed as a "cold start" route on the next launch.
   return Notifications.addNotificationResponseReceivedListener((response) => {
     void markResponseHandled(response);
-    const data = extractData(response);
-    if (!data) return;
+    const data = readNotificationData(response.notification.request.content.data);
     const action = response.actionIdentifier;
     if (action && action !== Notifications.DEFAULT_ACTION_IDENTIFIER) {
       void handleAction(action, data);
       return; // action handled; no default route — caller stays where they are
     }
-    routeFromData(data);
+    void routeFromData(data);
   });
 }
 

@@ -2,12 +2,14 @@ import { ScrollView, View, Text, TouchableOpacity, RefreshControl } from 'react-
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../src/store/auth.store';
 import { useTheme } from '../../src/hooks/useTheme';
+import { useCancelServiceRequest } from '../../src/hooks/useServiceRequest';
+import { ErrorCard } from '../../src/components/ErrorCard';
 import { api } from '../../src/lib/api';
 import {
   Display,
@@ -33,8 +35,8 @@ type ServiceRequestSummary = {
   description: string;
   status: string;
   createdAt?: string;
-  assignedStaff?: { name?: string } | null;
-  assignee?: { name?: string } | null;
+  /** First assigned staff member (StaffMember with its user). */
+  assignedTo?: { user?: { name?: string } } | null;
 };
 type Notice = { id: string; isRead: boolean };
 type PinnedNotice = { id: string; title: string; body: string; isPinned: boolean };
@@ -99,7 +101,6 @@ function fmtWhen(iso?: string): string {
 
 export default function HomeScreen() {
   const t = useTheme();
-  const qc = useQueryClient();
   // Known from sign-in, so the greeting is right on the very first frame
   // instead of reading "Hi, Resident" and then changing once /residents/me
   // answers — one of the visible "reloads" of Home at launch.
@@ -117,6 +118,7 @@ export default function HomeScreen() {
   const {
     data: recentRequests,
     isPending: requestsPending,
+    isError: requestsError,
     refetch: refetchRequests,
   } = useQuery<ServiceRequestSummary[]>({
     queryKey: ['my-service-requests'],
@@ -158,10 +160,7 @@ export default function HomeScreen() {
     await AsyncStorage.setItem(DISMISSED_PINNED_KEY, JSON.stringify(next));
   };
 
-  const cancelRequest = useMutation({
-    mutationFn: (id: string) => api.patch(`/service-requests/${id}/cancel`, {}),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['my-service-requests'] }),
-  });
+  const { confirmCancel, pendingId: cancellingId } = useCancelServiceRequest();
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -172,6 +171,8 @@ export default function HomeScreen() {
   const firstName = firstNameOf(profile?.user?.name ?? storedName);
   const flatNo = profile?.flat ? `${profile.flat.block} - ${profile.flat.number}` : '';
   const unreadNotices = notices?.filter((n) => !n.isRead).length ?? 0;
+  // A failed load must not read as "No active requests".
+  const requestsFailed = requestsError && !recentRequests;
   const activeRequests = (recentRequests ?? []).filter((r) => ACTIVE_STATUSES.includes(r.status)).slice(0, 3);
 
   return (
@@ -332,7 +333,12 @@ export default function HomeScreen() {
               ) : null}
             </View>
 
-            {requestsPending ? (
+            {requestsFailed ? (
+              <ErrorCard
+                message="Your requests couldn't be loaded. Please try again — your requests are safe."
+                onRetry={() => refetchRequests()}
+              />
+            ) : requestsPending ? (
               // Not "No active requests": saying there are none before we know
               // is wrong, and the card then visibly changes once they load.
               // A skeleton the shape of the card that will replace it.
@@ -353,7 +359,7 @@ export default function HomeScreen() {
                 </View>
               </RoundCard>
             ) : null}
-            {!requestsPending && (activeRequests.length === 0 ? (
+            {!requestsPending && !requestsFailed && (activeRequests.length === 0 ? (
               <RoundCard tone="white" style={{ alignItems: 'center', paddingVertical: 28 }}>
                 <Ionicons name="checkmark-circle" size={32} color={rd.green} />
                 <Text style={{ color: t.textMuted, fontSize: t.fontSm, marginTop: 8 }}>No active requests</Text>
@@ -362,7 +368,7 @@ export default function HomeScreen() {
               <View style={{ gap: 14 }}>
                 {activeRequests.map((r) => {
                   const s = SR_STATUS[r.status] ?? { label: r.status, tone: 'neutral' as RdStatusTone };
-                  const who = r.assignedStaff?.name ?? r.assignee?.name;
+                  const who = r.assignedTo?.user?.name;
                   const when = fmtWhen(r.createdAt);
                   return (
                     <RoundCard key={r.id} tone="white" padding={t.cardPaddingLg}>
@@ -388,7 +394,9 @@ export default function HomeScreen() {
                           size="md"
                           fullWidth={false}
                           textColor={rd.crimson}
-                          onPress={() => cancelRequest.mutate(r.id)}
+                          onPress={() => confirmCancel(r.id)}
+                          loading={cancellingId === r.id}
+                          disabled={!!cancellingId}
                           style={{ flex: 1 }}
                         />
                         <PillButton

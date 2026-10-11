@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
 import { useTheme } from '../../src/hooks/useTheme';
+import { ErrorCard } from '../../src/components/ErrorCard';
 import {
   ScreenHeader,
   Display,
@@ -15,6 +16,7 @@ import {
   rd,
   type RdStatusTone,
 } from '../../src/components/ui';
+import { complaintCategoryLabel } from '../../src/utils/complaint';
 
 // Figma reference: Complaints Management (Complaints Management.jpg, -1.jpg, -2.jpg)
 // Home screen: category grid + active complaints list.
@@ -75,7 +77,7 @@ export default function ComplaintsScreen() {
       <Ionicons name="time-outline" size={24} color={t.textPrimary} />
     </TouchableOpacity>
   );
-  const { data: complaints } = useQuery({
+  const { data: complaints, isError, refetch } = useQuery({
     queryKey: ['my-complaints'],
     queryFn: () => api.get<any[]>('/complaints/my'),
   });
@@ -125,6 +127,13 @@ export default function ComplaintsScreen() {
           ))}
         </View>
 
+        {isError && !complaints && (
+          <ErrorCard
+            message="Your complaints couldn't be loaded. Please try again — your complaints are safe."
+            onRetry={() => refetch()}
+          />
+        )}
+
         {/* Active Complaints section */}
         {active.length > 0 && (
           <>
@@ -137,7 +146,7 @@ export default function ComplaintsScreen() {
                     <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 8 }}>
                       <View style={{ flex: 1, marginRight: 10 }}>
                         <Text style={{ fontSize: t.fontBase, fontWeight: '700', color: t.textPrimary }}>
-                          {item.category ?? item.title ?? 'Complaint'}
+                          {complaintCategoryLabel(item.category) ?? item.title ?? 'Complaint'}
                         </Text>
                         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 6 }}>
                           <Ionicons name="calendar-outline" size={13} color={t.textMuted} />

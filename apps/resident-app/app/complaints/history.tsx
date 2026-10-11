@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
 import { useTheme } from '../../src/hooks/useTheme';
+import { ErrorCard } from '../../src/components/ErrorCard';
 import {
   ScreenHeader,
   Display,
@@ -16,6 +17,7 @@ import {
   rd,
   type RdStatusTone,
 } from '../../src/components/ui';
+import { complaintCategoryLabel } from '../../src/utils/complaint';
 
 // Figma refs: Complaints Management-8.jpg (list), -9.jpg (empty state)
 // Data: GET /complaints/my, filtered client-side by tab.
@@ -50,7 +52,7 @@ export default function ComplaintHistoryScreen() {
   const t = useTheme();
   const [tab, setTab] = useState<Tab>('all');
 
-  const { data } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['my-complaints'],
     queryFn: () => api.get<any[]>('/complaints/my'),
   });
@@ -67,7 +69,16 @@ export default function ComplaintHistoryScreen() {
     <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
       <ScreenHeader title="Complaint History" />
 
-      {all.length === 0 ? (
+      {isLoading ? (
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator color={t.accentPrimary} />
+        </View>
+      ) : isError && !data ? (
+        <ErrorCard
+          message="Your complaints couldn't be loaded. Please try again — your complaints are safe."
+          onRetry={() => refetch()}
+        />
+      ) : all.length === 0 ? (
         /* Empty state */
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40 }}>
           <Display size="lg" align="center">No complaints yet</Display>
@@ -128,7 +139,7 @@ export default function ComplaintHistoryScreen() {
                       }}
                     >
                       <Text style={{ fontSize: t.fontBase, fontWeight: '700', color: t.textPrimary, flex: 1, marginRight: 10 }}>
-                        {item.category ?? item.title ?? 'Complaint'}
+                        {complaintCategoryLabel(item.category) ?? item.title ?? 'Complaint'}
                       </Text>
                       <View style={{ alignItems: 'flex-end', gap: 4 }}>
                         <StatusPill label={label} tone={tone} />

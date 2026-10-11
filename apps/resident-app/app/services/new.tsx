@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -18,6 +18,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 import { filterPastAmPmSlots } from '../../src/lib/time-slots';
 import { api } from '../../src/lib/api';
+import { isResidentProfileMissing } from '../../src/lib/profile-guard';
 import { useTheme } from '../../src/hooks/useTheme';
 import {
   ScreenHeader,
@@ -90,9 +91,9 @@ export default function NewServiceRequestScreen() {
   const category = initialCategory ?? '';
   const selectedDay = days[selectedDayIdx];
 
-  const preferredTime = selectedTime
-    ? fmtBookingDate(selectedDay.date, selectedTime)
-    : undefined;
+  // Always send the chosen day: with no time slot it used to be dropped, so
+  // the request reached staff with no date at all.
+  const preferredTime = fmtBookingDate(selectedDay.date, selectedTime || 'Any time');
 
   const mutation = useMutation<{ id: string }, Error>({
     mutationFn: async () => {
@@ -114,13 +115,17 @@ export default function NewServiceRequestScreen() {
   // Date is required; preferred time is optional (matches the Figma label).
   const isValid = !!selectedDay;
 
-  // Guard: profile fetch returned 404 → user has no Resident row yet. Send
+  // Guard: profile fetch settled on a 404 → user has no Resident row yet. Send
   // them to pending-approval; that screen renders the right next-step button
-  // (Complete Home Details / Upload Documents) based on actual state.
-  if (profile.isError) {
-    router.replace('/(auth)/pending-approval' as any);
-    return null;
-  }
+  // (Complete Home Details / Upload Documents) based on actual state. Any
+  // other failure (offline, 5xx) is not "pending approval" — keep the form;
+  // a failed submit reports its own error. Navigate from an effect, never
+  // during render.
+  const profileMissing = isResidentProfileMissing(profile);
+  useEffect(() => {
+    if (profileMissing) router.replace('/(auth)/pending-approval' as any);
+  }, [profileMissing]);
+  if (profileMissing) return null;
 
   return (
     <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>

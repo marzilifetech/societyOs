@@ -6,15 +6,16 @@ import {
   TouchableOpacity,
   TextInput,
   Image,
-  Alert,
 } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { api } from '../../src/lib/api';
 import { useTheme } from '../../src/hooks/useTheme';
+import { useCancelServiceRequest } from '../../src/hooks/useServiceRequest';
+import { ErrorCard } from '../../src/components/ErrorCard';
 import {
   ScreenHeader,
   Display,
@@ -89,26 +90,14 @@ function fmtDateTime(iso: string) {
 
 export default function ServicesScreen() {
   const t = useTheme();
-  const qc = useQueryClient();
   const [search, setSearch] = useState('');
 
-  const { data: requests } = useQuery<ServiceRequestSummary[]>({
+  const { data: requests, isError, refetch } = useQuery<ServiceRequestSummary[]>({
     queryKey: ['my-service-requests'],
     queryFn: () => api.get<ServiceRequestSummary[]>('/service-requests/my'),
   });
 
-  const cancelMutation = useMutation({
-    mutationFn: (id: string) => api.patch(`/service-requests/${id}/cancel`, {}),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['my-service-requests'] }),
-    onError: (err: any) => Alert.alert('Error', err?.message ?? 'Could not cancel request.'),
-  });
-
-  const handleCancel = (id: string) => {
-    Alert.alert('Cancel request?', 'Are you sure you want to cancel this request?', [
-      { text: 'No', style: 'cancel' },
-      { text: 'Yes, Cancel', style: 'destructive', onPress: () => cancelMutation.mutate(id) },
-    ]);
-  };
+  const { confirmCancel: handleCancel } = useCancelServiceRequest();
 
   const active = requests?.filter(
     (r) => !['COMPLETED', 'CLOSED', 'REJECTED', 'CANCELLED'].includes(r.status),
@@ -193,6 +182,13 @@ export default function ServicesScreen() {
             />
           ))}
         </View>
+
+        {isError && !requests && (
+          <ErrorCard
+            message="Your service requests couldn't be loaded. Please try again — your requests are safe."
+            onRetry={() => refetch()}
+          />
+        )}
 
         {/* Active Requests */}
         {active.length > 0 && (

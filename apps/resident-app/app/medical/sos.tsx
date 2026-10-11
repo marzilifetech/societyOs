@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   Platform,
   Modal,
   Alert,
+  Linking,
   Vibration,
   Animated,
   Easing,
@@ -21,10 +22,10 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
-import { io } from 'socket.io-client';
-type Socket = any; // socket.io-client deep type import is finicky under pnpm
 
 import { api } from '../../src/lib/api';
+import { pickSecurityContact } from '../../src/utils/emergency-contacts';
+import { subscribe } from '../../src/lib/socket';
 import { useAuthStore } from '../../src/store/auth.store';
 import { useTheme } from '../../src/hooks/useTheme';
 import {
@@ -43,24 +44,23 @@ import { ErrorBoundary } from '../../src/components/ErrorBoundary';
 // 5-second cancel window → Alert Sent (live responder status via socket) →
 // Resolved / Cancelled summaries, plus the cancel-reason bottom sheet.
 //
-// API surface (unchanged): POST /sos/trigger, PATCH /sos/:id/note,
-// PATCH /sos/:id/resolve, PATCH /sos/:id/false-alarm, socket sos:<id>:acknowledged.
+// API surface: POST /sos/trigger, PATCH /sos/:id/note, PATCH /sos/:id/resolve,
+// PATCH /sos/:id/false-alarm; on the shared /events socket the sender gets
+// sos:<id>:acknowledged and sos:<id>:closed ({ status: RESOLVED | FALSE_ALARM }).
 //
-// NOTE: per-responder acknowledgement + arrival counts and a resident SOS
-// history feed have no backend yet — the UI derives what it can from the single
-// acknowledge event and local timing. SOS history lives at /medical/sos-history.
+// NOTE: per-responder acknowledgement + arrival counts have no backend — the
+// UI derives what it can from the single acknowledge event and local timing.
+// SOS history lives at /medical/sos-history.
 
-let socket: Socket | null = null;
-function getSocket(): Socket {
-  if (!socket) {
-    // The SOS gateway is the `/sos` namespace at the server root. Connecting to
-    // the API URL itself put the socket in a non-existent `/v1` namespace, so
-    // the acknowledgement never arrived.
-    const apiUrl = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000/v1';
-    const serverUrl = apiUrl.replace(/\/api\/v\d+$/, '').replace(/\/v\d+$/, '');
-    socket = io(`${serverUrl}/sos`, { path: '/socket.io', transports: ['websocket'], autoConnect: false } as any);
-  }
-  return socket;
+type Coords = { lat: number; lng: number };
+
+/** How long a send may wait for a GPS fix before going out without one. */
+const LOCATION_WAIT_MS = 2000;
+
+const wait = (ms: number) => new Promise<null>((resolve) => setTimeout(() => resolve(null), ms));
+
+function toCoords(loc: Location.LocationObject | null | undefined): Coords | null {
+  return loc ? { lat: loc.coords.latitude, lng: loc.coords.longitude } : null;
 }
 
 type Phase = 'form' | 'sending' | 'active' | 'resolved' | 'cancelled';
@@ -102,28 +102,57 @@ function SosScreenInner() {
   const [alertId, setAlertId] = useState<string | null>(null);
   const [acknowledged, setAcknowledged] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [coords, setCoords] = useState<{ lat?: number; lng?: number }>({});
+  const [coords, setCoords] = useState<Coords | null>(null);
 
   const [showCancel, setShowCancel] = useState(false);
   const [cancelReason, setCancelReason] = useState<string | null>(null);
   const [cancelComments, setCancelComments] = useState('');
 
   const times = useRef<{ sentAt?: number; ackAt?: number; endAt?: number }>({});
-  const abortSend = useRef(false);
+  // Bumped by every Send and every Cancel: a trigger response that comes back
+  // after its send was cancelled (or superseded) must not revive the alert.
+  const sendSeq = useRef(0);
+  const triggering = useRef(false);
+  // Location lookup started with the countdown, so the fix is usually ready
+  // by the time the alert goes out.
+  const fix = useRef<Promise<Coords | null>>(Promise.resolve(null));
+  const lastKnown = useRef<Coords | null>(null);
 
   const { data: profile } = useQuery({
     queryKey: ['resident-profile'],
     queryFn: () => api.get<any>('/residents/me'),
     staleTime: 5 * 60_000,
   });
+  const { data: contactsData } = useQuery({
+    queryKey: ['emergency-contacts'],
+    queryFn: () => api.get<any>('/residents/society/emergency-contacts'),
+    staleTime: 30 * 60_000,
+  });
+  const security = pickSecurityContact(contactsData);
+
   const name = profile?.user?.name ?? useAuthStore.getState().user?.name ?? 'Resident';
   const flat = profile?.flat ? `${profile.flat.block} - ${profile.flat.number}` : '—';
-  const locationStr =
-    coords.lat != null && coords.lng != null
-      ? `${coords.lat.toFixed(4)}° N, ${coords.lng.toFixed(4)}° E`
-      : phase === 'form'
-      ? '—'
-      : 'Locating…';
+  const locationStr = coords
+    ? `${coords.lat.toFixed(4)}° N, ${coords.lng.toFixed(4)}° E`
+    : phase === 'form'
+    ? '—'
+    : phase === 'sending'
+    ? 'Locating…'
+    : 'Not available';
+
+  /** Error alert that offers a direct call to security when we know the number. */
+  const showFailure = (title: string, message: string) => {
+    const buttons: { text: string; style?: 'cancel'; onPress?: () => void }[] = [{ text: 'OK', style: 'cancel' }];
+    if (security) {
+      buttons.push({
+        text: `Call ${security.label}`,
+        onPress: () => {
+          Linking.openURL(`tel:${security.phone.replace(/\s/g, '')}`).catch(() => {});
+        },
+      });
+    }
+    Alert.alert(title, security ? message : `${message} Please call security directly.`, buttons);
+  };
 
   const infoRows = [
     { label: 'Name:', value: name },
@@ -132,104 +161,134 @@ function SosScreenInner() {
   ];
 
   // ---- send / cancel / resolve ----------------------------------------------
-  const doTrigger = useCallback(async () => {
-    if (abortSend.current) return;
-    setBusy(true);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
-    Vibration.vibrate([0, 200, 100, 200]);
-    try {
-      let lat: number | undefined;
-      let lng: number | undefined;
+  const startLocating = () => {
+    lastKnown.current = null;
+    setCoords(null);
+    fix.current = (async () => {
       try {
         let { status } = await Location.getForegroundPermissionsAsync();
         if (status !== 'granted') {
           ({ status } = await Location.requestForegroundPermissionsAsync());
         }
-        if (status === 'granted') {
-          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-          lat = loc.coords.latitude;
-          lng = loc.coords.longitude;
-          setCoords({ lat, lng });
-        }
+        if (status !== 'granted') return null;
+        Location.getLastKnownPositionAsync()
+          .then((loc) => {
+            lastKnown.current = toCoords(loc);
+          })
+          .catch(() => {});
+        const current = toCoords(await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }));
+        if (current) setCoords(current);
+        return current;
       } catch {
-        /* location optional */
+        return null; // location is optional
       }
-      const raw = await api.post<object>('/sos/trigger', { lat, lng });
+    })();
+  };
+
+  const doTrigger = async () => {
+    if (triggering.current) return;
+    triggering.current = true;
+    const seq = sendSeq.current;
+    setBusy(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
+    Vibration.vibrate([0, 200, 100, 200]);
+    try {
+      // Never hold an emergency for GPS: take whatever fix arrives within the
+      // cap, else the last known position, else send without coordinates.
+      const position = (await Promise.race([fix.current, wait(LOCATION_WAIT_MS)])) ?? lastKnown.current;
+      if (position) setCoords(position);
+      if (seq !== sendSeq.current) return; // cancelled before it went out
+      const raw = await api.post<object>('/sos/trigger', position ?? {});
       const alert = unwrapApiEnvelope<{ id: string }>(raw);
+      if (seq !== sendSeq.current) {
+        // Cancelled while the request was in flight — withdraw the alert it created.
+        api.patch(`/sos/${alert.id}/false-alarm`, {}).catch(() =>
+          showFailure(
+            'Alert could not be withdrawn',
+            'Your SOS reached security before it was cancelled. Please let them know you are safe.',
+          ),
+        );
+        return;
+      }
       setAlertId(alert.id);
       times.current.sentAt = Date.now();
       const note = details.trim();
       if (note) api.patch(`/sos/${alert.id}/note`, { note }).catch(() => {});
       setPhase('active');
-    } catch {
-      Alert.alert('Error', 'Could not send SOS. Please call security directly.');
+    } catch (err) {
+      if (seq !== sendSeq.current) return;
+      Vibration.cancel();
+      showFailure('SOS not sent', err instanceof Error && err.message ? err.message : 'Could not send SOS.');
       setPhase('form');
     } finally {
+      triggering.current = false;
       setBusy(false);
     }
-  }, [details]);
+  };
 
   const doTriggerRef = useRef(doTrigger);
   doTriggerRef.current = doTrigger;
 
-  // Countdown effect while in the 5-second cancel window.
+  // Countdown while in the 5-second cancel window; the send fires from the
+  // effect below (not inside a state updater, which may run twice).
   useEffect(() => {
     if (phase !== 'sending') return;
-    abortSend.current = false;
-    setCountdown(5);
-    const id = setInterval(() => {
-      setCountdown((c) => {
-        if (c <= 1) {
-          clearInterval(id);
-          doTriggerRef.current();
-          return 0;
-        }
-        return c - 1;
-      });
-    }, 1000);
+    const id = setInterval(() => setCountdown((c) => Math.max(0, c - 1)), 1000);
     return () => clearInterval(id);
   }, [phase]);
 
+  useEffect(() => {
+    if (phase === 'sending' && countdown === 0) doTriggerRef.current();
+  }, [phase, countdown]);
+
   const startSending = () => {
+    if (busy) return;
     Haptics.selectionAsync().catch(() => {});
+    sendSeq.current += 1;
+    startLocating();
+    setCountdown(5);
     setPhase('sending');
   };
   const cancelSending = () => {
-    abortSend.current = true;
+    sendSeq.current += 1;
     Vibration.cancel();
     setPhase('form');
   };
 
   const markResolved = async () => {
-    if (!alertId) return;
+    if (!alertId || busy) return;
     setBusy(true);
     try {
       await api.patch(`/sos/${alertId}/resolve`, {});
-    } catch {
-      /* still show resolved locally */
+      times.current.endAt = Date.now();
+      Vibration.cancel();
+      setPhase('resolved');
+    } catch (err) {
+      showFailure('Could not mark as resolved', err instanceof Error && err.message ? err.message : 'Please try again.');
+    } finally {
+      setBusy(false);
     }
-    times.current.endAt = Date.now();
-    Vibration.cancel();
-    setBusy(false);
-    setPhase('resolved');
   };
 
   const confirmCancel = async () => {
+    if (!alertId || busy) return;
     setBusy(true);
     const note = [cancelReason, cancelComments.trim()].filter(Boolean).join(' — ');
     try {
-      if (alertId) {
-        if (note) await api.patch(`/sos/${alertId}/note`, { note }).catch(() => {});
-        await api.patch(`/sos/${alertId}/false-alarm`, {});
-      }
-    } catch {
-      /* still show cancelled locally */
+      if (note) await api.patch(`/sos/${alertId}/note`, { note }).catch(() => {});
+      await api.patch(`/sos/${alertId}/false-alarm`, {});
+      times.current.endAt = Date.now();
+      Vibration.cancel();
+      setShowCancel(false);
+      setPhase('cancelled');
+    } catch (err) {
+      showFailure(
+        'Could not cancel the alert',
+        err instanceof Error && err.message ? err.message : 'Your SOS is still active.',
+      );
+    } finally {
+      setBusy(false);
     }
-    times.current.endAt = Date.now();
-    Vibration.cancel();
-    setBusy(false);
-    setShowCancel(false);
-    setPhase('cancelled');
   };
 
   const backHome = () => {
@@ -237,38 +296,34 @@ function SosScreenInner() {
     router.replace('/(tabs)');
   };
 
-  // Socket: flip responder rows to "Acknowledged" on the ack event.
+  // Live updates for the sender arrive on the shared /events socket (it owns
+  // auth, connection and rooms; we only add and remove listeners): flip
+  // responder rows on the ack, and close the alert when security resolves it
+  // or marks a false alarm.
   useEffect(() => {
     if (phase !== 'active' || !alertId) return;
-    const s = getSocket();
-    const { token, societyId } = useAuthStore.getState();
-    if (!token || !societyId) return;
-    s.auth = { token };
-    // The gateway emits acknowledgements to the `society:<id>` room, which a
-    // client only receives after joining. Re-join on every (re)connect.
-    const join = () => s.emit('join-society', societyId);
-    s.on('connect', join);
-    if (s.connected) join();
-    else s.connect();
     const onAck = () => {
       setAcknowledged(true);
       times.current.ackAt = Date.now();
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     };
-    s.on(`sos:${alertId}:acknowledged`, onAck);
+    const onClosed = (payload: unknown) => {
+      times.current.endAt = Date.now();
+      Vibration.cancel();
+      setShowCancel(false);
+      setPhase((payload as { status?: string } | null)?.status === 'FALSE_ALARM' ? 'cancelled' : 'resolved');
+    };
+    const offAck = subscribe(`sos:${alertId}:acknowledged`, onAck);
+    const offClosed = subscribe(`sos:${alertId}:closed`, onClosed);
     return () => {
-      s.off('connect', join);
-      s.off(`sos:${alertId}:acknowledged`, onAck);
+      offAck();
+      offClosed();
     };
   }, [phase, alertId]);
 
   useEffect(
     () => () => {
       Vibration.cancel();
-      if (socket) {
-        socket.disconnect();
-        socket = null;
-      }
     },
     [],
   );
@@ -448,7 +503,6 @@ function SosScreenInner() {
               rows={[
                 { label: 'Alert Duration', value: fmtClock(duration) },
                 { label: 'Response Time', value: fmtLong(respTime) },
-                { label: 'Responders', value: `${phase === 'resolved' && acknowledged ? 3 : 0} Arrived` },
               ]}
             />
           )}
@@ -459,15 +513,15 @@ function SosScreenInner() {
       <View style={{ backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: rd.cardBorder, paddingBottom: insets.bottom }}>
         <View style={{ paddingHorizontal: t.screenPadding, paddingTop: 12, paddingBottom: 6, gap: 10 }}>
           {phase === 'form' && (
-            <PillButton label="Send Alert" tone="dark" onPress={startSending} loading={busy} />
+            <PillButton label="Send Alert" tone="dark" onPress={startSending} loading={busy} disabled={busy} />
           )}
           {phase === 'sending' && (
             <PillButton label="Cancel SOS Alert" tone="ghost" onPress={cancelSending} />
           )}
           {phase === 'active' && (
             <>
-              <PillButton label="Mark As Resolved" tone="dark" onPress={markResolved} loading={busy} />
-              <PillButton label="Cancel SOS Alert" tone="ghost" onPress={() => setShowCancel(true)} />
+              <PillButton label="Mark As Resolved" tone="dark" onPress={markResolved} loading={busy} disabled={busy} />
+              <PillButton label="Cancel SOS Alert" tone="ghost" onPress={() => setShowCancel(true)} disabled={busy} />
             </>
           )}
           {(phase === 'resolved' || phase === 'cancelled') && (
@@ -542,7 +596,7 @@ function SosScreenInner() {
                 />
 
                 <View style={{ gap: 10, marginTop: 20 }}>
-                  <PillButton label="Yes, Cancel SOS" tone="danger" onPress={confirmCancel} loading={busy} />
+                  <PillButton label="Yes, Cancel SOS" tone="danger" onPress={confirmCancel} loading={busy} disabled={busy} />
                   <PillButton label="Keep SOS Active" tone="light" onPress={() => setShowCancel(false)} />
                 </View>
               </View>

@@ -2,12 +2,13 @@ import { useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, Platform } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
+import { localDateString, parseLocalDate } from '../../utils/date';
 
 type Mode = 'date' | 'time' | 'datetime';
 
 interface Props {
   label?: string;
-  value: string | null; // ISO string or HH:MM (when mode='time')
+  value: string | null; // YYYY-MM-DD (mode='date'), ISO string, or HH:MM (timeAsHHMM)
   onChange: (iso: string) => void;
   mode?: Mode;
   placeholder?: string;
@@ -25,7 +26,8 @@ function formatDisplay(value: string | null, mode: Mode, timeAsHHMM?: boolean): 
     return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
   }
   if (mode === 'date') {
-    const d = new Date(value);
+    const d = parseLocalDate(value);
+    if (!d) return '';
     return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
   }
   const d = new Date(value);
@@ -34,7 +36,9 @@ function formatDisplay(value: string | null, mode: Mode, timeAsHHMM?: boolean): 
 
 /**
  * Cross-platform date/time picker button. Replaces free-text date inputs.
- * Stores ISO string in parent state on confirm (or HH:MM if timeAsHHMM).
+ * On confirm: mode='date' gives the picked local calendar date as YYYY-MM-DD
+ * (an ISO timestamp of local midnight is the previous day in UTC for IST);
+ * 'datetime'/'time' give an ISO string (or HH:MM if timeAsHHMM).
  */
 export function DateField({ label, value, onChange, mode = 'date', placeholder, minimumDate, maximumDate, timeAsHHMM }: Props) {
   const [show, setShow] = useState(false);
@@ -53,8 +57,8 @@ export function DateField({ label, value, onChange, mode = 'date', placeholder, 
           return d;
         }
       }
-      const d = new Date(value);
-      if (!isNaN(d.getTime())) return d;
+      const d = parseLocalDate(value);
+      if (d) return d;
     }
     return new Date();
   })();
@@ -95,7 +99,7 @@ export function DateField({ label, value, onChange, mode = 'date', placeholder, 
       onChange(`${hh}:${mm}`);
       return;
     }
-    onChange(selected.toISOString());
+    onChange(mode === 'date' ? localDateString(selected) : selected.toISOString());
   };
 
   const display = formatDisplay(value, mode, timeAsHHMM);

@@ -8,14 +8,17 @@ import { api } from '../../src/lib/api';
 
 type Package = {
   id: string;
-  courier: string;
-  trackingNumber: string;
-  status: 'ARRIVED' | 'COLLECTED';
+  courierName: string;
+  /** Older payloads. */
+  courier?: string;
+  trackingNumber?: string | null;
+  /** PackageStatus: PENDING (waiting at the gate) | COLLECTED */
+  status: 'PENDING' | 'COLLECTED';
   arrivedAt: string;
 };
 
 const STATUS_META: Record<string, { bgClass: string; textClass: string; label: string }> = {
-  ARRIVED:   { bgClass: 'bg-orange-100', textClass: 'text-orange-700', label: 'Arrived' },
+  PENDING:   { bgClass: 'bg-orange-100', textClass: 'text-orange-700', label: 'Arrived' },
   COLLECTED: { bgClass: 'bg-green-100', textClass: 'text-green-700', label: 'Collected' },
 };
 
@@ -74,7 +77,7 @@ export default function PackagesScreen() {
         )}
 
         {data?.map((pkg: Package) => {
-          const meta = STATUS_META[pkg.status] ?? STATUS_META.ARRIVED;
+          const meta = STATUS_META[pkg.status] ?? STATUS_META.PENDING;
           return (
             <View key={pkg.id} className="bg-gray-50 rounded-2xl border border-gray-200 p-4 mb-3">
               <View className="flex-row items-start">
@@ -83,7 +86,7 @@ export default function PackagesScreen() {
                 </View>
                 <View className="flex-1 mr-2">
                   <View className="flex-row justify-between items-start">
-                    <Text className="text-gray-900 text-base font-bold flex-1 mr-2">{pkg.courier}</Text>
+                    <Text className="text-gray-900 text-base font-bold flex-1 mr-2">{pkg.courierName ?? pkg.courier}</Text>
                     <View className={`${meta.bgClass} rounded-lg px-2.5 py-1`}>
                       <Text className={`${meta.textClass} text-xs font-bold`}>{meta.label}</Text>
                     </View>

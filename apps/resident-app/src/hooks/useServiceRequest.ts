@@ -50,3 +50,37 @@ export function useServiceRequest(
 
   return { confirm, dispute, rate };
 }
+
+/**
+ * Cancel a service request after a confirmation prompt. Shared by Home, the
+ * Services tab and the request detail so every Cancel asks first, reports
+ * failures and ignores taps while a cancel is already in flight.
+ */
+export function useCancelServiceRequest(opts: { onCancelled?: (id: string) => void } = {}) {
+  const qc = useQueryClient();
+
+  const mutation = useMutation({
+    mutationFn: (id: string) => api.patch(`/service-requests/${id}/cancel`, {}),
+    onSuccess: (_data, id) => {
+      qc.invalidateQueries({ queryKey: ['my-service-requests'] });
+      qc.invalidateQueries({ queryKey: ['service-request', id] });
+      opts.onCancelled?.(id);
+    },
+    onError: (err: any) => Alert.alert('Error', err?.message ?? 'Could not cancel request.'),
+  });
+
+  const confirmCancel = (id: string) => {
+    if (mutation.isPending) return;
+    Alert.alert('Cancel request?', 'Are you sure you want to cancel this request?', [
+      { text: 'No', style: 'cancel' },
+      { text: 'Yes, Cancel', style: 'destructive', onPress: () => mutation.mutate(id) },
+    ]);
+  };
+
+  return {
+    confirmCancel,
+    isPending: mutation.isPending,
+    /** The request currently being cancelled, if any. */
+    pendingId: mutation.isPending ? mutation.variables : undefined,
+  };
+}

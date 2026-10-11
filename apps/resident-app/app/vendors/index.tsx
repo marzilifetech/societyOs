@@ -32,7 +32,11 @@ export default function VendorsScreen() {
     setRefreshing(false);
   };
 
-  const filtered = filter === 'All' ? data : data?.filter((v: Vendor) => v.category === filter);
+  // Stored categories are upper-case (GROCERY, PHARMACY, …); chips are labels.
+  const filtered =
+    filter === 'All'
+      ? data
+      : data?.filter((v: Vendor) => (v.category ?? '').toUpperCase() === filter.toUpperCase());
 
   return (
     <SafeAreaView className="flex-1 bg-white">

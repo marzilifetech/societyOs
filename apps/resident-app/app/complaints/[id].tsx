@@ -19,6 +19,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { api } from '../../src/lib/api';
 import { useTheme } from '../../src/hooks/useTheme';
+import { ErrorCard } from '../../src/components/ErrorCard';
 import {
   ScreenHeader,
   Display,
@@ -61,17 +62,21 @@ function fmtDateTime(iso?: string): string {
     ', ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 }
 
-// Vertical stepper component
-const CATEGORY_META: Record<string, { icon: keyof typeof Ionicons.glyphMap; subtitle: string }> = {
-  Noise: { icon: 'volume-high-outline', subtitle: 'Noise disturbance in the community' },
-  Parking: { icon: 'car-outline', subtitle: 'Parking or vehicle issue' },
-  Cleanliness: { icon: 'sparkles-outline', subtitle: 'Cleanliness or hygiene concern' },
-  Water: { icon: 'water-outline', subtitle: 'Water supply or leakage' },
-  Maintenance: { icon: 'construct-outline', subtitle: 'Repair or maintenance request' },
-  Neighbour: { icon: 'people-outline', subtitle: 'Issue with a neighbour' },
-  Pets: { icon: 'paw-outline', subtitle: 'Pet-related concern' },
-  Other: { icon: 'ellipsis-horizontal', subtitle: 'Other complaint' },
+// Keyed by the backend ComplaintCategory enum value (what GET /complaints/:id returns).
+const CATEGORY_META: Record<string, { label: string; icon: keyof typeof Ionicons.glyphMap; subtitle: string }> = {
+  NOISE: { label: 'Noise', icon: 'volume-high-outline', subtitle: 'Noise disturbance in the community' },
+  PARKING: { label: 'Parking', icon: 'car-outline', subtitle: 'Parking or vehicle issue' },
+  CLEANLINESS: { label: 'Cleanliness', icon: 'sparkles-outline', subtitle: 'Cleanliness or hygiene concern' },
+  WATER: { label: 'Water', icon: 'water-outline', subtitle: 'Water supply or leakage' },
+  MAINTENANCE: { label: 'Maintenance', icon: 'construct-outline', subtitle: 'Repair or maintenance request' },
+  NEIGHBOR: { label: 'Neighbour', icon: 'people-outline', subtitle: 'Issue with a neighbour' },
+  PETS: { label: 'Pets', icon: 'paw-outline', subtitle: 'Pet-related concern' },
+  SECURITY: { label: 'Security', icon: 'shield-outline', subtitle: 'Safety or security concern' },
+  COMMUNITY: { label: 'Community', icon: 'business-outline', subtitle: 'Community or common-area issue' },
+  OTHER: { label: 'Other', icon: 'ellipsis-horizontal', subtitle: 'Other complaint' },
 };
+
+// Vertical stepper component
 
 function VerticalStepper({ status }: { status: string }) {
   const t = useTheme();
@@ -204,6 +209,14 @@ function GreenBeacon({ children }: { children?: React.ReactNode }) {
   );
 }
 
+/** The assigned staff member's name, whatever shape the API sends. */
+function staffName(complaint: any): string {
+  const v = complaint?.assignedStaff ?? complaint?.assignedTo ?? complaint?.staff;
+  if (typeof v === 'string' && v.trim()) return v;
+  const name = v?.user?.name ?? v?.name;
+  return typeof name === 'string' && name.trim() ? name : 'Not Assigned';
+}
+
 export default function ComplaintDetailScreen() {
   const t = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -214,7 +227,7 @@ export default function ComplaintDetailScreen() {
   const [showRating, setShowRating] = useState(false);
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
 
-  const { data: complaint, isLoading } = useQuery({
+  const { data: complaint, isLoading, isError, refetch } = useQuery({
     queryKey: ['complaint', id],
     queryFn: () => api.get<any>(`/complaints/${id}`),
   });
@@ -238,6 +251,18 @@ export default function ComplaintDetailScreen() {
     );
   }
 
+  if (isError && !complaint) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+        <ScreenHeader title="Track Complaint" />
+        <ErrorCard
+          message="This complaint couldn't be loaded. Please try again — your complaint is safe."
+          onRetry={() => refetch()}
+        />
+      </View>
+    );
+  }
+
   if (!complaint) {
     return (
       <View style={{ flex: 1, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40 }}>
@@ -252,6 +277,8 @@ export default function ComplaintDetailScreen() {
     );
   }
 
+  const categoryMeta = CATEGORY_META[String(complaint.category ?? '').toUpperCase()];
+  const categoryLabel = categoryMeta?.label ?? complaint.category;
   const status = (complaint.status ?? '').toUpperCase();
   const isResolved = status === 'RESOLVED' || status === 'CLOSED';
   const isRejected = status === 'REJECTED' || status === 'CANCELLED';
@@ -261,8 +288,8 @@ export default function ComplaintDetailScreen() {
   // Info rows for details card
   const infoRows = [
     { label: 'Date & Time:', value: fmtDateTime(complaint.createdAt) },
-    { label: 'Issue:', value: complaint.category ?? '—' },
-    { label: 'Staff:', value: complaint.assignedStaff ?? complaint.staff ?? 'Not Assigned' },
+    { label: 'Issue:', value: categoryLabel ?? '—' },
+    { label: 'Staff:', value: staffName(complaint) },
   ];
 
   const historyBtn = (
@@ -325,14 +352,14 @@ export default function ComplaintDetailScreen() {
                 <IconCircle
                   size={44}
                   bg={rd.crimsonSoft}
-                  icon={CATEGORY_META[complaint.category ?? '']?.icon ?? 'alert-circle-outline'}
+                  icon={categoryMeta?.icon ?? 'alert-circle-outline'}
                 />
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: t.fontBase, fontWeight: '700', color: t.textPrimary }}>
-                    {complaint.category ?? 'Complaint'}
+                    {categoryLabel ?? 'Complaint'}
                   </Text>
                   <Text style={{ fontSize: t.fontSm, color: t.textMuted, marginTop: 2 }}>
-                    {CATEGORY_META[complaint.category ?? '']?.subtitle ?? 'Complaint details below'}
+                    {categoryMeta?.subtitle ?? 'Complaint details below'}
                   </Text>
                 </View>
               </View>

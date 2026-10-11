@@ -4,15 +4,16 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../../src/lib/api';
+import { billBreakdownRows } from '../../../src/utils/bill';
 
 type BillDetail = {
   id: string;
   month: string;
   amount: number;
-  status: 'PENDING' | 'SUCCESS' | 'FAILED' | 'OVERDUE';
+  status: 'PENDING' | 'SUCCESS' | 'FAILED' | 'OVERDUE' | 'WAIVED' | 'REFUNDED';
   dueDate?: string;
   description?: string;
-  breakdown?: Record<string, number>;
+  breakdown?: Record<string, unknown>;
   payments?: { id: string; amount: number; paidAt: string }[];
   penaltyAmount?: number;
 };
@@ -22,6 +23,8 @@ const STATUS_BADGE: Record<string, { bg: string; text: string; label: string }> 
   SUCCESS: { bg: 'bg-green-100', text: 'text-green-700', label: 'Paid' },
   FAILED: { bg: 'bg-red-100', text: 'text-red-700', label: 'Failed' },
   OVERDUE: { bg: 'bg-red-100', text: 'text-red-700', label: 'Overdue' },
+  WAIVED: { bg: 'bg-gray-100', text: 'text-gray-700', label: 'Waived' },
+  REFUNDED: { bg: 'bg-gray-100', text: 'text-gray-700', label: 'Refunded' },
 };
 
 export default function BillDetailScreen() {
@@ -49,6 +52,7 @@ export default function BillDetailScreen() {
 
   const isPending = bill?.status === 'PENDING' || bill?.status === 'OVERDUE';
   const isOverdue = bill?.status === 'OVERDUE';
+  const breakdownRows = billBreakdownRows(bill?.breakdown);
   const daysOverdue = bill?.dueDate ? Math.max(0, Math.floor((Date.now() - new Date(bill.dueDate).getTime()) / 86400000)) : 0;
 
   return (
@@ -108,16 +112,16 @@ export default function BillDetailScreen() {
               </View>
             </View>
 
-            {bill.breakdown && (
+            {breakdownRows.length > 0 && (
               <View className="bg-gray-50 border border-gray-200 rounded-2xl p-5 mb-4">
                 <View className="flex-row items-center gap-2 mb-3">
                   <Ionicons name="document-text" size={16} color="#374151" />
                   <Text className="text-gray-900 font-semibold">Breakdown</Text>
                 </View>
-                {Object.entries(bill.breakdown).map(([key, val]) => (
-                  <View key={key} className="flex-row justify-between mb-2">
-                    <Text className="text-gray-500 text-sm capitalize">{key.replace(/_/g, ' ')}</Text>
-                    <Text className="text-gray-900 text-sm">₹{Number(val).toLocaleString('en-IN')}</Text>
+                {breakdownRows.map((row) => (
+                  <View key={row.key} className="flex-row justify-between mb-2">
+                    <Text className="text-gray-500 text-sm">{row.label}</Text>
+                    <Text className="text-gray-900 text-sm">{row.value}</Text>
                   </View>
                 ))}
               </View>

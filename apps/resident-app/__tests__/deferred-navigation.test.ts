@@ -2,16 +2,16 @@ const mockPush = jest.fn();
 jest.mock('expo-router', () => ({ router: { push: (...a: unknown[]) => mockPush(...a) } }));
 
 import {
+  appNavigator,
   navigateWhenAppReady,
   markAppShellReady,
-  __resetDeferredNavigationForTests,
 } from '../src/lib/deferred-navigation';
 
 describe('deferred navigation', () => {
   beforeEach(() => {
     jest.useFakeTimers();
     mockPush.mockReset();
-    __resetDeferredNavigationForTests();
+    appNavigator.reset();
   });
   afterEach(() => jest.useRealTimers());
 

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, ScrollView } from 'react-native';
+import { View, Text, ScrollView, ActivityIndicator } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -7,6 +7,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import { api } from '../../src/lib/api';
 import { useTheme } from '../../src/hooks/useTheme';
+import { ErrorCard } from '../../src/components/ErrorCard';
 import {
   ScreenHeader,
   Display,
@@ -19,8 +20,7 @@ import {
 } from '../../src/components/ui';
 
 // Figma reference: Medical SOS history (node-id=22-1418, frames "SOS History").
-// There is no resident-facing SOS history endpoint yet — this fetches
-// /sos/history defensively and falls back to the empty state until one exists.
+// GET /sos/history returns the resident's own alerts (most recent first).
 
 type Tab = 'all' | 'active' | 'past';
 type HistoryItem = { id: string; title: string; date: string; duration: string; status: RdStatusTone; statusLabel: string };
@@ -49,10 +49,9 @@ export default function SosHistoryScreen() {
   const t = useTheme();
   const [tab, setTab] = useState<Tab>('all');
 
-  const { data } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['sos-history'],
     queryFn: () => api.get<any[]>('/sos/history'),
-    retry: false,
   });
 
   const items: HistoryItem[] = (Array.isArray(data) ? data : []).map((a: any) => {
@@ -75,7 +74,13 @@ export default function SosHistoryScreen() {
     <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
       <ScreenHeader title="SOS History" />
 
-      {items.length === 0 ? (
+      {isLoading ? (
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator color={t.textMuted} />
+        </View>
+      ) : isError && items.length === 0 ? (
+        <ErrorCard message="Your SOS history couldn't be loaded. Please try again." onRetry={() => refetch()} />
+      ) : items.length === 0 ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40 }}>
           <Display size="lg" align="center">No alerts yet</Display>
           <Text style={{ textAlign: 'center', color: t.textMuted, fontSize: t.fontBase, marginTop: 10, lineHeight: t.fontBase * 1.5 }}>

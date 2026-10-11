@@ -10,7 +10,7 @@ type Bill = {
   id: string;
   month: string;
   amount: number;
-  status: 'PENDING' | 'SUCCESS' | 'FAILED' | 'OVERDUE';
+  status: 'PENDING' | 'SUCCESS' | 'FAILED' | 'OVERDUE' | 'WAIVED' | 'REFUNDED';
   dueDate?: string;
   description?: string;
 };
@@ -20,7 +20,11 @@ const STATUS_META: Record<string, { label: string; bg: string; text: string }> =
   SUCCESS: { label: 'Paid', bg: 'bg-green-100', text: 'text-green-700' },
   FAILED: { label: 'Failed', bg: 'bg-red-100', text: 'text-red-700' },
   OVERDUE: { label: 'Overdue', bg: 'bg-red-100', text: 'text-red-700' },
+  WAIVED: { label: 'Waived', bg: 'bg-gray-100', text: 'text-gray-700' },
+  REFUNDED: { label: 'Refunded', bg: 'bg-gray-100', text: 'text-gray-700' },
 };
+// Unknown statuses show as-is, never as "Pending".
+const UNKNOWN_META = { bg: 'bg-gray-100', text: 'text-gray-700' };
 
 export default function BillsListScreen() {
   const [refreshing, setRefreshing] = useState(false);
@@ -105,7 +109,7 @@ export default function BillsListScreen() {
             </View>
           }
           renderItem={({ item: bill }) => {
-            const meta = STATUS_META[bill.status] ?? STATUS_META.PENDING;
+            const meta = STATUS_META[bill.status] ?? { ...UNKNOWN_META, label: String(bill.status ?? '') };
             const isOverdue = bill.status === 'OVERDUE';
             const isPaid = bill.status === 'SUCCESS';
             return (

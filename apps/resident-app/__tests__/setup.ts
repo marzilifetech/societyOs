@@ -9,8 +9,14 @@ if (typeof (globalThis as any).process === 'undefined') {
   (globalThis as any).process.env = {};
 }
 
+// Components read insets; without a provider they throw in tests.
+jest.mock('react-native-safe-area-context', () =>
+  require('react-native-safe-area-context/jest/mock').default,
+);
+
 jest.mock('expo-router', () => ({
   useRouter: () => ({ push: jest.fn(), replace: jest.fn(), back: jest.fn() }),
+  useSegments: () => [],
   useLocalSearchParams: () => ({}),
   Link: ({ children }: any) => children,
   router: { push: jest.fn(), replace: jest.fn(), back: jest.fn() },

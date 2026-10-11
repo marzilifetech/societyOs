@@ -9,6 +9,7 @@ import { useAuthStore } from '../../src/store/auth.store';
 import { useAccessibilityStore } from '../../src/store/accessibility.store';
 import { useTheme } from '../../src/hooks/useTheme';
 import { Display, StatusPill } from '../../src/components/ui';
+import { ErrorCard } from '../../src/components/ErrorCard';
 
 // Soft card shadow matching the redesign-kit RoundCard surface.
 const cardShadow = {
@@ -149,12 +150,16 @@ export default function ProfileScreen() {
     queryFn: () => api.get<any>('/residents/me'),
   });
 
-  // KYC documents — read-only on this screen. We tolerate the 404 case
-  // (profile-setup completed but documents step skipped) so the section can
-  // render the upload nudge instead of erroring.
-  const { data: myDocs } = useQuery<MyDocs | null>({
+  // KYC documents — read-only on this screen. Only a 404 (profile-setup
+  // completed but documents step skipped) means "none yet" and shows the
+  // upload nudge; any other failure is an error, not a missing upload.
+  const { data: myDocs, isError: docsError, refetch: refetchDocs } = useQuery<MyDocs | null>({
     queryKey: ['my-documents'],
-    queryFn: () => api.get<MyDocs>('/residents/documents/me').catch(() => null),
+    queryFn: () =>
+      api.get<MyDocs>('/residents/documents/me').catch((err: any) => {
+        if (err?.status === 404) return null;
+        throw err;
+      }),
   });
 
   const directoryMutation = useMutation({
@@ -240,7 +245,12 @@ export default function ProfileScreen() {
             ) : null}
           </View>
 
-          {!myDocs || (!myDocs.aadhaarUrl && !myDocs.panUrl && !myDocs.addressProofUrl) ? (
+          {docsError && myDocs === undefined ? (
+            <ErrorCard
+              message="Your documents couldn't be loaded. Please try again — they are safe."
+              onRetry={() => refetchDocs()}
+            />
+          ) : myDocs === undefined ? null : !myDocs || (!myDocs.aadhaarUrl && !myDocs.panUrl && !myDocs.addressProofUrl) ? (
             // No documents uploaded — nudge card.
             <TouchableOpacity
               onPress={() => router.push('/(auth)/documents' as any)}

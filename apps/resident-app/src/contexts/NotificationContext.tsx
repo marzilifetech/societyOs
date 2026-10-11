@@ -1,4 +1,12 @@
-import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 /**
  * Shape of the rich notification displayed in the foreground banner.
@@ -60,7 +68,8 @@ export function classifyBannerType(n: BannerNotification | null): BannerType {
  * Senior-citizen banner queue. The user must have time to read each card, so we
  * NEVER overlap multiple banners — incoming notifications wait in a small FIFO
  * (max 5 — anything beyond that is dropped to avoid memory growth from a
- * runaway sender). Auto-dismiss is now TYPE-AWARE:
+ * runaway sender), except an emergency, which never waits behind routine
+ * banners. Auto-dismiss is TYPE-AWARE:
  *
  *   MARKETING  → 4 s   (gentle, doesn't demand attention)
  *   DELIVERY   → 10 s  (matches NoBrokerHood's elderly-tested visitor timing)
@@ -74,59 +83,65 @@ const DISMISS_MS: Record<BannerType, number | null> = {
   EMERGENCY: null,
 };
 
+const MAX_QUEUED = 5;
+
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
   const [current, setCurrent] = useState<BannerNotification | null>(null);
+  // The banner on screen, as a ref: `showBanner` used to read `current` from
+  // its render closure, so two pushes landing in the same frame both saw an
+  // empty slot and the second silently replaced the first.
+  const currentRef = useRef<BannerNotification | null>(null);
   const queueRef = useRef<BannerNotification[]>([]);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const clearTimer = () => {
+  const clearTimer = useCallback(() => {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
     }
-  };
-
-  const startDismissTimer = (n: BannerNotification) => {
-    const ms = DISMISS_MS[classifyBannerType(n)];
-    if (ms === null) return; // sticky — no auto-dismiss
-    timerRef.current = setTimeout(() => {
-      setCurrent(null);
-      showNext();
-    }, ms);
-  };
-
-  const showNext = useCallback(() => {
-    const next = queueRef.current.shift() ?? null;
-    setCurrent(next);
-    clearTimer();
-    if (next) startDismissTimer(next);
   }, []);
 
+  /** The one place a banner goes on (or off) screen, with its own timer. */
+  const present = useCallback(
+    (n: BannerNotification | null) => {
+      clearTimer();
+      currentRef.current = n;
+      setCurrent(n);
+      if (!n) return;
+      const ms = DISMISS_MS[classifyBannerType(n)];
+      if (ms === null) return; // sticky — no auto-dismiss
+      timerRef.current = setTimeout(() => present(queueRef.current.shift() ?? null), ms);
+    },
+    [clearTimer],
+  );
+
   const dismiss = useCallback(() => {
-    clearTimer();
-    setCurrent(null);
-    showNext();
-  }, [showNext]);
+    present(queueRef.current.shift() ?? null);
+  }, [present]);
 
   const showBanner = useCallback(
     (n: BannerNotification) => {
-      if (current) {
-        if (queueRef.current.length < 5) {
-          queueRef.current.push(n);
-        }
+      const showing = currentRef.current;
+      if (!showing) {
+        present(n);
         return;
       }
-      setCurrent(n);
-      clearTimer();
-      startDismissTimer(n);
+      // An emergency never waits behind routine banners: it takes the screen
+      // now and the interrupted banner goes back to the front of the queue.
+      if (classifyBannerType(n) === 'EMERGENCY' && classifyBannerType(showing) !== 'EMERGENCY') {
+        queueRef.current.unshift(showing);
+        queueRef.current.length = Math.min(queueRef.current.length, MAX_QUEUED);
+        present(n);
+        return;
+      }
+      if (queueRef.current.length < MAX_QUEUED) queueRef.current.push(n);
     },
-    [current, showNext],
+    [present],
   );
 
-  const value = useMemo(
-    () => ({ current, showBanner, dismiss }),
-    [current, showBanner, dismiss],
-  );
+  useEffect(() => clearTimer, [clearTimer]);
+
+  const value = useMemo(() => ({ current, showBanner, dismiss }), [current, showBanner, dismiss]);
 
   return <NotificationContext.Provider value={value}>{children}</NotificationContext.Provider>;
 }

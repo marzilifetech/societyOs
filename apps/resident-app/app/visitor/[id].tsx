@@ -7,6 +7,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
 import { useTheme } from '../../src/hooks/useTheme';
 import { StatusPill, type RdStatusTone } from '../../src/components/ui';
+import { ErrorCard } from '../../src/components/ErrorCard';
+import { isGatePassUsable } from '../../src/utils/visitor';
 
 // Status chips follow the StatusPill soft-tone vocabulary.
 const STATUS_TONE: Record<string, RdStatusTone> = {
@@ -14,6 +16,7 @@ const STATUS_TONE: Record<string, RdStatusTone> = {
   CHECKED_IN: 'resolved',
   CHECKED_OUT: 'neutral',
   DENIED: 'cancelled',
+  EXPIRED: 'neutral',
 };
 
 export default function VisitorDetailScreen() {
@@ -21,7 +24,7 @@ export default function VisitorDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const qc = useQueryClient();
 
-  const { data: visitor, isLoading } = useQuery({
+  const { data: visitor, isLoading, isError, refetch } = useQuery({
     queryKey: ['visitor', id],
     queryFn: () => api.get<any>(`/visitors/${id}`),
   });
@@ -43,6 +46,14 @@ export default function VisitorDetailScreen() {
     );
   }
 
+  if (isError && !visitor) {
+    return (
+      <SafeAreaView className="flex-1 bg-white">
+        <ErrorCard message="This visitor pass couldn't be loaded. Please try again." onRetry={() => refetch()} />
+      </SafeAreaView>
+    );
+  }
+
   if (!visitor) {
     return (
       <SafeAreaView className="flex-1 bg-white items-center justify-center">
@@ -51,8 +62,11 @@ export default function VisitorDetailScreen() {
     );
   }
 
-  const statusTone = STATUS_TONE[visitor.status] ?? 'neutral';
-  const isPending = visitor.status === 'EXPECTED';
+  const rejected = visitor.approvalStatus === 'REJECTED';
+  const statusTone = rejected ? 'cancelled' : STATUS_TONE[visitor.status] ?? 'neutral';
+  const statusLabel = rejected ? 'REJECTED' : String(visitor.status ?? '').replace('_', ' ');
+  // Only a pass that can still get them in: not rejected, not expired.
+  const isPending = isGatePassUsable(visitor);
 
   return (
     <SafeAreaView className="flex-1 bg-white">
@@ -68,9 +82,17 @@ export default function VisitorDetailScreen() {
           </TouchableOpacity>
           <Text className="font-bold text-gray-900 mb-1" style={{ fontSize: t.font2xl }}>Visitor Pass</Text>
           <View className="mt-1 mb-6">
-            <StatusPill label={visitor.status.replace('_', ' ')} tone={statusTone} />
+            <StatusPill label={statusLabel} tone={statusTone} />
           </View>
         </View>
+
+        {visitor.status === 'EXPECTED' && !isPending && (
+          <View className="mx-6 mb-6 bg-gray-50 border border-gray-200 rounded-2xl p-4">
+            <Text className="text-gray-600" style={{ fontSize: t.fontSm }}>
+              {rejected ? 'Entry was rejected for this visitor.' : 'This gate pass is no longer valid.'}
+            </Text>
+          </View>
+        )}
 
         {/* Gate pass QR */}
         {isPending && visitor.qrToken && (
@@ -96,8 +118,8 @@ export default function VisitorDetailScreen() {
               className="mt-4 bg-primary-50 rounded-full px-5"
               style={{ minHeight: t.touchTargetSm, justifyContent: 'center' }}
               onPress={() => {
-                const validLine = visitor.validTill
-                  ? `Valid until ${new Date(visitor.validTill).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
+                const validLine = visitor.validUntil
+                  ? `Valid until ${new Date(visitor.validUntil).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
                   : 'Valid for 24 hours';
                 Share.share({
                   message: `Gate pass for ${visitor.name ?? 'your visitor'}\nCode: ${visitor.qrToken}\n${validLine}\n\nShow this code at the gate.`,

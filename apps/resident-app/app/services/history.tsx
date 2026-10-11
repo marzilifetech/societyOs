@@ -8,6 +8,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../../src/lib/api';
 import { useTheme } from '../../src/hooks/useTheme';
 import { useRefreshOnFocus, usePullToRefresh } from '../../src/hooks/useRefreshOnFocus';
+import { ErrorCard } from '../../src/components/ErrorCard';
 import {
   ScreenHeader,
   Display,
@@ -77,7 +78,7 @@ export default function ServiceHistoryScreen() {
   const t = useTheme();
   const [tab, setTab] = useState<Tab>('all');
 
-  const { data: requests, isLoading, refetch } = useQuery<ServiceRequestSummary[]>({
+  const { data: requests, isLoading, isError, refetch } = useQuery<ServiceRequestSummary[]>({
     queryKey: ['my-service-requests'],
     queryFn: () => api.get<ServiceRequestSummary[]>('/service-requests/my'),
   });
@@ -102,7 +103,12 @@ export default function ServiceHistoryScreen() {
     <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
       <ScreenHeader title="Service History" />
 
-      {isEmpty && all.length === 0 ? (
+      {isError && !requests ? (
+        <ErrorCard
+          message="Your service requests couldn't be loaded. Please try again — your requests are safe."
+          onRetry={() => refetch()}
+        />
+      ) : isEmpty && all.length === 0 ? (
         // Empty state (Figma: Utility Service-3.jpg)
         <View
           style={{

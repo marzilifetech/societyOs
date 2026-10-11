@@ -11,6 +11,7 @@ const mockBack = jest.fn();
 const mockReplace = jest.fn();
 
 jest.mock('expo-router', () => ({
+  useSegments: () => [],
   router: {
     back: (...args: any[]) => mockBack(...args),
     canGoBack: () => true,

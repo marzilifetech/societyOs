@@ -20,6 +20,7 @@ jest.mock(
 jest.mock('../src/lib/push', () => ({
   unregisterDeviceToken: jest.fn().mockResolvedValue(undefined),
 }));
+jest.mock('../src/lib/query-client', () => ({ queryClient: { clear: jest.fn() } }));
 
 import * as SecureStore from 'expo-secure-store';
 import { useAuthStore, HYDRATE_BUDGET_MS } from '../src/store/auth.store';
@@ -136,7 +137,7 @@ describe('useAuthStore', () => {
     it('revokes on the server by default (device token, then logout)', async () => {
       await useAuthStore.getState().clearAuth();
       expect(unregisterDeviceToken).toHaveBeenCalledTimes(1);
-      expect(api.post).toHaveBeenCalledWith('/auth/logout', {});
+      expect(api.post).toHaveBeenCalledWith('/auth/logout', { refreshToken: 'rt' });
     });
 
     it('still signs out locally when the server logout fails', async () => {
@@ -145,11 +146,46 @@ describe('useAuthStore', () => {
       expect(useAuthStore.getState().token).toBeNull();
     });
 
-    it('skips every server call with revokeOnServer: false', async () => {
+    it('with revokeOnServer: false skips logout but still releases the push token', async () => {
+      // The session is already dead server-side; the release needs none, and
+      // without it the next resident on this phone got no pushes.
       await useAuthStore.getState().clearAuth({ revokeOnServer: false });
-      expect(unregisterDeviceToken).not.toHaveBeenCalled();
+      expect(unregisterDeviceToken).toHaveBeenCalledTimes(1);
       expect(api.post).not.toHaveBeenCalled();
       expect(useAuthStore.getState().token).toBeNull();
+    });
+
+    it('does not wait for a release that never finishes on a forced sign-out', async () => {
+      (unregisterDeviceToken as jest.Mock).mockReturnValueOnce(new Promise(() => {}));
+      await expect(
+        useAuthStore.getState().clearAuth({ revokeOnServer: false }),
+      ).resolves.toBeUndefined();
+    });
+
+    it('cannot hang on a logout request that never answers', async () => {
+      jest.useFakeTimers();
+      try {
+        (api.post as jest.Mock).mockReturnValueOnce(new Promise(() => {}));
+        const pending = useAuthStore.getState().clearAuth();
+        await jest.advanceTimersByTimeAsync(5000);
+        await expect(pending).resolves.toBeUndefined();
+        expect(useAuthStore.getState().token).toBeNull();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it("drops the previous resident's cached queries", async () => {
+      const { queryClient } = require('../src/lib/query-client');
+      await useAuthStore.getState().clearAuth();
+      expect(queryClient.clear).toHaveBeenCalled();
+    });
+
+    it('drops a notification tap held for the signed-in shell', async () => {
+      const { appNavigator } = require('../src/lib/deferred-navigation');
+      const clearPending = jest.spyOn(appNavigator, 'clearPending');
+      await useAuthStore.getState().clearAuth({ revokeOnServer: false });
+      expect(clearPending).toHaveBeenCalled();
     });
 
     it('clears the in-memory session BEFORE the Keystore deletes finish', async () => {
@@ -192,6 +228,31 @@ describe('useAuthStore', () => {
   });
 
   // ─── hydrate ────────────────────────────────────────────────────────────────
+
+  // ─── restoreSession (the fingerprint shortcut on the sign-in screen) ─────────
+
+  describe('restoreSession', () => {
+    it('re-reads a session that launch gave up on', async () => {
+      // Launch timed out on a slow Keystore: hydrated, but signed out.
+      useAuthStore.setState({ isHydrated: true });
+      storeContains(FULL_SESSION);
+      await expect(useAuthStore.getState().restoreSession()).resolves.toBe(true);
+      expect(useAuthStore.getState().token).toBe('tok-hydrated');
+      expect(setApiTokens).toHaveBeenCalledWith('tok-hydrated', 'rt-hydrated');
+    });
+
+    it('reports no session when none is stored', async () => {
+      useAuthStore.setState({ isHydrated: true });
+      await expect(useAuthStore.getState().restoreSession()).resolves.toBe(false);
+      expect(useAuthStore.getState().token).toBeNull();
+    });
+
+    it('keeps a session that is already in the store', async () => {
+      useAuthStore.setState({ token: 'live', user: mockUser, isHydrated: true });
+      await expect(useAuthStore.getState().restoreSession()).resolves.toBe(true);
+      expect(getItem).not.toHaveBeenCalled();
+    });
+  });
 
   describe('hydrate', () => {
     it('restores auth state when all keys are present in SecureStore', async () => {

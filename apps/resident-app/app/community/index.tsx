@@ -8,6 +8,7 @@ import { router } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
+import { ErrorCard } from '../../src/components/ErrorCard';
 
 type Post = {
   id: string;
@@ -24,7 +25,7 @@ export default function CommunityFeedScreen() {
   const qc = useQueryClient();
   const [page] = useState(1);
 
-  const { data, isLoading, isRefetching, refetch } = useQuery({
+  const { data, isLoading, isError, isRefetching, refetch } = useQuery({
     queryKey: ['community-posts', page],
     queryFn: () => api.get<{ posts: Post[]; total: number }>(`/community/posts?page=${page}&limit=20`),
   });
@@ -114,15 +115,19 @@ export default function CommunityFeedScreen() {
             <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor="#821A52" />
           }
           ListEmptyComponent={
-            <View className="items-center mt-20">
-              <View className="w-20 h-20 rounded-full bg-primary-50 items-center justify-center mb-4">
-                <Ionicons name="chatbubbles" size={36} color="#821A52" />
+            isError && !data ? (
+              <ErrorCard message="Posts couldn't be loaded. Please try again." onRetry={() => refetch()} />
+            ) : (
+              <View className="items-center mt-20">
+                <View className="w-20 h-20 rounded-full bg-primary-50 items-center justify-center mb-4">
+                  <Ionicons name="chatbubbles" size={36} color="#821A52" />
+                </View>
+                <Text className="text-gray-900 text-lg font-semibold mb-1">Nothing here yet</Text>
+                <Text className="text-gray-500 text-sm text-center px-8">
+                  Be the first to share something with your community!
+                </Text>
               </View>
-              <Text className="text-gray-900 text-lg font-semibold mb-1">Nothing here yet</Text>
-              <Text className="text-gray-500 text-sm text-center px-8">
-                Be the first to share something with your community!
-              </Text>
-            </View>
+            )
           }
         />
       )}

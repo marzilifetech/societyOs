@@ -6,7 +6,7 @@
  */
 
 import React, { useEffect } from 'react';
-import { StyleSheet } from 'react-native';
+import { PanResponder, StyleSheet } from 'react-native';
 import { render, screen, act } from '@testing-library/react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -88,9 +88,8 @@ describe('InAppBanner', () => {
     });
     expect(screen.getByText('Visitor at the gate')).toBeTruthy();
     expect(screen.getByText('Ravi Kumar is waiting')).toBeTruthy();
-    const offsets = translateYOf('Visitor at the gate');
-    expect(offsets.length).toBeGreaterThan(0);
-    offsets.forEach((y) => expect(y).toBe(0));
+    // No offset at all: nothing can leave it parked off-screen.
+    translateYOf('Visitor at the gate').forEach((y) => expect(y).toBe(0));
   });
 
   it('a queued notification also appears in place once the first is dismissed', () => {
@@ -107,5 +106,26 @@ describe('InAppBanner', () => {
     });
     expect(screen.getByText('Second')).toBeTruthy();
     translateYOf('Second').forEach((y) => expect(y).toBe(0));
+  });
+
+  it('a swipe up dismisses it on release — no animation to wait for', () => {
+    const create = jest.spyOn(PanResponder, 'create');
+    renderBanner();
+    const gesture = create.mock.calls[0][0];
+    act(() => {
+      show!({ id: 'n1', title: 'First', body: 'one', data: {} });
+      show!({ id: 'n2', title: 'Second', body: 'two', data: {} });
+    });
+    const release = (dy: number) =>
+      act(() => gesture.onPanResponderRelease?.({} as never, { dy } as never));
+
+    release(-20); // a short drag is not a dismissal
+    expect(screen.getByText('First')).toBeTruthy();
+    release(-80);
+    expect(screen.queryByText('First')).toBeNull();
+    // The next banner is simply there.
+    expect(screen.getByText('Second')).toBeTruthy();
+    translateYOf('Second').forEach((y) => expect(y).toBe(0));
+    create.mockRestore();
   });
 });

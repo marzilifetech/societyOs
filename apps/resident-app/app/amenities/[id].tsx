@@ -1,10 +1,11 @@
-import { ScrollView, View, Text, TouchableOpacity, TextInput, Alert } from 'react-native';
+import { ScrollView, View, Text, TouchableOpacity, Alert } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
+import { localDateString } from '../../src/utils/date';
 
 type Amenity = {
   id: string;
@@ -13,7 +14,7 @@ type Amenity = {
   category: string;
   availableFrom: string;
   availableTo: string;
-  maxCapacity: number;
+  capacity: number;
   pricePerHour: number;
   status: string;
 };
@@ -37,7 +38,6 @@ export default function AmenityDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [selectedDate, setSelectedDate] = useState<'today' | 'tomorrow'>('today');
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
-  const [notes, setNotes] = useState('');
 
   const { data: amenity, isLoading, isError, refetch } = useQuery<Amenity>({
     queryKey: ['amenity', id],
@@ -51,15 +51,15 @@ export default function AmenityDetailScreen() {
         { text: 'OK', onPress: () => router.back() },
       ]);
     },
-    onError: () => {
-      Alert.alert('Error', 'Could not complete the booking. Please try again.');
+    onError: (err: any) => {
+      Alert.alert('Error', err?.message ?? 'Could not complete the booking. Please try again.');
     },
   });
 
   const getDate = (offset: number) => {
     const d = new Date();
     d.setDate(d.getDate() + offset);
-    return d.toISOString().split('T')[0];
+    return localDateString(d);
   };
 
   const dateStr = selectedDate === 'today' ? getDate(0) : getDate(1);
@@ -67,12 +67,13 @@ export default function AmenityDetailScreen() {
 
   const handleBook = () => {
     if (!selectedSlot) return;
+    // CreateAmenityBookingDto: { amenityId, date, startSlot, endSlot, guestCount? }.
+    // It has no notes field (unknown fields are rejected with a 400).
     bookMutation.mutate({
       amenityId: id,
       date: dateStr,
-      startTime: selectedSlot,
-      endTime: addHour(selectedSlot),
-      notes: notes.trim() || undefined,
+      startSlot: selectedSlot,
+      endSlot: addHour(selectedSlot),
     });
   };
 
@@ -114,7 +115,7 @@ export default function AmenityDetailScreen() {
               </View>
               <View>
                 <Text className="text-xs text-gray-400">Capacity</Text>
-                <Text className="text-sm text-gray-900 font-semibold">{amenity.maxCapacity} people</Text>
+                <Text className="text-sm text-gray-900 font-semibold">{amenity.capacity} people</Text>
               </View>
               {amenity.pricePerHour > 0 && (
                 <View>
@@ -171,18 +172,7 @@ export default function AmenityDetailScreen() {
             })}
           </View>
 
-          {/* Notes */}
-          <Text className="text-xs font-semibold text-gray-500 mb-2">NOTES (optional)</Text>
-          <TextInput
-            value={notes}
-            onChangeText={setNotes}
-            placeholder="Any special requirements?"
-            placeholderTextColor="#9CA3AF"
-            multiline
-            numberOfLines={3}
-            className="bg-gray-100 rounded-2xl text-gray-900 mb-6"
-            style={{ fontSize: 15, padding: 14, minHeight: 80, textAlignVertical: 'top' }}
-          />
+          <View className="mb-6" />
 
           <TouchableOpacity
             onPress={handleBook}

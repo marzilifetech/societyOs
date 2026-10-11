@@ -5,6 +5,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../../src/lib/api';
 import { useTheme } from '../../../src/hooks/useTheme';
+import { ErrorCard } from '../../../src/components/ErrorCard';
+import { canDecideVisitor, decisionMessage, visitorSettledMessage } from '../../../src/utils/visitor';
 
 type Visitor = {
   id: string;
@@ -14,48 +16,37 @@ type Visitor = {
   photoUrl?: string;
   createdAt?: string;
   status?: string;
+  approvalStatus?: string;
   type?: 'GUEST' | 'DELIVERY';
   deliveryPartner?: string | null;
 };
 
 type Decision = 'APPROVE' | 'REJECT' | 'LEAVE_AT_SECURITY';
+type DecisionResult = { decision?: string; applied?: boolean };
 
 /**
  * Live arrival approval screen. Reached by tapping a VISITOR_ARRIVAL push.
- * Approve/Deny call POST /visitors/:id/decision { action }.
+ * Approve/Deny call POST /visitors/:id/decision { action }; offered only while
+ * the request is still pending, and the result reports what actually happened.
  */
 export default function VisitorReviewScreen() {
   const t = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const qc = useQueryClient();
 
-  const { data: visitor, isLoading } = useQuery<Visitor>({
+  const { data: visitor, isLoading, isError, refetch } = useQuery<Visitor>({
     queryKey: ['visitor', id],
     queryFn: () => api.get<Visitor>(`/visitors/${id}`),
     enabled: !!id,
   });
 
-  const decisionMutation = useMutation<void, Error, Decision>({
+  const decisionMutation = useMutation<DecisionResult, Error, Decision>({
     mutationFn: (action) =>
-      api.post<void>(`/visitors/${id}/decision`, { action }),
-    onSuccess: (_data, action) => {
+      api.post<DecisionResult>(`/visitors/${id}/decision`, { action }),
+    onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: ['visitor', id] });
       qc.invalidateQueries({ queryKey: ['my-visitors'] });
-      const { title, body } =
-        action === 'APPROVE'
-          ? {
-              title: 'Entry Approved',
-              body: 'Security has been notified to let them in.',
-            }
-          : action === 'LEAVE_AT_SECURITY'
-          ? {
-              title: 'Leave at Security',
-              body: 'Security will keep the package at the desk.',
-            }
-          : {
-              title: 'Entry Denied',
-              body: 'Security has been notified to deny entry.',
-            };
+      const { title, body } = decisionMessage(result?.decision, result?.applied !== false);
       Alert.alert(title, body, [{ text: 'OK', onPress: () => router.back() }]);
     },
     onError: (err: Error) => Alert.alert('Error', err.message ?? 'Could not submit your decision.'),
@@ -65,6 +56,14 @@ export default function VisitorReviewScreen() {
     return (
       <SafeAreaView className="flex-1 bg-white items-center justify-center">
         <ActivityIndicator size="large" color={t.accentPrimary} />
+      </SafeAreaView>
+    );
+  }
+
+  if (isError && !visitor) {
+    return (
+      <SafeAreaView className="flex-1 bg-white">
+        <ErrorCard message="This visitor request couldn't be loaded. Please try again." onRetry={() => refetch()} />
       </SafeAreaView>
     );
   }
@@ -92,6 +91,8 @@ export default function VisitorReviewScreen() {
       })
     : null;
   const busy = decisionMutation.isPending;
+  const canDecide = canDecideVisitor(visitor);
+  const settled = canDecide ? null : visitorSettledMessage(visitor);
 
   return (
     <SafeAreaView className="flex-1 bg-white">
@@ -107,7 +108,7 @@ export default function VisitorReviewScreen() {
           </TouchableOpacity>
           <Text className="font-bold text-gray-900 mb-1" style={{ fontSize: t.font2xl }}>Visitor at the Gate</Text>
           <Text className="text-gray-500" style={{ fontSize: t.fontSm }}>
-            Someone is requesting entry. Please approve or deny.
+            {canDecide ? 'Someone is requesting entry. Please approve or deny.' : 'This request has already been handled.'}
           </Text>
         </View>
 
@@ -152,52 +153,61 @@ export default function VisitorReviewScreen() {
 
         <View className="flex-1" />
 
-        <View className="px-6 mb-8 gap-3">
-          <TouchableOpacity
-            className="bg-primary-500 rounded-full items-center justify-center"
-            style={{ minHeight: t.touchTargetLg }}
-            onPress={() => decisionMutation.mutate('APPROVE')}
-            disabled={busy}
-            accessibilityRole="button"
-            accessibilityLabel={`Approve entry for ${visitor.name ?? 'visitor'}`}
-          >
-            {busy ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text className="text-white font-semibold" style={{ fontSize: t.fontBase }}>
-                {visitor.type === 'DELIVERY' ? 'Approve & let them in' : 'Approve Entry'}
-              </Text>
-            )}
-          </TouchableOpacity>
-          {/* Third option only appears for deliveries — for guests there's
-              no "leave at security" alternative. */}
-          {visitor.type === 'DELIVERY' && (
+        {settled && (
+          <View className="mx-6 mb-8 bg-gray-50 border border-gray-200 rounded-2xl p-4">
+            <Text className="font-bold text-gray-900" style={{ fontSize: t.fontBase }}>{settled.title}</Text>
+            <Text className="text-gray-500 mt-1" style={{ fontSize: t.fontSm }}>{settled.body}</Text>
+          </View>
+        )}
+
+        {canDecide && (
+          <View className="px-6 mb-8 gap-3">
             <TouchableOpacity
-              className="bg-amber-500 rounded-full items-center justify-center"
+              className="bg-primary-500 rounded-full items-center justify-center"
               style={{ minHeight: t.touchTargetLg }}
-              onPress={() => decisionMutation.mutate('LEAVE_AT_SECURITY')}
+              onPress={() => decisionMutation.mutate('APPROVE')}
               disabled={busy}
               accessibilityRole="button"
-              accessibilityLabel="Leave at security"
+              accessibilityLabel={`Approve entry for ${visitor.name ?? 'visitor'}`}
             >
-              <Text className="text-white font-semibold" style={{ fontSize: t.fontBase }}>
-                Leave at security
+              {busy ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text className="text-white font-semibold" style={{ fontSize: t.fontBase }}>
+                  {visitor.type === 'DELIVERY' ? 'Approve & let them in' : 'Approve Entry'}
+                </Text>
+              )}
+            </TouchableOpacity>
+            {/* Third option only appears for deliveries — for guests there's
+                no "leave at security" alternative. */}
+            {visitor.type === 'DELIVERY' && (
+              <TouchableOpacity
+                className="bg-amber-500 rounded-full items-center justify-center"
+                style={{ minHeight: t.touchTargetLg }}
+                onPress={() => decisionMutation.mutate('LEAVE_AT_SECURITY')}
+                disabled={busy}
+                accessibilityRole="button"
+                accessibilityLabel="Leave at security"
+              >
+                <Text className="text-white font-semibold" style={{ fontSize: t.fontBase }}>
+                  Leave at security
+                </Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              className="bg-red-50 border border-red-200 rounded-full items-center justify-center"
+              style={{ minHeight: t.touchTargetLg }}
+              onPress={() => decisionMutation.mutate('REJECT')}
+              disabled={busy}
+              accessibilityRole="button"
+              accessibilityLabel={`Deny entry for ${visitor.name ?? 'visitor'}`}
+            >
+              <Text className="text-red-600 font-semibold" style={{ fontSize: t.fontBase }}>
+                {visitor.type === 'DELIVERY' ? 'Reject' : 'Deny Entry'}
               </Text>
             </TouchableOpacity>
-          )}
-          <TouchableOpacity
-            className="bg-red-50 border border-red-200 rounded-full items-center justify-center"
-            style={{ minHeight: t.touchTargetLg }}
-            onPress={() => decisionMutation.mutate('REJECT')}
-            disabled={busy}
-            accessibilityRole="button"
-            accessibilityLabel={`Deny entry for ${visitor.name ?? 'visitor'}`}
-          >
-            <Text className="text-red-600 font-semibold" style={{ fontSize: t.fontBase }}>
-              {visitor.type === 'DELIVERY' ? 'Reject' : 'Deny Entry'}
-            </Text>
-          </TouchableOpacity>
-        </View>
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );

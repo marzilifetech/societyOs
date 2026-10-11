@@ -34,11 +34,11 @@ describe('ThemedCard', () => {
     expect(tree).toMatchSnapshot();
   });
 
-  it('no glow renders without shadow styles', () => {
+  it('no glow keeps the soft neutral drop shadow, not a coloured glow', () => {
     const { toJSON } = render(<ThemedCard><Text>No glow</Text></ThemedCard>);
     const tree = toJSON() as any;
-    // shadowOpacity would be in style for glow, absent for default
     const style = Array.isArray(tree.props.style) ? Object.assign({}, ...tree.props.style) : tree.props.style;
-    expect(style.shadowOpacity).toBeUndefined();
+    expect(style.shadowColor).toBe('#000');
+    expect(style.shadowOpacity).toBeLessThan(0.2);
   });
 });

@@ -223,6 +223,7 @@ export default function NewHelpRequestScreen() {
                       onPress={() => setCategory(cat.value)}
                       activeOpacity={0.85}
                       accessibilityRole="button"
+                      accessibilityLabel={`${cat.label}, ${cat.subtitle}`}
                       accessibilityState={{ selected: active }}
                       style={{
                         width: '47%',

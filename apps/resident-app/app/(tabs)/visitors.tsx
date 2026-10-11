@@ -7,6 +7,7 @@ import { api } from '../../src/lib/api';
 import { useTheme } from '../../src/hooks/useTheme';
 import { useRefreshOnFocus, usePullToRefresh } from '../../src/hooks/useRefreshOnFocus';
 import { Display, IconCircle, rd } from '../../src/components/ui';
+import { ErrorCard } from '../../src/components/ErrorCard';
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
 
@@ -29,7 +30,7 @@ const STATUS_CONFIG: Record<string, { bg: string; fg: string; icon: IoniconName;
 
 export default function VisitorsTab() {
   const t = useTheme();
-  const { data: visitors, isLoading, refetch } = useQuery({
+  const { data: visitors, isLoading, isError, refetch } = useQuery({
     queryKey: ['my-visitors'],
     queryFn: () => api.get<any[]>('/visitors/my'),
   });
@@ -130,7 +131,12 @@ export default function VisitorsTab() {
           );
         }}
         ListEmptyComponent={
-          !isLoading ? (
+          isError && !visitors ? (
+            <ErrorCard
+              message="Your visitors couldn't be loaded. Please try again — your passes are safe."
+              onRetry={() => refetch()}
+            />
+          ) : !isLoading ? (
             <View className="items-center mt-20 px-8">
               <IconCircle icon="people-outline" size={64} bg={rd.crimsonSoft} color={t.accentPrimary} style={{ marginBottom: 16 }} />
               <Display size="sm" align="center" style={{ marginBottom: 6 }}>No visitors yet</Display>

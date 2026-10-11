@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Image,
   Modal,
   Pressable,
@@ -13,6 +14,7 @@ import { Tappable } from './ui/Tappable';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 
 /**
@@ -26,6 +28,8 @@ import { api } from '../lib/api';
  *  - User must pick one of the three actions; each is idempotent at the
  *    backend (a duplicate tap, or a competing lockscreen tap, collapses
  *    safely — see VisitorService.decide).
+ *  - If the decision can't be sent, the resident is told and can retry or
+ *    close (and decide from the Visitors tab) — never a silent close.
  *
  * For GUEST pushes the existing InAppBanner keeps working — only deliveries
  * trigger this modal. Wired in app/_layout.tsx's ForegroundBannerBridge
@@ -53,23 +57,31 @@ export function DeliveryApprovalModal({
   onResolved: () => void;
 }) {
   const [busy, setBusy] = useState<Decision | null>(null);
+  const qc = useQueryClient();
 
   const submit = async (decision: Decision) => {
     if (!payload || busy) return;
     setBusy(decision);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     try {
+      // Idempotent: a duplicate or competing (lockscreen) tap returns the
+      // decision that actually won rather than erroring.
       await api.post(`/visitors/${payload.visitId}/decision`, { action: decision });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-    } catch {
-      // The decide endpoint is idempotent — a duplicate tap or a competing
-      // lockscreen tap returns the actually-applied decision rather than
-      // erroring. So even on network failure we can close the modal: the
-      // resident's intent is clear, and the next push or screen refresh
-      // will reflect whichever decision actually won.
-    } finally {
+      qc.invalidateQueries({ queryKey: ['my-visitors'] });
+      qc.invalidateQueries({ queryKey: ['visitor', payload.visitId] });
       setBusy(null);
       onResolved();
+    } catch (err) {
+      setBusy(null);
+      Alert.alert(
+        'Not sent',
+        `${err instanceof Error && err.message ? err.message : 'Your answer did not reach security.'} You can also answer from the Visitors tab.`,
+        [
+          { text: 'Close', style: 'cancel', onPress: onResolved },
+          { text: 'Try again', onPress: () => submit(decision) },
+        ],
+      );
     }
   };
 

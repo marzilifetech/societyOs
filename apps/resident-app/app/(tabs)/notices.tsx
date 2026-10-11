@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { api } from '../../src/lib/api';
 import { useTheme } from '../../src/hooks/useTheme';
+import { ErrorCard } from '../../src/components/ErrorCard';
 import {
   ScreenHeader,
   Display,
@@ -110,17 +111,16 @@ export default function NoticesScreen() {
     if (tabParam === 'polls' || tabParam === 'notices') setTab(tabParam);
   }, [tabParam]);
 
-  const { data: notices, isLoading: noticesLoading } = useQuery({
+  const { data: notices, isLoading: noticesLoading, isError: noticesError, refetch: refetchNotices } = useQuery({
     queryKey: ['notices'],
     queryFn: () => api.get<Notice[]>('/notices'),
     enabled: tab === 'notices',
   });
 
-  const { data: polls, isLoading: pollsLoading } = useQuery({
+  const { data: polls, isLoading: pollsLoading, isError: pollsError, refetch: refetchPolls } = useQuery({
     queryKey: ['polls'],
     queryFn: () => api.get<Poll[]>('/notices/polls'),
     enabled: tab === 'polls',
-    retry: false,
   });
 
   const { data: birthdays } = useQuery({
@@ -130,6 +130,9 @@ export default function NoticesScreen() {
   });
 
   const isLoading = tab === 'notices' ? noticesLoading : pollsLoading;
+  // A failed load must not read as "No new notices" / "No active polls".
+  const loadFailed = tab === 'notices' ? noticesError && !notices : pollsError && !polls;
+  const retry = () => (tab === 'notices' ? refetchNotices() : refetchPolls());
   const noticeList: Notice[] = Array.isArray(notices) ? notices : [];
   const pollList: Poll[] = Array.isArray(polls) ? polls : [];
   const birthdayList: Birthday[] = Array.isArray(birthdays) ? birthdays : [];
@@ -155,6 +158,15 @@ export default function NoticesScreen() {
 
         {isLoading ? (
           <ActivityIndicator color={t.accentPrimary} style={{ marginTop: 48 }} />
+        ) : loadFailed ? (
+          <ErrorCard
+            message={
+              tab === 'notices'
+                ? "Notices couldn't be loaded. Please try again."
+                : "Polls couldn't be loaded. Please try again."
+            }
+            onRetry={retry}
+          />
         ) : tab === 'notices' ? (
           <NoticesTab
             notices={noticeList}
@@ -358,11 +370,18 @@ function PollCard({ poll, t }: { poll: Poll; t: ReturnType<typeof useTheme> }) {
   const voteMutation = useMutation({
     mutationFn: (optionId: string) =>
       api.post(`/notices/polls/${poll.id}/vote`, { optionId }),
-    onSuccess: (updated: any) => {
+    // The response is the PollVote row, not the poll — refetch for fresh counts.
+    onSuccess: () => {
       setVoted(true);
       qc.setQueryData(['polls'], (old: Poll[] | undefined) =>
-        old ? old.map((p) => (p.id === poll.id ? { ...p, ...updated, votedOptionId: selectedId } : p)) : old,
+        old ? old.map((p) => (p.id === poll.id ? { ...p, votedOptionId: selectedId } : p)) : old,
       );
+      qc.invalidateQueries({ queryKey: ['polls'] });
+    },
+    onError: (err: any) => {
+      // 410 POLL_CLOSED: voting ended while the list was open — refresh it.
+      if (err?.status === 410 || err?.code === 'POLL_CLOSED') qc.invalidateQueries({ queryKey: ['polls'] });
+      Alert.alert('Vote not submitted', err?.message ?? 'Could not submit your vote. Please try again.');
     },
   });
 

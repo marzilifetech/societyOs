@@ -20,6 +20,7 @@ import {
   type InfiniteData,
 } from '@tanstack/react-query';
 import { api } from '../../src/lib/api';
+import { hrefForNotification } from '../../src/lib/push';
 import { Display, IconCircle, SegmentedTabs } from '../../src/components/ui/redesign';
 import { SkeletonPlaceholder } from '../../src/components/common/SkeletonPlaceholder';
 
@@ -99,45 +100,9 @@ function visualFor(item: InboxItem): CategoryVisual {
   return CATEGORY_VISUALS[key] ?? CATEGORY_VISUALS[LEGACY_TO_CATEGORY[key] ?? ''] ?? DEFAULT_VISUAL;
 }
 
-function deepLinkFor(item: InboxItem): string {
-  const data = item.data ?? {};
-  const entityId =
-    (typeof data.entityId === 'string' && data.entityId) ||
-    (typeof data.visitId === 'string' && data.visitId) ||
-    undefined;
-  switch (item.type) {
-    // ── Category registry keys — the backend always sets these now ─────────
-    case 'visitor_approvals':
-    case 'visitors_gate':
-      return entityId ? `/visitor/review/${entityId}` : '/notifications';
-    case 'deliveries':
-      return entityId ? `/visitor/review/${entityId}` : '/packages';
-    case 'complaints':
-      return entityId ? `/complaints/${entityId}` : '/complaints';
-    case 'notices':
-    case 'notices_urgent':
-    case 'community':
-      return '/(tabs)/notices';
-    case 'emergency_sos':
-      return '/medical/sos';
-    // ── Legacy aliases — rows written by older backend builds ──────────────
-    case 'VISITOR_APPROVAL_REQUEST':
-    case 'VISITOR_ARRIVAL':
-      return entityId ? `/visitor/review/${entityId}` : '/notifications';
-    case 'DELIVERY_APPROVAL_REQUEST':
-      return entityId ? `/visitor/review/${entityId}` : '/packages';
-    case 'COMPLAINT_UPDATED':
-      return entityId ? `/complaints/${entityId}` : '/complaints';
-    case 'PACKAGE_ARRIVED':
-      return '/packages';
-    case 'NOTICE_PUBLISHED':
-      return '/(tabs)/notices';
-    case 'SOS_TRIGGERED':
-    case 'SOS':
-      return '/medical/sos';
-    default:
-      return '/notifications';
-  }
+/** Same routing table as a push tap and the in-app banner (src/lib/push.ts). */
+function deepLinkFor(item: InboxItem): string | null {
+  return hrefForNotification(item.type, item.data ?? {});
 }
 
 // ---------------------------------------------------------------------------
@@ -286,7 +251,9 @@ export default function NotificationsInbox() {
   const handlePress = useCallback(
     (item: InboxItem) => {
       if (!item.readAt) markRead.mutate(item.id);
-      router.push(deepLinkFor(item) as any);
+      const href = deepLinkFor(item);
+      // '/notifications' is this screen: nothing more specific to open.
+      if (href && href !== '/notifications') router.push(href as any);
     },
     [markRead],
   );

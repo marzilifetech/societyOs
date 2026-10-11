@@ -29,6 +29,7 @@ import {
   IconCircle,
   rd,
 } from '../../src/components/ui';
+import { complaintCategoryLabel } from '../../src/utils/complaint';
 
 // Figma reference: Complaints Management-3.jpg (form), -4.jpg (filled+anon), -5.jpg (success sheet)
 // Preserves existing API shape: POST /complaints { category, title, description, isAnonymous, photoUrl }
@@ -430,7 +431,7 @@ export default function NewComplaintScreen() {
                 {successData?.category ? (
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                     <Ionicons name="checkmark-circle-outline" size={16} color={t.textMuted} />
-                    <Text style={{ fontSize: t.fontSm, color: t.textSecondary }}>{successData.category}</Text>
+                    <Text style={{ fontSize: t.fontSm, color: t.textSecondary }}>{complaintCategoryLabel(successData.category)}</Text>
                   </View>
                 ) : null}
               </View>

@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
+import { attendanceByDate, type AttendanceRow, type AttendanceStatus } from '../../src/utils/attendance';
 
 
 type DomHelper = {
@@ -12,27 +13,34 @@ type DomHelper = {
   name: string;
   role: string;
   phone: string;
-  gateAccess: boolean;
+  gateAccess?: boolean;
   photoUri?: string;
   lastPayment?: { amount: number; date: string };
-  monthlyAttendance: Record<string, 'present' | 'absent' | 'holiday'>;
+  /** Last 30 attendance rows, newest first. */
+  attendance?: AttendanceRow[];
 };
 
-const DOT_COLOR: Record<string, string> = {
-  present: '#22C55E',
-  absent: '#EF4444',
-  holiday: '#9CA3AF',
+const DOT_COLOR: Record<AttendanceStatus, string> = {
+  PRESENT: '#22C55E',
+  ABSENT: '#EF4444',
+  HALF_DAY: '#F59E0B',
+  HOLIDAY: '#9CA3AF',
 };
 
-function AttendanceCalendar({ attendance }: { attendance: Record<string, 'present' | 'absent' | 'holiday'> }) {
+function AttendanceCalendar({ attendance }: { attendance: Record<string, AttendanceStatus> }) {
   const now = new Date();
   const year = now.getFullYear();
   const month = now.getMonth();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
-  const present = Object.values(attendance).filter((v) => v === 'present').length;
-  const absent = Object.values(attendance).filter((v) => v === 'absent').length;
-  const holiday = Object.values(attendance).filter((v) => v === 'holiday').length;
+  const monthPrefix = `${year}-${String(month + 1).padStart(2, '0')}-`;
+  const thisMonth = Object.entries(attendance)
+    .filter(([date]) => date.startsWith(monthPrefix))
+    .map(([, status]) => status);
+  const present = thisMonth.filter((v) => v === 'PRESENT').length;
+  const halfDay = thisMonth.filter((v) => v === 'HALF_DAY').length;
+  const absent = thisMonth.filter((v) => v === 'ABSENT').length;
+  const holiday = thisMonth.filter((v) => v === 'HOLIDAY').length;
 
   return (
     <View className="bg-gray-50 border border-gray-200 rounded-2xl p-4 mb-4">
@@ -54,11 +62,17 @@ function AttendanceCalendar({ attendance }: { attendance: Record<string, 'presen
           );
         })}
       </View>
-      <View className="flex-row gap-4">
+      <View className="flex-row flex-wrap gap-4">
         <View className="flex-row items-center gap-1">
           <View className="w-2 h-2 rounded-full" style={{ backgroundColor: '#22C55E' }} />
           <Text className="text-gray-500 text-xs">Present: {present}</Text>
         </View>
+        {halfDay > 0 && (
+          <View className="flex-row items-center gap-1">
+            <View className="w-2 h-2 rounded-full" style={{ backgroundColor: '#F59E0B' }} />
+            <Text className="text-gray-500 text-xs">Half day: {halfDay}</Text>
+          </View>
+        )}
         <View className="flex-row items-center gap-1">
           <View className="w-2 h-2 rounded-full" style={{ backgroundColor: '#EF4444' }} />
           <Text className="text-gray-500 text-xs">Absent: {absent}</Text>
@@ -153,7 +167,7 @@ export default function DomesticHelpDetailScreen() {
               </View>
             </View>
 
-            <AttendanceCalendar attendance={data.monthlyAttendance} />
+            <AttendanceCalendar attendance={attendanceByDate(data.attendance)} />
 
             {/* Salary */}
             <View className="bg-gray-50 border border-gray-200 rounded-2xl px-4 py-4 mb-4">

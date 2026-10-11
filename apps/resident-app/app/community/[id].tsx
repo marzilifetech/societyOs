@@ -8,6 +8,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
+import { ErrorCard } from '../../src/components/ErrorCard';
 
 type Post = {
   id: string;
@@ -33,13 +34,18 @@ export default function PostDetailScreen() {
   const [commentText, setCommentText] = useState('');
   const inputRef = useRef<TextInput>(null);
 
-  const { data: post, isLoading: postLoading } = useQuery<Post>({
+  const { data: post, isLoading: postLoading, isError: postError, refetch: refetchPost } = useQuery<Post>({
     queryKey: ['community-post', id],
     queryFn: () => api.get<Post>(`/community/posts/${id}`),
     enabled: !!id,
   });
 
-  const { data: comments = [], isLoading: commentsLoading } = useQuery<Comment[]>({
+  const {
+    data: comments = [],
+    isLoading: commentsLoading,
+    isError: commentsError,
+    refetch: refetchComments,
+  } = useQuery<Comment[]>({
     queryKey: ['community-comments', id],
     queryFn: () => api.get<Comment[]>(`/community/posts/${id}/comments`),
     enabled: !!id,
@@ -170,6 +176,8 @@ export default function PostDetailScreen() {
 
         {isLoading ? (
           <ActivityIndicator size="large" color="#821A52" style={{ marginTop: 80 }} />
+        ) : postError && !post ? (
+          <ErrorCard message="This post couldn't be loaded. Please try again." onRetry={() => refetchPost()} />
         ) : (
           <FlatList
             data={comments}
@@ -183,12 +191,16 @@ export default function PostDetailScreen() {
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
             ListEmptyComponent={
-              <View className="items-center py-10">
-                <View className="w-16 h-16 rounded-full bg-primary-50 items-center justify-center mb-3">
-                  <Ionicons name="chatbubble-ellipses" size={28} color="#821A52" />
+              commentsError ? (
+                <ErrorCard message="Comments couldn't be loaded. Please try again." onRetry={() => refetchComments()} />
+              ) : (
+                <View className="items-center py-10">
+                  <View className="w-16 h-16 rounded-full bg-primary-50 items-center justify-center mb-3">
+                    <Ionicons name="chatbubble-ellipses" size={28} color="#821A52" />
+                  </View>
+                  <Text className="text-gray-500 text-sm">No comments yet — be first!</Text>
                 </View>
-                <Text className="text-gray-500 text-sm">No comments yet — be first!</Text>
-              </View>
+              )
             }
           />
         )}

@@ -4,6 +4,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as SecureStore from 'expo-secure-store';
 import { api } from '../../src/lib/api';
+import { useAuthStore } from '../../src/store/auth.store';
 import { requestPhoneNumberHint } from '../../src/hooks/useSmsOtpAutoRead';
 import { useTheme } from '../../src/hooks/useTheme';
 import { ThemedText, ThemedButton } from '../../src/components/ui';
@@ -74,9 +75,13 @@ export default function PhoneEntryScreen() {
           fallbackLabel: 'Use PIN',
           cancelLabel: 'Use phone number',
         });
-        if (result.success) {
-          router.replace('/(tabs)');
-        }
+        if (!result.success) return;
+        // The fingerprint only unlocks the stored session; it is not one. If
+        // launch gave up reading it (slow Keystore) the store is empty, and
+        // Home would open signed out, every request failing. Read it again,
+        // and if it still isn't there, stay here for the OTP sign-in.
+        const signedIn = await useAuthStore.getState().restoreSession();
+        if (signedIn) router.replace('/(tabs)');
       } catch {
         // biometric auth non-critical; show normal login
       }

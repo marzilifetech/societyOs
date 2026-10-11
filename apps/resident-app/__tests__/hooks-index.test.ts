@@ -3,9 +3,9 @@
  */
 
 jest.mock('../src/lib/socket', () => ({
-  connectSocket: jest.fn(),
-  disconnectSocket: jest.fn(),
+  subscribe: jest.fn(() => jest.fn()),
   getSocket: jest.fn(() => ({ on: jest.fn(), off: jest.fn() })),
+  disconnect: jest.fn(),
 }));
 
 jest.mock('expo-notifications', () => ({

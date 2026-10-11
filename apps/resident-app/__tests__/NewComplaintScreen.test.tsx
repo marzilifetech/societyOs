@@ -21,6 +21,7 @@ jest.mock('expo-linear-gradient', () => ({
 const mockBack = jest.fn();
 const mockReplace = jest.fn();
 jest.mock('expo-router', () => ({
+  useSegments: () => [],
   router: {
     back: () => mockBack(),
     canGoBack: () => true,

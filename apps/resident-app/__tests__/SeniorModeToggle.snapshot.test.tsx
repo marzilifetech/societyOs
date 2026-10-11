@@ -70,7 +70,7 @@ describe('SeniorModeToggle', () => {
 
   it('calls toggleSeniorMode when the outer button is pressed', () => {
     const { getByLabelText } = render(<SeniorModeToggle />);
-    fireEvent.press(getByLabelText('Senior Mode'));
+    fireEvent.press(getByLabelText('Larger Fonts'));
     expect(mockToggle).toHaveBeenCalledTimes(1);
   });
 });

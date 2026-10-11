@@ -12,11 +12,13 @@ jest.mock('../src/store/accessibility.store', () => ({
 
 const mockBack = jest.fn();
 const mockCanGoBack = jest.fn(() => true);
+let mockSegments: string[] = ['complaints'];
 jest.mock('expo-router', () => ({
   router: {
     back: () => mockBack(),
     canGoBack: () => mockCanGoBack(),
   },
+  useSegments: () => mockSegments,
 }));
 
 import { ScreenHeader } from '../src/components/ui/ScreenHeader';
@@ -26,6 +28,7 @@ describe('ScreenHeader', () => {
     mockBack.mockClear();
     mockCanGoBack.mockReset();
     mockCanGoBack.mockReturnValue(true);
+    mockSegments = ['complaints'];
   });
 
   it('renders title only (default)', () => {
@@ -57,11 +60,16 @@ describe('ScreenHeader', () => {
     expect(mockBack).toHaveBeenCalledTimes(1);
   });
 
-  it('does not call router.back when canGoBack is false', () => {
+  it('hides the back button when there is no history', () => {
     mockCanGoBack.mockReturnValue(false);
-    const { getByLabelText } = render(<ScreenHeader title="X" />);
-    fireEvent.press(getByLabelText('Go back'));
-    expect(mockBack).not.toHaveBeenCalled();
+    const { queryByLabelText } = render(<ScreenHeader title="X" />);
+    expect(queryByLabelText('Go back')).toBeNull();
+  });
+
+  it('never shows a back button on a tab root, even with history', () => {
+    mockSegments = ['(tabs)', 'notices'];
+    const { queryByLabelText } = render(<ScreenHeader title="Notices" />);
+    expect(queryByLabelText('Go back')).toBeNull();
   });
 
   it('renders trailing element', () => {

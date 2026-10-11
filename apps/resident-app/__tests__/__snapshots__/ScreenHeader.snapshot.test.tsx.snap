@@ -1,18 +1,11 @@
 // Jest Snapshot v1, https://goo.gl/fbAQLP
 
 exports[`ScreenHeader renders title + subtitle 1`] = `
-<RNCSafeAreaView
-  edges={
-    {
-      "bottom": "off",
-      "left": "off",
-      "right": "off",
-      "top": "additive",
-    }
-  }
+<View
   style={
     {
       "backgroundColor": "#FFFFFF",
+      "paddingTop": 0,
     }
   }
 >
@@ -21,7 +14,7 @@ exports[`ScreenHeader renders title + subtitle 1`] = `
       {
         "alignItems": "center",
         "flexDirection": "row",
-        "minHeight": 52,
+        "minHeight": 48,
         "paddingHorizontal": 20,
         "paddingVertical": 12,
       }
@@ -68,12 +61,12 @@ exports[`ScreenHeader renders title + subtitle 1`] = `
       style={
         {
           "alignItems": "center",
-          "borderRadius": 22,
-          "height": 44,
+          "borderRadius": 20,
+          "height": 40,
           "justifyContent": "center",
           "marginRight": 8,
           "opacity": 1,
-          "width": 44,
+          "width": 40,
         }
       }
     >
@@ -118,22 +111,15 @@ exports[`ScreenHeader renders title + subtitle 1`] = `
       </Text>
     </View>
   </View>
-</RNCSafeAreaView>
+</View>
 `;
 
 exports[`ScreenHeader renders title only (default) 1`] = `
-<RNCSafeAreaView
-  edges={
-    {
-      "bottom": "off",
-      "left": "off",
-      "right": "off",
-      "top": "additive",
-    }
-  }
+<View
   style={
     {
       "backgroundColor": "#FFFFFF",
+      "paddingTop": 0,
     }
   }
 >
@@ -142,7 +128,7 @@ exports[`ScreenHeader renders title only (default) 1`] = `
       {
         "alignItems": "center",
         "flexDirection": "row",
-        "minHeight": 52,
+        "minHeight": 48,
         "paddingHorizontal": 20,
         "paddingVertical": 12,
       }
@@ -189,12 +175,12 @@ exports[`ScreenHeader renders title only (default) 1`] = `
       style={
         {
           "alignItems": "center",
-          "borderRadius": 22,
-          "height": 44,
+          "borderRadius": 20,
+          "height": 40,
           "justifyContent": "center",
           "marginRight": 8,
           "opacity": 1,
-          "width": 44,
+          "width": 40,
         }
       }
     >
@@ -227,5 +213,5 @@ exports[`ScreenHeader renders title only (default) 1`] = `
       </Text>
     </View>
   </View>
-</RNCSafeAreaView>
+</View>
 `;

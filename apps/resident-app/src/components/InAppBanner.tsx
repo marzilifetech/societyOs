@@ -1,18 +1,11 @@
-import React, { useEffect, useRef } from 'react';
-import {
-  Animated,
-  Image,
-  PanResponder,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import React, { useRef } from 'react';
+import { Image, PanResponder, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useNotificationBanner, BannerNotification, classifyBannerType, type BannerType } from '../contexts/NotificationContext';
 import { api } from '../lib/api';
+import { appNavigator } from '../lib/deferred-navigation';
+import { hrefForNotification } from '../lib/push';
 
 const SUCCESS_INK = '#1F7A45';
 const DANGER = '#DC2626';
@@ -77,36 +70,20 @@ function visualFor(n: BannerNotification): BannerVisual {
 export function InAppBanner() {
   const { current, dismiss } = useNotificationBanner();
   const insets = useSafeAreaInsets();
-  // Starts IN PLACE. It used to start at -200 and spring in, but on this
-  // app's React Native setup (0.81, old architecture) an Animated value never
-  // reaches a view mounted after its screen's first render — and this banner
-  // only mounts when a notification arrives. It stayed parked off-screen, so a
-  // foreground "visitor at the gate" alert was invisible. A banner that is
-  // simply there is worth more than one that slides. Swipe-up still dismisses
-  // (the dismiss runs from the animation's end callback, which does fire).
-  const translateY = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    if (current) translateY.setValue(0);
-  }, [current, translateY]);
-
-  // Swipe up to dismiss.
+  // A plain View, no Animated. On this app's React Native setup (0.81, old
+  // architecture) an Animated value never reaches a view mounted after its
+  // screen's first render — and this banner mounts when a notification
+  // arrives. It first sat parked off-screen (spring-in from -200); later the
+  // swipe left the value at -200, so every banner after the first was
+  // invisible. Nothing here depends on an animation to be seen: swipe up
+  // simply dismisses on release.
+  const dismissRef = useRef(dismiss);
+  dismissRef.current = dismiss;
   const pan = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_e, g) => g.dy < -8,
-      onPanResponderMove: (_e, g) => {
-        if (g.dy < 0) translateY.setValue(g.dy);
-      },
       onPanResponderRelease: (_e, g) => {
-        if (g.dy < -50) {
-          Animated.timing(translateY, {
-            toValue: -200,
-            duration: 180,
-            useNativeDriver: true,
-          }).start(() => dismiss());
-        } else {
-          Animated.spring(translateY, { toValue: 0, useNativeDriver: true }).start();
-        }
+        if (g.dy < -50) dismissRef.current();
       },
     }),
   ).current;
@@ -115,7 +92,8 @@ export function InAppBanner() {
 
   const handleTap = () => {
     dismiss();
-    routeFromBanner(current);
+    const href = hrefForNotification(current.type, current.data);
+    if (href) appNavigator.navigateWhenReady(href);
   };
 
   const handleAction = async (actionId: 'APPROVE' | 'REJECT') => {
@@ -139,15 +117,9 @@ export function InAppBanner() {
   const visual = visualFor(current);
 
   return (
-    <Animated.View
+    <View
       pointerEvents="box-none"
-      style={[
-        styles.wrap,
-        {
-          paddingTop: insets.top + 4,
-          transform: [{ translateY }],
-        },
-      ]}
+      style={[styles.wrap, { paddingTop: insets.top + 4 }]}
       {...pan.panHandlers}
     >
       <TouchableOpacity
@@ -197,53 +169,8 @@ export function InAppBanner() {
           </View>
         ) : null}
       </TouchableOpacity>
-    </Animated.View>
+    </View>
   );
-}
-
-function routeFromBanner(n: BannerNotification) {
-  switch (n.type) {
-    // ── Category registry keys — the backend always sets these now ─────────
-    case 'visitor_approvals':
-    case 'visitors_gate':
-      if (n.entityId) router.push(`/visitor/review/${n.entityId}` as any);
-      return;
-    case 'deliveries':
-      if (n.entityId) router.push(`/visitor/review/${n.entityId}` as any);
-      else router.push('/packages' as any);
-      return;
-    case 'complaints':
-      if (n.entityId) router.push(`/complaints/${n.entityId}` as any);
-      return;
-    case 'notices':
-    case 'notices_urgent':
-    case 'community':
-      router.push('/(tabs)/notices' as any);
-      return;
-    case 'emergency_sos':
-      router.push('/medical/sos' as any);
-      return;
-    // ── Legacy aliases — payloads from older backend builds ────────────────
-    case 'VISITOR_APPROVAL_REQUEST':
-    case 'VISITOR_ARRIVAL':
-      if (n.entityId) router.push(`/visitor/review/${n.entityId}` as any);
-      return;
-    case 'COMPLAINT_UPDATED':
-      if (n.entityId) router.push(`/complaints/${n.entityId}` as any);
-      return;
-    case 'PACKAGE_ARRIVED':
-      router.push('/packages' as any);
-      return;
-    case 'NOTICE_PUBLISHED':
-      router.push('/(tabs)/notices' as any);
-      return;
-    case 'SOS_TRIGGERED':
-    case 'SOS':
-      router.push('/medical/sos' as any);
-      return;
-    default:
-      router.push('/notifications' as any);
-  }
 }
 
 const styles = StyleSheet.create({

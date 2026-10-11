@@ -1,8 +1,11 @@
 import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
+import { settleWithin, swallow } from '@societyos/mobile-core';
 import { setApiTokens, api } from '../lib/api';
 import { unregisterDeviceToken } from '../lib/push';
-import { settleWithin } from '../lib/timeout';
+import { queryClient } from '../lib/query-client';
+import { appNavigator } from '../lib/deferred-navigation';
+import { disconnect as disconnectSocket } from '../lib/socket';
 
 type AuthUser = { id: string; phone: string; role: string; status: string; name?: string | null };
 
@@ -20,11 +23,16 @@ interface AuthState {
   ) => Promise<void>;
   updateUser: (partial: Partial<NonNullable<AuthState['user']>>) => Promise<void>;
   /**
-   * Sign out. `revokeOnServer: false` skips the logout and device-token calls
-   * — used when the server has already ended the session, where those calls
-   * can only 401 and would delay getting the user back to sign-in.
+   * Sign out. `revokeOnServer: false` skips the logout call and doesn't wait
+   * for the push-token release — used when the server has already ended the
+   * session, where waiting would only delay getting the user back to sign-in.
    */
   clearAuth: (options?: { revokeOnServer?: boolean }) => Promise<void>;
+  /**
+   * Read the stored session again after launch gave up on it (a slow
+   * Keystore). Resolves to whether a session is now in the store.
+   */
+  restoreSession: () => Promise<boolean>;
   /** Keep the store in step after the api-client rotates the token pair. */
   applyRefreshedTokens: (accessToken: string, refreshToken: string) => void;
   hydrate: () => Promise<void>;
@@ -99,27 +107,55 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   clearAuth: async ({ revokeOnServer = true } = {}) => {
+    // Release this phone's push token on EVERY path, a forced sign-out too
+    // (the release needs no session), so the next resident to sign in here
+    // gets their own pushes and stops getting this one's. Bounded and never
+    // throws; a registration made meanwhile waits for it (see push.ts).
+    const released = unregisterDeviceToken();
     if (revokeOnServer) {
-      // Best-effort server revoke before wiping local state. Failure is
-      // intentionally ignored — if the server is unreachable, the AT and RT
-      // family will still expire on their TTL, and the local state must be
-      // wiped regardless.
-      // Forget this device's push token server-side so a logged-out user stops
-      // receiving pushes. Best-effort and must run while the token is still valid.
-      await unregisterDeviceToken();
-      try {
-        await api.post('/auth/logout', {});
-      } catch {
-        /* ignore */
-      }
+      // Best-effort server revoke while the session is still valid. Bounded:
+      // on a dead connection this used to hold the Sign out button for the
+      // full request timeout. Failure is ignored — the AT and RT family still
+      // expire on their TTL, and local state is wiped regardless.
+      // The refresh token lets the server end this session's whole token
+      // family, not just the current access token.
+      const refreshToken = get().refreshToken;
+      const logout = settleWithin(
+        swallow(() => api.post('/auth/logout', refreshToken ? { refreshToken } : {})),
+        5000,
+        undefined,
+      );
+      await Promise.all([released, logout]);
     }
     // Local state first: the moment the session is gone in memory, every
     // screen and late-arriving 401 sees it, even if a Keystore delete is slow.
     setApiTokens(null, null);
+    disconnectSocket();
+    // A tap held for the signed-in shell pointed into this session.
+    appNavigator.clearPending();
     set({ token: null, refreshToken: null, user: null, societyId: null, isHydrated: true });
-    await Promise.all(
-      SESSION_KEYS.map((key) => SecureStore.deleteItemAsync(key).catch(() => undefined)),
-    );
+    await Promise.all([
+      // The next person to use this phone must not see this resident's
+      // cached bills, visitors or complaints.
+      swallow(() => queryClient.clear()),
+      ...SESSION_KEYS.map((key) => SecureStore.deleteItemAsync(key).catch(() => undefined)),
+    ]);
+  },
+
+  restoreSession: async () => {
+    if (get().token) return true;
+    // Joins a launch read still in flight; otherwise reads afresh.
+    if (!get().isHydrated) {
+      await get().hydrate();
+      return !!get().token;
+    }
+    const session = await settleWithin(readStoredSession(), HYDRATE_BUDGET_MS, null);
+    // Signed in some other way while this was reading: keep that session.
+    if (session && !get().token) {
+      setApiTokens(session.token, session.refreshToken);
+      set({ ...session, isHydrated: true });
+    }
+    return !!get().token;
   },
 
   applyRefreshedTokens: (accessToken, refreshToken) => {

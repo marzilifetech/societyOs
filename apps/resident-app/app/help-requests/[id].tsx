@@ -18,6 +18,14 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 import { api } from '../../src/lib/api';
 import { useTheme } from '../../src/hooks/useTheme';
+import { ErrorCard } from '../../src/components/ErrorCard';
+import {
+  conciergeStatus,
+  conciergeStepIndex,
+  conciergeTypeLabel,
+  isConciergeCancelled,
+  isConciergeCompleted,
+} from '../../src/utils/concierge';
 import {
   ScreenHeader,
   Display,
@@ -26,26 +34,28 @@ import {
   InfoRows,
   IconCircle,
   rd,
-  type RdStatusTone,
 } from '../../src/components/ui';
 
 // Track Request screen — Figma "Staff Help Request-14.jpg" (Track Complaint frame)
-// Vertical stepper: Requested → Assigned → On the way / On Hold → Completed
+// Vertical stepper: Requested (PENDING) → Assigned (ASSIGNED/ACCEPTED) →
+// On the way (IN_PROGRESS) → Completed
 // Request Details (InfoRows) + "Go Back" + "Cancel Request" (ghost red)
 // Cancel → bottom-sheet → "Request Cancelled" success state
-// POST /help-requests/:id/rate { rating, comment } — rate & review flow
-// PATCH /help-requests/:id/cancel { reason? }
+// POST /concierge-requests/:id/rate { rating, review? } — rate & review flow
+// PATCH /concierge/:id/cancel
 
 type HelpRequest = {
   id: string;
-  category: string;
+  category?: string;
+  type?: string;
   description: string;
   urgency?: string;
   status: string;
   createdAt: string;
   preferredTime?: string;
   staffName?: string;
-  rating?: number;
+  /** Prisma Decimal — a string when set. */
+  rating?: number | string | null;
 };
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
@@ -69,23 +79,6 @@ const STEPPER_STEPS: Step[] = [
   { key: 'on_the_way', label: 'On the way', subLabel: 'Staff Dispatched' },
   { key: 'completed', label: 'Completed', subLabel: 'Request Fulfilled' },
 ];
-
-function getStepIndex(status: string): number {
-  const s = status?.toUpperCase() ?? '';
-  if (s === 'COMPLETED' || s === 'RESOLVED') return 3;
-  if (s === 'IN_PROGRESS' || s === 'ACKNOWLEDGED' || s === 'ON_THE_WAY') return 2;
-  if (s === 'ASSIGNED') return 1;
-  return 0; // OPEN / default
-}
-
-function mapStatus(raw: string): { tone: RdStatusTone; label: string } {
-  const s = raw?.toUpperCase() ?? '';
-  if (s === 'RESOLVED' || s === 'COMPLETED') return { tone: 'resolved', label: 'Completed' };
-  if (s === 'CANCELLED' || s === 'CANCELED') return { tone: 'cancelled', label: 'Cancelled' };
-  if (s === 'ASSIGNED' || s === 'IN_PROGRESS' || s === 'ACKNOWLEDGED') return { tone: 'active', label: 'In Progress' };
-  if (s === 'OPEN') return { tone: 'pending', label: 'Requested' };
-  return { tone: 'neutral', label: raw ?? 'Unknown' };
-}
 
 function fmtDate(iso: string): string {
   if (!iso) return '—';
@@ -116,11 +109,10 @@ export default function TrackRequestScreen() {
   const [rating, setRating] = useState(0);
   const [ratingComment, setRatingComment] = useState('');
 
-  const { data: request, isLoading } = useQuery<HelpRequest>({
+  const { data: request, isLoading, refetch } = useQuery<HelpRequest>({
     queryKey: ['help-request', id],
     queryFn: () => api.get<HelpRequest>(`/concierge-requests/${id}`),
     enabled: !!id,
-    retry: false,
   });
 
   const cancelMutation = useMutation({
@@ -138,10 +130,11 @@ export default function TrackRequestScreen() {
   });
 
   const rateMutation = useMutation({
-    mutationFn: (body: { rating: number; comment?: string }) =>
+    mutationFn: (body: { rating: number; review?: string }) =>
       api.post(`/concierge-requests/${id}/rate`, body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['concierge-requests'] });
+      qc.invalidateQueries({ queryKey: ['help-request', id] });
       setPhase('rated');
     },
     onError: (err: any) => {
@@ -156,7 +149,7 @@ export default function TrackRequestScreen() {
 
   const handleRate = () => {
     if (rating === 0) return;
-    rateMutation.mutate({ rating, ...(ratingComment.trim() ? { comment: ratingComment.trim() } : {}) });
+    rateMutation.mutate({ rating, ...(ratingComment.trim() ? { review: ratingComment.trim() } : {}) });
   };
 
   const backHome = () => router.replace('/help-requests' as any);
@@ -168,6 +161,18 @@ export default function TrackRequestScreen() {
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <Text style={{ color: t.textMuted, fontSize: t.fontBase }}>Loading…</Text>
         </View>
+      </View>
+    );
+  }
+
+  if (!request) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+        <ScreenHeader title="Track Request" />
+        <ErrorCard
+          message="This request couldn't be loaded. Please try again — your request is safe."
+          onRetry={() => refetch()}
+        />
       </View>
     );
   }
@@ -348,20 +353,21 @@ export default function TrackRequestScreen() {
   }
 
   // Main tracking view
-  const status = request ? mapStatus(request.status) : { tone: 'pending' as RdStatusTone, label: 'Requested' };
-  const stepIndex = request ? getStepIndex(request.status) : 0;
-  const isCompleted =
-    request?.status?.toUpperCase() === 'COMPLETED' || request?.status?.toUpperCase() === 'RESOLVED';
-  const isCancelledServer =
-    request?.status?.toUpperCase() === 'CANCELLED' || request?.status?.toUpperCase() === 'CANCELED';
+  const typeLabel = request.category ?? conciergeTypeLabel(request.type);
+  const stepIndex = conciergeStepIndex(request.status);
+  const isCompleted = isConciergeCompleted(request.status);
+  const isCancelledServer = isConciergeCancelled(request.status);
   const isActive = !isCompleted && !isCancelledServer;
+  // The desk only lets a request be cancelled before someone takes it.
+  const canCancel = String(request.status ?? '').toUpperCase() === 'PENDING';
 
   const detailRows = [
-    { label: 'Requested on:', value: fmtDate(request?.createdAt ?? '') },
-    { label: 'Request Type:', value: request?.category ?? (request as any)?.type ?? '—' },
-    { label: 'Preferred Time:', value: request?.preferredTime ?? 'Not specified' },
-    { label: 'Staff:', value: request?.staffName ?? 'Not Assigned' },
-    ...(request?.description ? [{ label: 'Description:', value: request.description }] : []),
+    { label: 'Status:', value: conciergeStatus(request.status).label },
+    { label: 'Requested on:', value: fmtDate(request.createdAt ?? '') },
+    { label: 'Request Type:', value: typeLabel },
+    { label: 'Preferred Time:', value: request.preferredTime ?? 'Not specified' },
+    { label: 'Staff:', value: request.staffName ?? 'Not Assigned' },
+    ...(request.description ? [{ label: 'Description:', value: request.description }] : []),
   ];
 
   return (
@@ -377,11 +383,11 @@ export default function TrackRequestScreen() {
           <RoundCard tone="gray" padding={t.cardPadding} style={{ marginBottom: 20 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
               <IconCircle size={44} bg={rd.inkSoft}>
-                <Ionicons name={CATEGORY_ICONS[request.category] ?? 'help-circle-outline'} size={22} color={t.textSecondary} />
+                <Ionicons name={CATEGORY_ICONS[typeLabel] ?? 'help-circle-outline'} size={22} color={t.textSecondary} />
               </IconCircle>
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: t.fontBase, fontWeight: '700', color: t.textPrimary }}>
-                  {request.category ?? (request as any).type ?? 'Help request'}
+                  {typeLabel}
                 </Text>
                 <Text style={{ fontSize: t.fontSm, color: t.textMuted, marginTop: 2 }}>
                   {fmtDate(request.createdAt)}
@@ -515,7 +521,7 @@ export default function TrackRequestScreen() {
           ) : (
             <>
               <PillButton label="Back to Home" tone="dark" onPress={backHome} />
-              {isActive && (
+              {canCancel && (
                 <PillButton
                   label="Cancel Request"
                   tone="ghost"

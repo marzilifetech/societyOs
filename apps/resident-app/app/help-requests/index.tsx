@@ -7,6 +7,8 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { api } from '../../src/lib/api';
 import { useTheme } from '../../src/hooks/useTheme';
+import { ErrorCard } from '../../src/components/ErrorCard';
+import { conciergeStatus, conciergeTypeLabel, isConciergeActive } from '../../src/utils/concierge';
 import {
   ScreenHeader,
   Display,
@@ -15,7 +17,6 @@ import {
   IconCircle,
   StatusPill,
   rd,
-  type RdStatusTone,
 } from '../../src/components/ui';
 
 // Staff Help Request Home — Figma "Staff Help Request.jpg"
@@ -95,15 +96,6 @@ const CATEGORIES: {
   },
 ];
 
-function mapStatus(raw: string): { tone: RdStatusTone; label: string } {
-  const s = raw?.toUpperCase() ?? '';
-  if (s === 'RESOLVED' || s === 'COMPLETED') return { tone: 'resolved', label: 'Completed' };
-  if (s === 'CANCELLED' || s === 'CANCELED') return { tone: 'cancelled', label: 'Cancelled' };
-  if (s === 'ASSIGNED' || s === 'IN_PROGRESS' || s === 'ACKNOWLEDGED') return { tone: 'active', label: 'In Progress' };
-  if (s === 'OPEN') return { tone: 'pending', label: 'Requested' };
-  return { tone: 'neutral', label: raw ?? 'Unknown' };
-}
-
 function fmtDate(iso: string): string {
   if (!iso) return '';
   const d = new Date(iso);
@@ -115,12 +107,14 @@ export default function HelpRequestsScreen() {
   const t = useTheme();
   const [refreshing, setRefreshing] = useState(false);
 
-  const { data, isLoading, refetch } = useQuery<HelpRequest[]>({
+  // placeholderData (not initialData): an empty initialData counted as fresh
+  // under the global staleTime, so the list never fetched on first open.
+  const { data, isPlaceholderData, isError, refetch } = useQuery<HelpRequest[]>({
     queryKey: ['concierge-requests'],
     queryFn: () => api.get<HelpRequest[]>('/concierge/my'),
-    retry: false,
-    initialData: [],
+    placeholderData: [],
   });
+  const isLoading = isPlaceholderData && !isError;
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -128,10 +122,7 @@ export default function HelpRequestsScreen() {
     setRefreshing(false);
   };
 
-  const activeRequests = (data ?? []).filter((r) => {
-    const s = r.status?.toUpperCase();
-    return s === 'OPEN' || s === 'ASSIGNED' || s === 'IN_PROGRESS' || s === 'ACKNOWLEDGED';
-  });
+  const activeRequests = (data ?? []).filter((r) => isConciergeActive(r.status));
 
   const historyBtn = (
     <TouchableOpacity
@@ -188,6 +179,13 @@ export default function HelpRequestsScreen() {
           ))}
         </View>
 
+        {isError && (data ?? []).length === 0 && (
+          <ErrorCard
+            message="Your requests couldn't be loaded. Please try again — your requests are safe."
+            onRetry={() => refetch()}
+          />
+        )}
+
         {/* Active Requests section */}
         {!isLoading && activeRequests.length > 0 && (
           <>
@@ -203,9 +201,8 @@ export default function HelpRequestsScreen() {
             </Text>
             <View style={{ gap: 12 }}>
               {activeRequests.map((item) => {
-                const status = mapStatus(item.status);
-                const label = item.category ?? item.type ?? 'Request';
-                const cat = CATEGORIES.find((c) => c.value === label);
+                const status = conciergeStatus(item.status);
+                const label = item.category ?? conciergeTypeLabel(item.type);
                 return (
                   <RoundCard key={item.id} tone="white" padding={t.cardPaddingLg}>
                     <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 8 }}>
@@ -250,7 +247,7 @@ export default function HelpRequestsScreen() {
           </>
         )}
 
-        {!isLoading && activeRequests.length === 0 && (data ?? []).length === 0 && (
+        {!isLoading && !isError && activeRequests.length === 0 && (
           <View style={{ alignItems: 'center', paddingTop: 12 }}>
             <IconCircle size={64} bg={rd.inkSoft}>
               <Ionicons name="help-circle-outline" size={32} color={t.textMuted} />

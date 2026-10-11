@@ -9,15 +9,27 @@ import { api } from '../../src/lib/api';
 type InfraItem = {
   id: string;
   name: string;
-  category: string;
-  status: 'OPERATIONAL' | 'DEGRADED' | 'DOWN';
+  /** InfrastructureType: LIFT | POWER | WATER | GENERATOR | WIFI */
+  type: string;
+  /** InfrastructureStatus */
+  status: 'OPERATIONAL' | 'MAINTENANCE' | 'FAULT';
   updatedAt: string;
 };
 
 const STATUS_META: Record<string, { bgClass: string; textClass: string; label: string }> = {
   OPERATIONAL: { bgClass: 'bg-green-100', textClass: 'text-green-700', label: 'Operational' },
-  DEGRADED: { bgClass: 'bg-amber-100', textClass: 'text-amber-700', label: 'Degraded' },
-  DOWN: { bgClass: 'bg-red-100', textClass: 'text-red-700', label: 'Down' },
+  MAINTENANCE: { bgClass: 'bg-amber-100', textClass: 'text-amber-700', label: 'Under Maintenance' },
+  FAULT: { bgClass: 'bg-red-100', textClass: 'text-red-700', label: 'Fault' },
+};
+// Never show an unrecognised status as "Operational".
+const UNKNOWN_STATUS = { bgClass: 'bg-gray-100', textClass: 'text-gray-600', label: 'Unknown' };
+
+const TYPE_LABEL: Record<string, string> = {
+  LIFT: 'Lift',
+  POWER: 'Power',
+  WATER: 'Water',
+  GENERATOR: 'Generator',
+  WIFI: 'Wi-Fi',
 };
 
 export default function InfrastructureScreen() {
@@ -75,7 +87,7 @@ export default function InfrastructureScreen() {
         )}
 
         {data?.map((item: InfraItem) => {
-          const meta = STATUS_META[item.status] ?? STATUS_META.OPERATIONAL;
+          const meta = STATUS_META[item.status] ?? UNKNOWN_STATUS;
           return (
             <View
               key={item.id}
@@ -90,7 +102,7 @@ export default function InfrastructureScreen() {
                     <Text className="text-base font-bold text-gray-900">{item.name}</Text>
                     <View className="flex-row items-center mt-1">
                       <View className="bg-primary-50 rounded-md px-2 py-0.5">
-                        <Text className="text-primary-500 text-xs font-semibold">{item.category}</Text>
+                        <Text className="text-primary-500 text-xs font-semibold">{TYPE_LABEL[item.type] ?? item.type}</Text>
                       </View>
                     </View>
                   </View>

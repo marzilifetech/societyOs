@@ -9,6 +9,7 @@ import {
   TextInput,
   Platform,
   KeyboardAvoidingView,
+  Alert,
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -21,6 +22,7 @@ import { useTheme } from '../../src/hooks/useTheme';
 import { useRefreshOnFocus } from '../../src/hooks/useRefreshOnFocus';
 import { canRate } from '../../src/lib/serviceStatus';
 import { useServiceRequest } from '../../src/hooks/useServiceRequest';
+import { ErrorCard } from '../../src/components/ErrorCard';
 import {
   ScreenHeader,
   Display,
@@ -72,6 +74,16 @@ function mapUiPhase(status: string): UIPhase {
   return 'tracking';
 }
 
+/**
+ * When a tracker step happened, from the fields the backend records:
+ * createdAt (requested), acceptedAt (the provider accepted the job) and
+ * resolvedAt (done). There is no separate "started" time.
+ */
+function stepTime(sr: { createdAt?: string; acceptedAt?: string | null; resolvedAt?: string | null }, idx: number) {
+  const iso = idx === 0 ? sr.createdAt : idx === 1 ? sr.acceptedAt : idx === 3 ? sr.resolvedAt : null;
+  return iso ? fmtDateTime(iso) : '';
+}
+
 function fmtDateTime(iso?: string) {
   if (!iso) return '—';
   const d = new Date(iso);
@@ -100,7 +112,7 @@ export default function ServiceDetailScreen() {
   const [ratingNote, setRatingNote] = useState('');
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
 
-  const { data: sr, isLoading, refetch } = useQuery({
+  const { data: sr, isLoading, isError, refetch } = useQuery({
     queryKey: ['service-request', id],
     queryFn: () => api.get<any>(`/service-requests/${id}`),
   });
@@ -129,6 +141,7 @@ export default function ServiceDetailScreen() {
       qc.invalidateQueries({ queryKey: ['my-service-requests'] });
       setShowCancel(false);
     },
+    onError: (err: any) => Alert.alert('Error', err?.message ?? 'Could not cancel request.'),
   });
 
   if (isLoading) {
@@ -138,6 +151,18 @@ export default function ServiceDetailScreen() {
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <ActivityIndicator size="large" color={t.accentPrimary} />
         </View>
+      </View>
+    );
+  }
+
+  if (isError && !sr) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+        <ScreenHeader title="Track Request" />
+        <ErrorCard
+          message="This request couldn't be loaded. Please try again — your request is safe."
+          onRetry={() => refetch()}
+        />
       </View>
     );
   }
@@ -505,6 +530,9 @@ export default function ServiceDetailScreen() {
 
   // ---- CANCELLED PHASE -------------------------------------------------------
   if (uiPhase === 'cancelled') {
+    // REJECTED is the office declining the request — not the resident cancelling it.
+    const rejected = sr.status === 'REJECTED';
+    const closedTitle = rejected ? 'Request Rejected' : 'Booking Cancelled';
     return (
       <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
         <ScreenHeader title="Service Request" />
@@ -533,7 +561,7 @@ export default function ServiceDetailScreen() {
           >
             <Ionicons name="checkmark-circle" size={16} color={rd.green} />
             <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: t.fontSm }}>
-              Booking Cancelled
+              {closedTitle}
             </Text>
           </View>
 
@@ -545,7 +573,7 @@ export default function ServiceDetailScreen() {
           </View>
 
           <Display size="lg" align="center" style={{ marginBottom: 6 }}>
-            Booking Cancelled
+            {closedTitle}
           </Display>
           <Text
             style={{
@@ -555,7 +583,9 @@ export default function ServiceDetailScreen() {
               marginBottom: 24,
             }}
           >
-            Service Provider has been notified.
+            {rejected
+              ? sr.rejectedReason || 'The society office could not take up this request.'
+              : 'Service Provider has been notified.'}
           </Text>
 
           <InfoRows title="Booking Details" rows={bookingRows} />
@@ -689,19 +719,7 @@ export default function ServiceDetailScreen() {
                   </Text>
                   {(done || current) && (
                     <Text style={{ fontSize: t.fontXs, color: t.textMuted, marginTop: 2 }}>
-                      {current
-                        ? fmtDateTime(
-                            sr.status === 'PENDING'
-                              ? sr.createdAt
-                              : sr.status === 'ASSIGNED'
-                              ? sr.assignedAt ?? sr.createdAt
-                              : sr.startedAt ?? sr.createdAt,
-                          )
-                        : ''}
-                      {done && idx === 0 ? fmtDateTime(sr.createdAt) : ''}
-                      {done && idx === 1 ? fmtDateTime(sr.assignedAt ?? sr.createdAt) : ''}
-                      {done && idx === 2 ? fmtDateTime(sr.startedAt ?? sr.createdAt) : ''}
-                      {done || current ? ` · ${step.subLabel}` : ''}
+                      {[stepTime(sr, idx), step.subLabel].filter(Boolean).join(' · ')}
                     </Text>
                   )}
                 </View>
@@ -871,6 +889,7 @@ export default function ServiceDetailScreen() {
                     tone="danger"
                     onPress={() => cancelMutation.mutate()}
                     loading={cancelMutation.isPending}
+                    disabled={cancelMutation.isPending}
                   />
                   <PillButton
                     label="Keep Request"

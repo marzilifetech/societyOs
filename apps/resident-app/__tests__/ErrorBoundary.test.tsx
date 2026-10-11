@@ -69,7 +69,7 @@ describe('ErrorBoundary', () => {
     // Swap to non-throwing children while error UI is still shown,
     // so reset() won't trigger a re-throw cycle
     rerender(<ErrorBoundary><Fine /></ErrorBoundary>);
-    fireEvent.press(getByText('Retry'));
+    fireEvent.press(getByText('Try again'));
     expect(getByText('All good')).toBeTruthy();
   });
 

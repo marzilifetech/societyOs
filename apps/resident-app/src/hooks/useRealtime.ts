@@ -1,82 +1,37 @@
 import { useEffect } from 'react';
-import { Alert, Vibration } from 'react-native';
-import * as Notifications from 'expo-notifications';
-import { connectSocket, disconnectSocket, getSocket } from '../lib/socket';
+import { useQueryClient, type QueryKey } from '@tanstack/react-query';
+import { subscribe } from '../lib/socket';
 
-// Configure how notifications appear when the app is in the foreground.
-// MUST run lazily — calling this at module scope throws "property is not
-// writable" under Expo Go SDK 52 New Architecture, which freezes the JS bundle
-// before the native expo-notifications module is initialized.
-let notificationHandlerSet = false;
-function ensureNotificationHandler() {
-  if (notificationHandlerSet) return;
-  notificationHandlerSet = true;
-  try {
-    Notifications.setNotificationHandler({
-      handleNotification: async () => ({
-        shouldShowAlert: true,
-        shouldShowBanner: true,
-        shouldShowList: true,
-        shouldPlaySound: true,
-        shouldSetBadge: false,
-      }),
-    });
-  } catch {
-    /* expo-notifications partially unsupported in Expo Go SDK 52 */
-  }
-}
+/**
+ * Server events → the cached screens they make stale.
+ *
+ * Realtime only keeps open screens current; it never interrupts. Several of
+ * these arrive on the SOCIETY room (an emergency broadcast, a complaint or a
+ * visitor at another flat — see RealtimeGateway.emitToSociety), and they used
+ * to pop an Alert over whatever the resident was doing, for events that
+ * weren't theirs. Anything the resident must act on reaches them as a push,
+ * which the in-app banner already shows.
+ */
+const STALE_ON: Record<string, QueryKey[]> = {
+  'visitor:arrived': [['my-visitors'], ['visitor']],
+  'package:arrived': [['packages']],
+  'complaint:updated': [['my-complaints'], ['complaint']],
+  'service-request:updated': [['my-service-requests'], ['service-request']],
+  'help:completed': [['help-request']],
+  'maintenance:due': [['maintenance-bills'], ['bill']],
+  'emergency:broadcast': [['notices'], ['notices-summary'], ['notices-pinned'], ['notice']],
+};
 
-async function scheduleLocalNotification(title: string, body: string) {
-  try {
-    await Notifications.scheduleNotificationAsync({
-      content: { title, body },
-      trigger: null, // fire immediately
-    });
-  } catch {
-    // expo-notifications may not have permissions; fall back to Alert
-    Alert.alert(title, body);
-  }
-}
-
+/** Keeps cached data in step with server events while signed in. */
 export function useRealtime() {
+  const queryClient = useQueryClient();
+
   useEffect(() => {
-    ensureNotificationHandler();
-    connectSocket();
-    const socket = getSocket();
-
-    const onVisitorArrived = (data: { visitorName?: string }) => {
-      scheduleLocalNotification(
-        'Visitor Arrived',
-        `${data?.visitorName ?? 'Someone'} is at the gate`,
-      );
-    };
-
-    const onComplaintUpdated = (data: { status?: string }) => {
-      Alert.alert('Complaint Update', `Status changed to ${data?.status ?? 'unknown'}`);
-    };
-
-    const onPackageArrived = (data: { courierName?: string }) => {
-      Alert.alert('Package Arrived', `${data?.courierName ?? 'A courier'} parcel is at reception`);
-    };
-
-    const onEmergencyBroadcast = (data: { title?: string; message?: string; severity?: string }) => {
-      if (data?.severity === 'EMERGENCY') {
-        Vibration.vibrate([0, 500, 200, 500]);
-      }
-      Alert.alert('⚠️ Emergency Alert', data?.message ?? data?.title ?? 'Emergency notice from management');
-    };
-
-    socket.on('visitor:arrived', onVisitorArrived);
-    socket.on('complaint:updated', onComplaintUpdated);
-    socket.on('package:arrived', onPackageArrived);
-    socket.on('emergency:broadcast', onEmergencyBroadcast);
-
-    return () => {
-      socket.off('visitor:arrived', onVisitorArrived);
-      socket.off('complaint:updated', onComplaintUpdated);
-      socket.off('package:arrived', onPackageArrived);
-      socket.off('emergency:broadcast', onEmergencyBroadcast);
-      disconnectSocket();
-    };
-  }, []);
+    const unsubscribes = Object.entries(STALE_ON).map(([event, keys]) =>
+      subscribe(event, () => {
+        for (const queryKey of keys) void queryClient.invalidateQueries({ queryKey });
+      }),
+    );
+    return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
+  }, [queryClient]);
 }

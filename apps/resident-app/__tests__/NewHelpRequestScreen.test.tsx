@@ -1,7 +1,6 @@
 /**
- * Behaviour test for the redesigned New Help Request screen.
- * Validates the ScreenHeader title/subtitle, RadioCard category list,
- * urgency picker, and submit-button gating.
+ * The Request Help screen: category cards, submit gating, and the concierge
+ * request it sends.
  */
 
 import { render, fireEvent } from '@testing-library/react-native';
@@ -9,6 +8,7 @@ import React from 'react';
 
 const mockBack = jest.fn();
 jest.mock('expo-router', () => ({
+  useSegments: () => [],
   router: {
     back: () => mockBack(),
     canGoBack: () => true,
@@ -42,36 +42,31 @@ jest.mock('@tanstack/react-query', () => ({
 
 import NewHelpRequestScreen from '../app/help-requests/new';
 
-describe('NewHelpRequestScreen (redesigned)', () => {
+describe('NewHelpRequestScreen', () => {
   beforeEach(() => {
     mockBack.mockClear();
     mockApiPost.mockClear();
   });
 
-  it('renders ScreenHeader, all RadioCard categories, urgency options, and submit', () => {
+  it('shows the categories and keeps submit disabled until one is picked', () => {
     const { getByText, getByLabelText } = render(<NewHelpRequestScreen />);
-    expect(getByText('New Help Request')).toBeTruthy();
-    expect(getByText('Tell us what needs attention')).toBeTruthy();
-    // RadioCards expose `accessibilityRole="radio"` with `accessibilityLabel` = title + subtitle.
-    expect(getByLabelText('Plumbing, Leaks, drainage, taps')).toBeTruthy();
-    expect(getByLabelText('Electrical, Wiring, outlets, lights')).toBeTruthy();
-    expect(getByLabelText('Other, Anything not above')).toBeTruthy();
-    expect(getByLabelText('Set urgency to Low')).toBeTruthy();
-    expect(getByLabelText('Set urgency to High')).toBeTruthy();
-    expect(getByLabelText('Submit help request')).toBeTruthy();
+    expect(getByText('Request Help')).toBeTruthy();
+    expect(getByLabelText('Package Pickup, Collect a parcel or package')).toBeTruthy();
+    expect(getByLabelText('Heavy Lifting, Move furniture or appliances')).toBeTruthy();
+
+    fireEvent.press(getByText('Submit Request'));
+    expect(mockApiPost).not.toHaveBeenCalled();
   });
 
-  it('selecting a category and typing a description enables submit and POSTs', async () => {
-    const { getByLabelText, getByPlaceholderText } = render(<NewHelpRequestScreen />);
-    fireEvent.press(getByLabelText('Plumbing, Leaks, drainage, taps'));
-    fireEvent.changeText(getByPlaceholderText('Describe the issue in detail…'), 'Tap leaking in kitchen');
-    fireEvent.press(getByLabelText('Submit help request'));
-    // The mocked useMutation runs synchronously inside this microtask.
+  it('posts the chosen category and description to the concierge desk', async () => {
+    const { getByText, getByLabelText, getByPlaceholderText } = render(<NewHelpRequestScreen />);
+    fireEvent.press(getByLabelText('Heavy Lifting, Move furniture or appliances'));
+    fireEvent.changeText(getByPlaceholderText('Any details the staff member should know...'), 'Sofa to 3rd floor');
+    fireEvent.press(getByText('Submit Request'));
     await Promise.resolve();
-    expect(mockApiPost).toHaveBeenCalledWith('/help-requests', expect.objectContaining({
-      category: 'Plumbing',
-      urgency: 'LOW',
-      description: 'Tap leaking in kitchen',
-    }));
+    expect(mockApiPost).toHaveBeenCalledWith('/concierge', {
+      type: 'HEAVY_LIFTING',
+      description: 'Sofa to 3rd floor',
+    });
   });
 });

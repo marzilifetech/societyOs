@@ -34,9 +34,9 @@ describe('useTheme', () => {
     expect(result.current.fontBase).toBe(16);
   });
 
-  it('seniorTokens fontBase is 20', () => {
+  it('seniorTokens fontBase is 17', () => {
     mockSeniorMode = true;
     const { result } = renderHook(() => useTheme());
-    expect(result.current.fontBase).toBe(20);
+    expect(result.current.fontBase).toBe(17);
   });
 });

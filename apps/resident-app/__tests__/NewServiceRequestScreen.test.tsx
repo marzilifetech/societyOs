@@ -13,6 +13,7 @@ jest.mock('../src/lib/photo-upload', () => ({
 
 const mockBack = jest.fn();
 jest.mock('expo-router', () => ({
+  useSegments: () => [],
   router: {
     back: () => mockBack(),
     canGoBack: () => true,
@@ -31,6 +32,8 @@ jest.mock('../src/lib/api', () => ({
 
 jest.mock('@tanstack/react-query', () => ({
   useQueryClient: () => ({ invalidateQueries: jest.fn() }),
+  // The resident-profile guard: a profile exists, so the form is shown.
+  useQuery: () => ({ data: { id: 'r1' }, isError: false, isLoading: false, error: null }),
   useMutation: (opts: any) => ({
     mutate: async () => {
       try {
@@ -64,7 +67,9 @@ describe('NewServiceRequestScreen (redesigned)', () => {
   });
 
   it('renders time slot grid', () => {
-    const { getByLabelText } = render(<NewServiceRequestScreen />);
+    const { getAllByLabelText, getByLabelText } = render(<NewServiceRequestScreen />);
+    // Tomorrow: today's earlier slots are hidden once they have passed.
+    fireEvent.press(getAllByLabelText(/^Select (?!time slot)/)[1]);
     expect(getByLabelText('Select time slot 09:00 AM')).toBeTruthy();
     expect(getByLabelText('Select time slot 02:00 PM')).toBeTruthy();
   });
@@ -74,14 +79,19 @@ describe('NewServiceRequestScreen (redesigned)', () => {
     expect(getByLabelText('Submit service request')).toBeTruthy();
   });
 
-  it('does not POST when no time slot is selected', () => {
+  it('books for the chosen day at any time when no time slot is picked', async () => {
     const { getByLabelText } = render(<NewServiceRequestScreen />);
-    fireEvent.press(getByLabelText('Submit service request'));
-    expect(mockApiPost).not.toHaveBeenCalled();
+    await fireEvent.press(getByLabelText('Submit service request'));
+    expect(mockApiPost).toHaveBeenCalledWith(
+      '/service-requests',
+      expect.objectContaining({ category: 'Plumber', preferredTime: expect.stringMatching(/, Any time$/) }),
+    );
   });
 
   it('POSTs when a time slot is selected', async () => {
-    const { getByLabelText } = render(<NewServiceRequestScreen />);
+    const { getAllByLabelText, getByLabelText } = render(<NewServiceRequestScreen />);
+    // Pick tomorrow, so the 9 AM slot is never already past whenever this runs.
+    fireEvent.press(getAllByLabelText(/^Select (?!time slot)/)[1]);
     fireEvent.press(getByLabelText('Select time slot 09:00 AM'));
     await fireEvent.press(getByLabelText('Submit service request'));
     expect(mockApiPost).toHaveBeenCalledWith(

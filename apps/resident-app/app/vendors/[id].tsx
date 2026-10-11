@@ -1,7 +1,7 @@
 import { ScrollView, View, Text, TouchableOpacity, TextInput, Alert, RefreshControl } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
@@ -22,22 +22,23 @@ type OrderItem = {
 
 type Order = {
   id: string;
-  vendorId: string;
   status: string;
-  total: number;
+  /** Prisma Decimal — arrives as a string. */
+  totalAmount: string | number;
   createdAt: string;
-  items?: OrderItem[];
+  vendor?: { id: string };
 };
 
 const ORDER_STATUS_META: Record<string, { bgClass: string; textClass: string; label: string }> = {
   PENDING: { bgClass: 'bg-amber-100', textClass: 'text-amber-700', label: 'Pending' },
   CONFIRMED: { bgClass: 'bg-primary-100', textClass: 'text-primary-700', label: 'Confirmed' },
+  OUT_FOR_DELIVERY: { bgClass: 'bg-primary-100', textClass: 'text-primary-700', label: 'Out for delivery' },
   DELIVERED: { bgClass: 'bg-green-100', textClass: 'text-green-700', label: 'Delivered' },
   CANCELLED: { bgClass: 'bg-red-100', textClass: 'text-red-700', label: 'Cancelled' },
 };
 
 function fmt(n: number) {
-  return `₹${n.toFixed(2)}`;
+  return `₹${(Number.isFinite(n) ? n : 0).toFixed(2)}`;
 }
 
 export default function VendorDetailScreen() {
@@ -46,6 +47,7 @@ export default function VendorDetailScreen() {
   const [notes, setNotes] = useState('');
   const [deliveryDate, setDeliveryDate] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const qc = useQueryClient();
 
   const { data: vendor, isLoading: vendorLoading, isError: vendorError } = useQuery<Vendor>({
     queryKey: ['vendor', id],
@@ -53,15 +55,21 @@ export default function VendorDetailScreen() {
     enabled: !!id,
   });
 
+  // Filtered on the server (it pages 20 at a time, so filtering here alone
+  // could miss this vendor's orders); filtered here too for older servers.
   const { data: orders, isLoading: ordersLoading, isError: ordersError, refetch: refetchOrders } = useQuery<Order[]>({
     queryKey: ['vendor-orders', id],
-    queryFn: () => api.get<Order[]>(`/vendors/orders/mine?vendorId=${id}`),
+    queryFn: async () => {
+      const all = await api.get<Order[]>(`/vendors/orders/mine?vendorId=${encodeURIComponent(String(id))}&limit=50`);
+      return (Array.isArray(all) ? all : []).filter((o) => !o.vendor?.id || o.vendor.id === id);
+    },
     enabled: !!id,
   });
 
   const mutation = useMutation({
     mutationFn: (body: object) => api.post(`/vendors/${id}/orders`, body),
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['vendor-orders', id] });
       Alert.alert('Order placed!', 'Your order has been submitted to the vendor.', [
         { text: 'OK', onPress: () => router.back() },
       ]);
@@ -93,12 +101,27 @@ export default function VendorDetailScreen() {
   }, 0);
 
   const handleSubmit = () => {
-    const validItems = items.filter((it) => it.name.trim() && it.quantity && it.price);
+    const validItems = items
+      .filter((it) => it.name.trim() && it.quantity && it.price)
+      .map((it) => ({
+        name: it.name.trim(),
+        quantity: parseInt(it.quantity, 10),
+        unitPrice: parseFloat(it.price),
+      }));
     if (validItems.length === 0) {
       Alert.alert('Required', 'Add at least one item with name, quantity, and price.');
       return;
     }
-    mutation.mutate({ items: validItems, notes: notes.trim() || undefined, deliveryDate: deliveryDate.trim() || undefined });
+    if (validItems.some((it) => !(it.quantity >= 1) || !(it.unitPrice >= 0))) {
+      Alert.alert('Check items', 'Quantity must be a whole number of at least 1, and price a valid amount.');
+      return;
+    }
+    mutation.mutate({
+      items: validItems,
+      notes: notes.trim() || undefined,
+      // Local calendar date picked by the resident (YYYY-MM-DD).
+      deliveryAt: deliveryDate || undefined,
+    });
   };
 
   if (vendorError) {
@@ -213,7 +236,7 @@ export default function VendorDetailScreen() {
         />
 
         <View className="mb-4">
-          <DateField label="Delivery Date" value={deliveryDate} onChange={(iso) => setDeliveryDate(iso.slice(0, 10))} mode="date" minimumDate={new Date()} />
+          <DateField label="Delivery Date" value={deliveryDate} onChange={setDeliveryDate} mode="date" minimumDate={new Date()} />
         </View>
 
         {/* Running total */}
@@ -262,7 +285,7 @@ export default function VendorDetailScreen() {
                 <Text className="text-gray-900 text-sm font-semibold">
                   {new Date(order.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
                 </Text>
-                <Text className="text-gray-500 text-[13px] mt-0.5">{fmt(order.total)}</Text>
+                <Text className="text-gray-500 text-[13px] mt-0.5">{fmt(Number(order.totalAmount))}</Text>
               </View>
               <View className={`rounded-full px-2.5 py-1 ${meta.bgClass}`}>
                 <Text className={`text-xs font-bold ${meta.textClass}`}>{meta.label}</Text>
