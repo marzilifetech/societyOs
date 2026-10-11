@@ -4,6 +4,7 @@ import type { ComponentType } from 'react';
 import { Activity, Droplet, Scale, Gauge } from 'lucide-react';
 import { Button, cn } from '@/components/primitives';
 import { careApi } from '@/lib/care-api';
+import { uploadViaMedia, type MediaUploadResult } from '@/lib/media-upload';
 
 /* ─────────────────────────── Vital metadata ─────────────────────────── */
 
@@ -144,52 +145,10 @@ export function ErrorRetry({ message, onRetry }: { message?: string; onRetry: ()
 
 /* ─────────────────────── Marzi media upload (web) ───────────────────── */
 
-interface CreateMediaResponse {
-  asset_id: string;
-  s3_key: string;
-  public_url: string | null;
-  upload: { method: string; url: string; fields: Record<string, string> };
-}
-
-export interface MediaUploadResult {
-  assetId: string;
-  publicUrl: string | null;
-  s3Key: string;
-}
-
-/**
- * Web mirror of the resident app's `uploadViaMedia` (see
- * apps/resident-app/src/lib/photo-upload.ts). Three steps, all through the
- * Marzi media service:
- *   1. POST /media            → asset + presigned S3 POST descriptor
- *   2. POST to S3 (multipart) → the file bytes (signed fields first, file last)
- *   3. POST /media/:id/confirm → flip the asset PENDING → ACTIVE
- * Returns the S3 key to persist against the health record (`fileKey`).
- */
-export async function uploadViaCareMedia(
+/** The care portal's uploads, through the shared media uploader. */
+export function uploadViaCareMedia(
   file: File,
   visibility: 'public' | 'private' = 'private',
 ): Promise<MediaUploadResult> {
-  const created = await careApi.post<CreateMediaResponse>('/media', {
-    filename: file.name,
-    content_type: file.type || 'application/octet-stream',
-    visibility,
-  });
-
-  const form = new FormData();
-  for (const [k, v] of Object.entries(created.upload.fields)) form.append(k, v);
-  form.append('file', file);
-
-  const res = await fetch(created.upload.url, { method: 'POST', body: form });
-  if (!res.ok && res.status !== 204) {
-    throw new Error(`Upload failed (${res.status})`);
-  }
-
-  await careApi.post(`/media/${created.asset_id}/confirm`, {});
-
-  return {
-    assetId: created.asset_id,
-    publicUrl: created.public_url,
-    s3Key: created.s3_key,
-  };
+  return uploadViaMedia(careApi, file, visibility);
 }

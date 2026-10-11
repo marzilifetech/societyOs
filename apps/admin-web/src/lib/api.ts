@@ -24,7 +24,7 @@ function friendlyError(status: number, serverMsg?: string, serverCode?: string):
     const onLoginPage =
       typeof window !== 'undefined' && window.location.pathname.startsWith('/login');
     if (!onLoginPage && typeof window !== 'undefined') {
-      localStorage.removeItem('auth-storage');
+      localStorage.removeItem('admin-auth');
       localStorage.removeItem('admin_token');
       localStorage.removeItem('admin_refresh_token');
       window.location.href = '/login?reason=session-expired';
@@ -68,9 +68,13 @@ function friendlyError(status: number, serverMsg?: string, serverCode?: string):
     return new Error(serverMsg ?? 'This record already exists. Please check and try again.');
   }
   if (status === 503) {
-    return new Error(
-      'Service is temporarily unavailable. Please try again in a moment.',
+    // The server's own message says what to do (e.g. "Scheduling isn't
+    // available right now. Send it now…", "sign in again").
+    const e: Error & { code?: string } = new Error(
+      serverMsg ?? 'Service is temporarily unavailable. Please try again in a moment.',
     );
+    if (serverCode) e.code = serverCode;
+    return e;
   }
   if (status >= 500) {
     return new Error('Something went wrong on our end. Please try again in a moment.');
@@ -218,7 +222,7 @@ export const api = new AdminApiClient({
   },
   onUnauthorized: () => {
     if (typeof window !== 'undefined') {
-      localStorage.removeItem('auth-storage');
+      localStorage.removeItem('admin-auth');
       localStorage.removeItem('admin_token');
       localStorage.removeItem('admin_refresh_token');
       window.location.href = '/login?reason=session-expired';

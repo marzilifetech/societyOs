@@ -20,7 +20,9 @@ const csp = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
-  `connect-src 'self' ${apiOrigin} ${sentryHost} ws: wss:`.trim(),
+  // S3: uploads go straight from the browser to S3 with a presigned POST.
+  // Without it every document and health-record upload was blocked.
+  `connect-src 'self' ${apiOrigin} https://*.amazonaws.com ${sentryHost} ws: wss:`.trim(),
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'",

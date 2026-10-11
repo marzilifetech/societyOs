@@ -19,6 +19,8 @@ import { api } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { useAccess } from '@/lib/useAccess';
 import { PERMISSIONS, type Permission } from '@/lib/permissions';
+import { useQueryClient } from '@tanstack/react-query';
+import { signOut } from '@/lib/session';
 
 /**
  * `permission` gates visibility. An item WITHOUT one is considered universally
@@ -128,7 +130,8 @@ function NavItem({ href, icon: Icon, label, badge }: Item & { badge?: number }) 
 }
 
 export function Sidebar() {
-  const { user, clearAuth } = useAuthStore();
+  const { user } = useAuthStore();
+  const queryClient = useQueryClient();
   const { can, isBlockScoped, blocks, access } = useAccess();
   const initials = user?.name?.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase() ?? 'A';
 
@@ -221,7 +224,7 @@ export function Sidebar() {
           </div>
         </div>
         <button
-          onClick={clearAuth}
+          onClick={() => void signOut(queryClient)}
           className="w-full flex items-center justify-center gap-1.5 text-xs text-gray-500 hover:text-red-600 transition-colors py-1.5"
         >
           <LogOut className="w-3.5 h-3.5" />

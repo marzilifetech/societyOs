@@ -93,8 +93,10 @@ export default function StaffLeavesPage() {
     dismissMutation.mutate(staffId);
   };
 
+  // Only an actual resignation/termination offers "Mark as left" — an
+  // emergency leave is a leave.
   const isResignationType = (leaveType: string) =>
-    ['RESIGNATION', 'TERMINATION', 'EMERGENCY', 'LEAVE_REQUESTED'].includes(leaveType?.toUpperCase());
+    ['RESIGNATION', 'TERMINATION'].includes(leaveType?.toUpperCase());
 
   const filtered = (leaves ?? []).filter((l) => tab === 'ALL' || l.status === tab);
 

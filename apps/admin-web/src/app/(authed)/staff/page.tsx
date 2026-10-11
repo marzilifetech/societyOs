@@ -8,6 +8,8 @@ import { Plus, HardHat, CalendarDays, DollarSign, Upload } from 'lucide-react';
 import { api, downloadAdminFile } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { ErrorState } from '@/components/ui/ErrorState';
+import { Can } from '@/lib/useAccess';
+import { PERMISSIONS } from '@/lib/permissions';
 import type { StaffUser, LeaveRequest, LeaveStatus } from '@societyos/api-client';
 
 type StaffLoan = {
@@ -66,12 +68,14 @@ function StaffLoansSection({ staffId }: { staffId: string }) {
             </span>
           ) : null}
         </div>
-        <button
-          onClick={() => setShowForm((v) => !v)}
-          className="text-xs text-primary-600 hover:text-primary-700 font-medium"
-        >
-          {showForm ? 'Cancel' : '+ Record Loan'}
-        </button>
+        <Can permission={[PERMISSIONS.STAFF_WRITE, PERMISSIONS.BILLING_WRITE]}>
+          <button
+            onClick={() => setShowForm((v) => !v)}
+            className="text-xs text-primary-600 hover:text-primary-700 font-medium"
+          >
+            {showForm ? 'Cancel' : '+ Record Loan'}
+          </button>
+        </Can>
       </div>
 
       {showForm && (
@@ -227,7 +231,10 @@ function StaffDrawer({ staffId }: { staffId: string }) {
             <p className="text-gray-900">{data?.salary != null ? `₹${data.salary.toLocaleString('en-IN')}` : '—'}</p>
           </div>
         </div>
-        <StaffLoansSection staffId={staffId} />
+        {/* Loans are payroll data: roles without billing access got a 403 here. */}
+        <Can permission={[PERMISSIONS.STAFF_READ, PERMISSIONS.BILLING_READ]}>
+          <StaffLoansSection staffId={staffId} />
+        </Can>
       </td>
     </tr>
   );

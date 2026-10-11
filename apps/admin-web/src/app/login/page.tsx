@@ -91,7 +91,7 @@ function LoginPageInner() {
       localStorage.removeItem('admin_token');
       localStorage.removeItem('admin_refresh_token');
       localStorage.removeItem('admin_selected_society_id');
-      localStorage.removeItem('auth-storage');
+      localStorage.removeItem('admin-auth');
       sessionStorage.removeItem('admin_reauth_token');
     } catch {
       /* private mode or quota — non-fatal */
@@ -144,6 +144,7 @@ function LoginPageInner() {
         phone: `+91${phone}`,
         otp,
         societyId: SOCIETY_ID,
+        client: 'admin',
       });
       const res = unwrapApiEnvelope<AdminVerifyOtpPayload>(raw);
 
@@ -186,6 +187,7 @@ function LoginPageInner() {
         phone: totpPending.phoneE164,
         otp: totpPending.otp,
         societyId: totpPending.societyId,
+        client: 'admin',
         totpCode: twoFactorCode,
       });
       const res = unwrapApiEnvelope<AdminVerifyOtpPayload>(raw);

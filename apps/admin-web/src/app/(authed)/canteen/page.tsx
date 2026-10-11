@@ -144,7 +144,7 @@ export default function CanteenPage() {
     refetch: refetchPreOrders,
   } = useQuery({
     queryKey: ['canteen-preorders', today],
-    queryFn: () => api.get<PreOrder[]>(`/canteen/pre-orders?date=${today}`),
+    queryFn: () => api.get<PreOrder[]>(`/canteen/pre-orders?date=${today}&scope=all`),
     enabled: activeTab === 'preorders',
   });
 

@@ -6,41 +6,51 @@ import { ScrollText } from 'lucide-react';
 import { api } from '@/lib/api';
 import { ErrorState } from '@/components/ui/ErrorState';
 
+/** As GET /admin/audit-logs returns it (the AuditLog row). */
 interface AuditEntry {
   id: string;
-  actorId: string;
-  actorName?: string;
+  actorId: string | null;
+  actorRole?: string | null;
   action: string;
-  resource: string;
-  resourceId?: string;
-  ip?: string;
-  userAgent?: string;
+  entityType: string;
+  entityId: string;
+  ipAddress?: string | null;
   createdAt: string;
-  meta?: Record<string, unknown>;
 }
 
 interface AuditPage {
   items: AuditEntry[];
-  total: number;
-  page: number;
-  pageSize: number;
+  nextCursor: string | null;
 }
 
+const PAGE_SIZE = 50;
+
+/**
+ * The backend pages with a cursor and filters by `adminId` / `entity` /
+ * `action`. This page sent page/pageSize/actor/resource, which the API
+ * ignored, and read fields the rows don't have — filters and paging did
+ * nothing and the actor/resource/IP columns were blank.
+ */
 export default function AuditLogPage() {
-  const [page, setPage] = useState(1);
+  // Cursors of the pages visited so far; the last one is the current page.
+  const [cursors, setCursors] = useState<(string | null)[]>([null]);
   const [actor, setActor] = useState('');
   const [action, setAction] = useState('');
   const [resource, setResource] = useState('');
+  const cursor = cursors[cursors.length - 1];
+  const page = cursors.length;
+  const resetPaging = () => setCursors([null]);
 
   const { data, isLoading, isError, refetch } = useQuery<AuditPage>({
-    queryKey: ['admin-audit-logs', page, actor, action, resource],
-    queryFn: () =>
-      api.get<AuditPage>(
-        `/admin/audit-logs?page=${page}&pageSize=50` +
-          (actor ? `&actor=${encodeURIComponent(actor)}` : '') +
-          (action ? `&action=${encodeURIComponent(action)}` : '') +
-          (resource ? `&resource=${encodeURIComponent(resource)}` : ''),
-      ),
+    queryKey: ['admin-audit-logs', cursor, actor, action, resource],
+    queryFn: () => {
+      const q = new URLSearchParams({ take: String(PAGE_SIZE) });
+      if (cursor) q.set('cursor', cursor);
+      if (actor.trim()) q.set('adminId', actor.trim());
+      if (action.trim()) q.set('action', action.trim());
+      if (resource.trim()) q.set('entity', resource.trim());
+      return api.get<AuditPage>(`/admin/audit-logs?${q.toString()}`);
+    },
   });
 
   return (
@@ -55,11 +65,11 @@ export default function AuditLogPage() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
         <input
           aria-label="Filter by actor"
-          placeholder="Actor (user id or name)"
+          placeholder="Actor (user id)"
           value={actor}
           onChange={(e) => {
             setActor(e.target.value);
-            setPage(1);
+            resetPaging();
           }}
           className="px-3 py-2 border border-gray-200 rounded-lg text-sm"
         />
@@ -69,7 +79,7 @@ export default function AuditLogPage() {
           value={action}
           onChange={(e) => {
             setAction(e.target.value);
-            setPage(1);
+            resetPaging();
           }}
           className="px-3 py-2 border border-gray-200 rounded-lg text-sm"
         />
@@ -79,7 +89,7 @@ export default function AuditLogPage() {
           value={resource}
           onChange={(e) => {
             setResource(e.target.value);
-            setPage(1);
+            resetPaging();
           }}
           className="px-3 py-2 border border-gray-200 rounded-lg text-sm"
         />
@@ -119,16 +129,17 @@ export default function AuditLogPage() {
                     {new Date(e.createdAt).toLocaleString('en-IN')}
                   </td>
                   <td className="px-4 py-3 text-gray-900 font-medium">
-                    {e.actorName ?? e.actorId}
+                    {e.actorId ?? 'system'}
+                    {e.actorRole ? <span className="text-gray-400 text-xs"> · {e.actorRole}</span> : null}
                   </td>
                   <td className="px-4 py-3">
                     <code className="bg-gray-100 rounded px-2 py-0.5 text-xs">{e.action}</code>
                   </td>
                   <td className="px-4 py-3 text-gray-700">
-                    {e.resource}
-                    {e.resourceId ? <span className="text-gray-400"> / {e.resourceId}</span> : null}
+                    {e.entityType}
+                    {e.entityId ? <span className="text-gray-400"> / {e.entityId}</span> : null}
                   </td>
-                  <td className="px-4 py-3 text-gray-500 font-mono text-xs">{e.ip ?? '—'}</td>
+                  <td className="px-4 py-3 text-gray-500 font-mono text-xs">{e.ipAddress ?? '—'}</td>
                 </tr>
               ))}
             </tbody>
@@ -140,17 +151,15 @@ export default function AuditLogPage() {
       <div className="mt-4 flex items-center gap-3">
         <button
           disabled={page === 1}
-          onClick={() => setPage((p) => Math.max(1, p - 1))}
+          onClick={() => setCursors((c) => (c.length > 1 ? c.slice(0, -1) : c))}
           className="px-4 py-2 rounded-lg border border-gray-200 text-sm disabled:opacity-40"
         >
           Previous
         </button>
-        <span className="text-sm text-gray-500">
-          Page {data?.page ?? page} of {data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1}
-        </span>
+        <span className="text-sm text-gray-500">Page {page}</span>
         <button
-          disabled={!data || data.items.length < data.pageSize}
-          onClick={() => setPage((p) => p + 1)}
+          disabled={!data?.nextCursor}
+          onClick={() => data?.nextCursor && setCursors((c) => [...c, data.nextCursor])}
           className="px-4 py-2 rounded-lg border border-gray-200 text-sm disabled:opacity-40"
         >
           Next

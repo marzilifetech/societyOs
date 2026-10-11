@@ -38,7 +38,15 @@ function AssignModal({
   onClose: () => void;
 }) {
   const qc = useQueryClient();
-  const [staffName, setStaffName] = useState(booking.staffName ?? '');
+  const [staffId, setStaffId] = useState(booking.staffId ?? '');
+  // Assignment is by staff member, picked from the society's active staff —
+  // the old free-text "name or ID" box was rejected by the API every time.
+  const { data: staffList = [], isLoading: staffLoading } = useQuery({
+    queryKey: ['admin-staff'],
+    queryFn: () =>
+      api.get<{ id: string; name: string | null; designation?: string; isActive?: boolean }[]>('/admin/staff'),
+  });
+  const activeStaff = staffList.filter((s) => s.isActive !== false);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -59,8 +67,7 @@ function AssignModal({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const trimmed = staffName.trim();
-    mutation.mutate({ status: 'CONFIRMED', staffId: trimmed || undefined });
+    mutation.mutate({ status: 'CONFIRMED', staffId: staffId || undefined });
   };
 
   return (
@@ -72,14 +79,22 @@ function AssignModal({
         </p>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Staff Name / ID</label>
-            <input
-              value={staffName}
-              onChange={(e) => setStaffName(e.target.value)}
-              placeholder="Enter staff name or ID"
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-primary-400"
+            <label className="block text-xs font-medium text-gray-700 mb-1">Assign to</label>
+            <select
+              value={staffId}
+              onChange={(e) => setStaffId(e.target.value)}
+              disabled={staffLoading}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-primary-400 bg-white"
               autoFocus
-            />
+            >
+              <option value="">{staffLoading ? 'Loading staff…' : 'Confirm without assigning'}</option>
+              {activeStaff.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name ?? 'Unnamed'}
+                  {s.designation ? ` · ${s.designation}` : ''}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="flex gap-2">
             <button
@@ -107,6 +122,9 @@ export default function HousekeepingPage() {
 
   const buildQuery = (s: HKStatus, p: number) => {
     const params = new URLSearchParams();
+    // The society's bookings, not the admin's own household's (an admin who
+    // also lives here would otherwise get only their own).
+    params.set('scope', 'all');
     if (s !== 'ALL') params.set('status', s);
     params.set('page', String(p));
     return `/housekeeping?${params.toString()}`;
@@ -114,7 +132,7 @@ export default function HousekeepingPage() {
 
   const { data: allBookings } = useQuery({
     queryKey: ['housekeeping', 'ALL', 1],
-    queryFn: () => api.get<HousekeepingBooking[]>('/housekeeping'),
+    queryFn: () => api.get<HousekeepingBooking[]>('/housekeeping?scope=all'),
   });
 
   const { data: bookings, isLoading, isError, refetch } = useQuery({

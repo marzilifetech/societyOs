@@ -55,20 +55,13 @@ export default function StaffLeaderboardPage() {
 
   const { data: leaderboardData, isLoading, isError, refetch } = useQuery({
     queryKey: ['staff-leaderboard', period],
-    queryFn: async () => {
-      try {
-        return await api.get<{ staff: StaffMember[] }>(`/staff/leaderboard?period=${period}`);
-      } catch {
-        // Fallback: fetch all staff and compute rank client-side
-        const staffList = await api.get<StaffMember[]>(`/staff?period=${period}`);
-        const arr = Array.isArray(staffList) ? staffList : (staffList as any)?.staff ?? [];
-        const sorted = [...arr].sort((a: StaffMember, b: StaffMember) => (b.tasksCompleted ?? 0) - (a.tasksCompleted ?? 0));
-        return { staff: sorted.map((s: StaffMember, i: number) => ({ ...s, rank: i + 1 })) };
-      }
-    },
+    // The API takes WEEK/MONTH/QUARTER; this sent lower case, every request
+    // was a 400, and a "fallback" listed raw staff rows instead — blank names,
+    // zero counts, a period picker that did nothing.
+    queryFn: () => api.get<StaffMember[]>(`/staff/leaderboard?period=${period.toUpperCase()}`),
   });
 
-  const staffArr: StaffMember[] = (leaderboardData as any)?.staff ?? (Array.isArray(leaderboardData) ? leaderboardData : []);
+  const staffArr: StaffMember[] = Array.isArray(leaderboardData) ? leaderboardData : [];
 
   const ranked = staffArr.map((s, i) => ({ ...s, rank: s.rank ?? i + 1 }));
   const podium = ranked.slice(0, 3);
@@ -76,7 +69,8 @@ export default function StaffLeaderboardPage() {
   const podiumOrdered = podium.length >= 2 ? [podium[1], podium[0], podium[2]].filter(Boolean) : podium;
   const table = ranked.slice(3);
 
-  const fmt = (n?: number) => (n != null ? `${Math.round(n)}%` : '—');
+  // Rates arrive as fractions (0–1).
+  const fmt = (n?: number) => (n != null ? `${Math.round(n * 100)}%` : '—');
 
   return (
     <div className="p-6 lg:p-8">
@@ -179,13 +173,13 @@ export default function StaffLeaderboardPage() {
                       </td>
                       <td className="px-5 py-3 text-center">
                         <span className={cn('text-xs font-medium',
-                          (s.onTimeRate ?? 0) >= 80 ? 'text-green-600' : (s.onTimeRate ?? 0) >= 60 ? 'text-amber-600' : 'text-red-600')}>
+                          (s.onTimeRate ?? 0) >= 0.8 ? 'text-green-600' : (s.onTimeRate ?? 0) >= 0.6 ? 'text-amber-600' : 'text-red-600')}>
                           {fmt(s.onTimeRate)}
                         </span>
                       </td>
                       <td className="px-5 py-3 text-center">
                         <span className={cn('text-xs font-medium',
-                          (s.attendanceRate ?? 0) >= 90 ? 'text-green-600' : (s.attendanceRate ?? 0) >= 75 ? 'text-amber-600' : 'text-red-600')}>
+                          (s.attendanceRate ?? 0) >= 0.9 ? 'text-green-600' : (s.attendanceRate ?? 0) >= 0.75 ? 'text-amber-600' : 'text-red-600')}>
                           {fmt(s.attendanceRate)}
                         </span>
                       </td>

@@ -7,24 +7,38 @@ import { Dumbbell, Plus, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { ErrorState } from '@/components/ui/ErrorState';
 
+/**
+ * As GET /admin/amenities returns it. The page was written against a
+ * different model (category, hourly price, AVAILABLE/UNAVAILABLE status) and
+ * posted to /amenities, which does not exist: creating or toggling an amenity
+ * never worked.
+ */
 type Amenity = {
   id: string;
   name: string;
-  category: string;
-  maxCapacity: number;
-  pricePerHour: number;
-  status: string;
-  description?: string;
-  availableFrom?: string;
-  availableTo?: string;
+  description?: string | null;
+  capacity: number;
+  isActive: boolean;
+  openTime?: string;
+  closeTime?: string;
+  slotDurationMin?: number;
+  pricePerSlot?: number;
 };
 
-const CATEGORIES = ['GYM', 'POOL', 'CLUBHOUSE', 'TENNIS', 'BADMINTON', 'OTHER'];
+const EMPTY_FORM = {
+  name: '',
+  description: '',
+  openTime: '06:00',
+  closeTime: '22:00',
+  slotDurationMin: 60,
+  capacity: 10,
+  pricePerSlot: 0,
+};
 
 export default function AmenitiesPage() {
   const qc = useQueryClient();
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: '', category: 'GYM', description: '', availableFrom: '06:00', availableTo: '22:00', maxCapacity: 10, pricePerHour: 0 });
+  const [form, setForm] = useState(EMPTY_FORM);
 
   const { data: amenities, isLoading, isError, refetch } = useQuery<Amenity[]>({
     queryKey: ['admin-amenities'],
@@ -33,7 +47,7 @@ export default function AmenitiesPage() {
 
   const createMutation = useMutation({
     mutationFn: (body: typeof form) =>
-      api.post('/amenities', {
+      api.post('/admin/amenities', {
         ...body,
         name: body.name.trim(),
         description: body.description.trim() || undefined,
@@ -41,7 +55,7 @@ export default function AmenitiesPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin-amenities'] });
       setShowForm(false);
-      setForm({ name: '', category: 'GYM', description: '', availableFrom: '06:00', availableTo: '22:00', maxCapacity: 10, pricePerHour: 0 });
+      setForm(EMPTY_FORM);
       toast.success('Done! The change has been saved.');
     },
     onError: (err: Error) => {
@@ -50,7 +64,8 @@ export default function AmenitiesPage() {
   });
 
   const toggleMutation = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: string }) => api.patch(`/amenities/${id}`, { status }),
+    mutationFn: ({ id, isActive }: { id: string; isActive: boolean }) =>
+      api.patch(`/admin/amenities/${id}`, { isActive }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin-amenities'] });
       toast.success('Done! The change has been saved.');
@@ -89,14 +104,15 @@ export default function AmenitiesPage() {
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Category</label>
-              <select
-                value={form.category}
-                onChange={(e) => setForm({ ...form, category: e.target.value })}
+              <label className="block text-xs font-medium text-gray-500 mb-1">Booking slot (minutes)</label>
+              <input
+                type="number"
+                min={5}
+                max={720}
+                value={form.slotDurationMin}
+                onChange={(e) => setForm({ ...form, slotDurationMin: Number(e.target.value) })}
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-primary-400"
-              >
-                {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
+              />
             </div>
             <div className="col-span-2">
               <label className="block text-xs font-medium text-gray-500 mb-1">Description</label>
@@ -108,20 +124,20 @@ export default function AmenitiesPage() {
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Available From</label>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Opens at</label>
               <input
                 type="time"
-                value={form.availableFrom}
-                onChange={(e) => setForm({ ...form, availableFrom: e.target.value })}
+                value={form.openTime}
+                onChange={(e) => setForm({ ...form, openTime: e.target.value })}
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-primary-400"
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Available To</label>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Closes at</label>
               <input
                 type="time"
-                value={form.availableTo}
-                onChange={(e) => setForm({ ...form, availableTo: e.target.value })}
+                value={form.closeTime}
+                onChange={(e) => setForm({ ...form, closeTime: e.target.value })}
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-primary-400"
               />
             </div>
@@ -129,17 +145,19 @@ export default function AmenitiesPage() {
               <label className="block text-xs font-medium text-gray-500 mb-1">Max Capacity</label>
               <input
                 type="number"
-                value={form.maxCapacity}
-                onChange={(e) => setForm({ ...form, maxCapacity: Number(e.target.value) })}
+                min={0}
+                value={form.capacity}
+                onChange={(e) => setForm({ ...form, capacity: Number(e.target.value) })}
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-primary-400"
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Price / hr (₹)</label>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Price per slot (₹)</label>
               <input
                 type="number"
-                value={form.pricePerHour}
-                onChange={(e) => setForm({ ...form, pricePerHour: Number(e.target.value) })}
+                min={0}
+                value={form.pricePerSlot}
+                onChange={(e) => setForm({ ...form, pricePerSlot: Number(e.target.value) })}
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-primary-400"
               />
             </div>
@@ -162,9 +180,9 @@ export default function AmenitiesPage() {
           <thead>
             <tr className="border-b border-gray-100">
               <th className="text-left text-xs font-semibold text-gray-500 px-6 py-3">Name</th>
-              <th className="text-left text-xs font-semibold text-gray-500 px-6 py-3">Category</th>
+              <th className="text-left text-xs font-semibold text-gray-500 px-6 py-3">Hours</th>
               <th className="text-left text-xs font-semibold text-gray-500 px-6 py-3">Capacity</th>
-              <th className="text-left text-xs font-semibold text-gray-500 px-6 py-3">Price/hr</th>
+              <th className="text-left text-xs font-semibold text-gray-500 px-6 py-3">Price / slot</th>
               <th className="text-left text-xs font-semibold text-gray-500 px-6 py-3">Status</th>
               <th className="text-left text-xs font-semibold text-gray-500 px-6 py-3">Actions</th>
             </tr>
@@ -195,25 +213,29 @@ export default function AmenitiesPage() {
                     <div className="font-medium text-gray-900 text-sm">{amenity.name}</div>
                     {amenity.description && <div className="text-xs text-gray-400 mt-0.5 line-clamp-1">{amenity.description}</div>}
                   </td>
-                  <td className="px-6 py-4 text-sm text-gray-600">{amenity.category}</td>
-                  <td className="px-6 py-4 text-sm text-gray-600">{amenity.maxCapacity}</td>
-                  <td className="px-6 py-4 text-sm text-gray-600">{amenity.pricePerHour > 0 ? `₹${amenity.pricePerHour}` : 'Free'}</td>
+                  <td className="px-6 py-4 text-sm text-gray-600">
+                    {amenity.openTime && amenity.closeTime ? `${amenity.openTime}–${amenity.closeTime}` : '—'}
+                  </td>
+                  <td className="px-6 py-4 text-sm text-gray-600">{amenity.capacity}</td>
+                  <td className="px-6 py-4 text-sm text-gray-600">
+                    {Number(amenity.pricePerSlot ?? 0) > 0 ? `₹${amenity.pricePerSlot}` : 'Free'}
+                  </td>
                   <td className="px-6 py-4">
-                    <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${amenity.status === 'AVAILABLE' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                      {amenity.status === 'AVAILABLE' ? 'Available' : 'Unavailable'}
+                    <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${amenity.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                      {amenity.isActive ? 'Available' : 'Unavailable'}
                     </span>
                   </td>
                   <td className="px-6 py-4">
                     <button
                       onClick={() => {
-                        const next = amenity.status === 'AVAILABLE' ? 'UNAVAILABLE' : 'AVAILABLE';
-                        if (next === 'UNAVAILABLE' && !window.confirm(`Disable ${amenity.name}? Residents won't be able to book this amenity.`)) return;
-                        toggleMutation.mutate({ id: amenity.id, status: next });
+                        const next = !amenity.isActive;
+                        if (!next && !window.confirm(`Disable ${amenity.name}? Residents won't be able to book this amenity.`)) return;
+                        toggleMutation.mutate({ id: amenity.id, isActive: next });
                       }}
                       disabled={toggleMutation.isPending}
                       className="text-xs text-primary-600 hover:text-primary-800 font-medium disabled:opacity-50"
                     >
-                      {amenity.status === 'AVAILABLE' ? 'Disable' : 'Enable'}
+                      {amenity.isActive ? 'Disable' : 'Enable'}
                     </button>
                   </td>
                 </tr>

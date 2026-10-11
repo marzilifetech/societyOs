@@ -9,6 +9,9 @@ import { ArrowLeft, CalendarDays, ArrowLeftRight, Ban, UserX, Plus, Trash2, Cloc
 import { api } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { ErrorState } from '@/components/ui/ErrorState';
+import { uploadViaMedia } from '@/lib/media-upload';
+import { useAccess } from '@/lib/useAccess';
+import { PERMISSIONS } from '@/lib/permissions';
 
 const SALARY_FIELDS = [
   { key: 'base', label: 'Basic (₹)' },
@@ -64,6 +67,14 @@ export default function StaffDetailPage() {
   const params = useParams();
   const qc = useQueryClient();
   const staffId = params.id as string;
+  // Mirror the server's checks so a role only sees what it can do. A Society
+  // Manager has no deactivate or billing permission: the buttons used to 403
+  // and the salary tab sat on "Loading…" forever.
+  const { can, access } = useAccess();
+  const canWrite = can(PERMISSIONS.STAFF_WRITE);
+  const canDeactivate = can(PERMISSIONS.STAFF_DEACTIVATE);
+  const canSeePay = can(PERMISSIONS.STAFF_READ, PERMISSIONS.BILLING_READ);
+  const isSuperAdmin = !!access?.isSuperAdmin;
   const [tab, setTab] = useState<'overview' | 'documents' | 'salary' | 'family'>('overview');
   const [showTransfer, setShowTransfer] = useState(false);
   const [transferForm, setTransferForm] = useState({ toSocietyId: '', reason: '' });
@@ -162,16 +173,16 @@ export default function StaffDetailPage() {
     onError: (err: Error) => toast.error(err.message ?? 'Could not update shift'),
   });
 
-  const { data: documents } = useQuery({
+  const { data: documents, isError: documentsFailed, refetch: refetchDocuments } = useQuery({
     queryKey: ['staff-documents', staffId],
     queryFn: () => api.get<any[]>(`/admin/staff/${staffId}/documents`),
     enabled: tab === 'documents' && !!staffId,
   });
 
-  const { data: salarySlips } = useQuery({
+  const { data: salarySlips, isError: salarySlipsFailed, refetch: refetchSalarySlips } = useQuery({
     queryKey: ['staff-salary-slips', staffId],
     queryFn: () => api.get<any[]>(`/admin/staff/${staffId}/salary-slips`),
-    enabled: tab === 'salary' && !!staffId,
+    enabled: tab === 'salary' && !!staffId && canSeePay,
   });
 
   const transferMutation = useMutation({
@@ -198,7 +209,7 @@ export default function StaffDetailPage() {
       );
       // Stay on the record and refresh it, so the new state is visible rather
       // than the operator being bounced to a list that looks unchanged.
-      qc.invalidateQueries({ queryKey: ['admin-staff-detail', staffId] });
+      qc.invalidateQueries({ queryKey: ['staff-detail', staffId] });
       qc.invalidateQueries({ queryKey: ['admin-staff'] });
     },
     onError: (err: Error) => toast.error(err.message),
@@ -208,7 +219,7 @@ export default function StaffDetailPage() {
     mutationFn: () => api.patch(`/admin/staff/${staffId}/reactivate`, {}),
     onSuccess: () => {
       toast.success('Staff reactivated. They can sign in again.');
-      qc.invalidateQueries({ queryKey: ['admin-staff-detail', staffId] });
+      qc.invalidateQueries({ queryKey: ['staff-detail', staffId] });
       qc.invalidateQueries({ queryKey: ['admin-staff'] });
     },
     onError: (err: Error) => toast.error(err.message),
@@ -219,6 +230,8 @@ export default function StaffDetailPage() {
     onSuccess: () => {
       setShowDismiss(false);
       toast.success('Staff marked as left society');
+      qc.invalidateQueries({ queryKey: ['admin-staff'] });
+      qc.invalidateQueries({ queryKey: ['staff-detail', staffId] });
       router.push('/staff');
     },
     onError: (err: Error) => toast.error(err.message),
@@ -311,18 +324,13 @@ export default function StaffDetailPage() {
   const uploadDocMutation = useMutation({
     mutationFn: async () => {
       if (!docForm.file) throw new Error('Select a file to upload');
-      const presign = await api.post<{ url: string; publicUrl: string }>('/upload/presign', {
-        contentType: docForm.file.type || 'application/octet-stream',
-        folder: `staff/${staffId}/documents`,
-      });
-      await fetch(presign.url, {
-        method: 'PUT',
-        body: docForm.file,
-        headers: { 'Content-Type': docForm.file.type || 'application/octet-stream' },
-      });
+      // Private media upload: the presigned S3 PUT this used was refused in
+      // production (and blocked by the CSP), and its response was never
+      // checked, so a document row pointing at nothing was saved anyway.
+      const uploaded = await uploadViaMedia(api, docForm.file, 'private');
       return api.post(`/admin/staff/${staffId}/documents`, {
         documentType: docForm.documentType,
-        fileUrl: presign.publicUrl,
+        fileUrl: uploaded.publicUrl ?? uploaded.s3Key,
       });
     },
     onSuccess: () => {
@@ -526,7 +534,7 @@ export default function StaffDetailPage() {
             </div>
             <button
               onClick={() => updateProfileMutation.mutate()}
-              disabled={!profileEdited || updateProfileMutation.isPending}
+              disabled={!canWrite || !profileEdited || updateProfileMutation.isPending}
               className="mt-4 px-4 py-2 bg-primary-500 text-white rounded-xl text-sm font-semibold disabled:opacity-50"
             >
               {updateProfileMutation.isPending ? 'Saving…' : 'Save Changes'}
@@ -575,7 +583,7 @@ export default function StaffDetailPage() {
                 <div className="mt-4 flex items-center gap-3">
                   <button
                     onClick={() => updateShiftMutation.mutate()}
-                    disabled={!shiftEdited || updateShiftMutation.isPending}
+                    disabled={!canWrite || !shiftEdited || updateShiftMutation.isPending}
                     className="px-4 py-2 bg-primary-500 text-white rounded-xl text-sm font-semibold disabled:opacity-50"
                   >
                     {updateShiftMutation.isPending ? 'Saving…' : 'Save shift'}
@@ -616,7 +624,7 @@ export default function StaffDetailPage() {
             </div>
             <button
               onClick={() => updateEmergencyContactMutation.mutate()}
-              disabled={!ecEdited || updateEmergencyContactMutation.isPending}
+              disabled={!canWrite || !ecEdited || updateEmergencyContactMutation.isPending}
               className="mt-3 px-4 py-2 bg-primary-500 text-white rounded-xl text-sm font-semibold disabled:opacity-50"
             >
               Save Emergency Contact
@@ -631,14 +639,16 @@ export default function StaffDetailPage() {
             <CalendarDays className="w-4 h-4 text-gray-500" /> Attendance
           </Link>
 
+          {isSuperAdmin && (
           <button
             onClick={() => setShowTransfer(true)}
             className="w-full py-3 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-left px-4 flex items-center gap-2.5 text-sm text-gray-700 transition-colors"
           >
             <ArrowLeftRight className="w-4 h-4 text-gray-500" /> Transfer to Another Society
           </button>
+          )}
 
-          {!isExStaff && (
+          {canDeactivate && !isExStaff && (
             <button
               onClick={() => setShowDismiss(true)}
               className="w-full py-3 rounded-xl border border-orange-200 bg-white hover:bg-orange-50 text-left px-4 text-orange-600 flex items-center gap-2.5 text-sm transition-colors"
@@ -647,7 +657,7 @@ export default function StaffDetailPage() {
             </button>
           )}
 
-          {staff?.status && staff.status !== 'ACTIVE' ? (
+          {!canDeactivate ? null : staff?.status && staff.status !== 'ACTIVE' ? (
             <button
               onClick={() => reactivateMutation.mutate()}
               disabled={reactivateMutation.isPending}
@@ -671,15 +681,17 @@ export default function StaffDetailPage() {
         <div className="bg-white rounded-2xl border border-gray-100 p-5">
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-semibold text-gray-900">Documents</h2>
-            <button
-              onClick={() => setShowDocUpload(v => !v)}
-              className="flex items-center gap-1.5 text-sm text-primary-500 hover:text-primary-600 font-medium"
-            >
-              <Plus className="w-4 h-4" /> Upload
-            </button>
+            {canWrite && (
+              <button
+                onClick={() => setShowDocUpload(v => !v)}
+                className="flex items-center gap-1.5 text-sm text-primary-500 hover:text-primary-600 font-medium"
+              >
+                <Plus className="w-4 h-4" /> Upload
+              </button>
+            )}
           </div>
 
-          {showDocUpload && (
+          {canWrite && showDocUpload && (
             <div className="mb-5 p-4 bg-gray-50 rounded-xl border border-gray-200 space-y-3">
               <div>
                 <label className="text-xs text-gray-500 mb-1 block">Document Type</label>
@@ -720,7 +732,9 @@ export default function StaffDetailPage() {
             </div>
           )}
 
-          {!documents ? (
+          {documentsFailed ? (
+            <ErrorState onRetry={() => refetchDocuments()} message="Documents couldn't be loaded." />
+          ) : !documents ? (
             <p className="text-sm text-gray-400">Loading…</p>
           ) : documents.length === 0 ? (
             <p className="text-sm text-gray-400">No documents uploaded yet.</p>
@@ -740,7 +754,7 @@ export default function StaffDetailPage() {
                     )}
                   </div>
                   <div className="flex items-center gap-2">
-                    {(doc.fileUrl ?? doc.url) && (
+                    {/^https:\/\//i.test(doc.fileUrl ?? doc.url ?? '') ? (
                       <a
                         href={doc.fileUrl ?? doc.url}
                         target="_blank"
@@ -749,12 +763,24 @@ export default function StaffDetailPage() {
                       >
                         View
                       </a>
-                    )}
-                    {doc.id && !doc.verifiedAt && (
+                    ) : (doc.fileUrl ?? doc.url) ? (
+                      // Private uploads (IDs) have no public address to open.
+                      <span className="text-xs text-gray-400">Stored securely</span>
+                    ) : null}
+                    {canWrite && doc.id && !doc.verifiedAt && (
                       <button onClick={() => verifyDocMutation.mutate(doc.id)} className="text-xs text-green-600">Verify</button>
                     )}
-                    {doc.id && (
-                      <button onClick={() => deleteDocMutation.mutate(doc.id)} className="text-xs text-red-600">Delete</button>
+                    {canWrite && doc.id && (
+                      <button
+                        onClick={() => {
+                          if (window.confirm('Delete this document? This cannot be undone.')) {
+                            deleteDocMutation.mutate(doc.id);
+                          }
+                        }}
+                        className="text-xs text-red-600"
+                      >
+                        Delete
+                      </button>
                     )}
                   </div>
                 </div>
@@ -846,7 +872,7 @@ export default function StaffDetailPage() {
           {familyEdited && (
             <button
               onClick={() => updateFamilyMutation.mutate()}
-              disabled={updateFamilyMutation.isPending}
+              disabled={!canWrite || updateFamilyMutation.isPending}
               className="mt-4 px-4 py-2 bg-primary-500 text-white rounded-xl text-sm font-semibold disabled:opacity-50"
             >
               {updateFamilyMutation.isPending ? 'Saving…' : 'Save Family Details'}
@@ -887,6 +913,7 @@ export default function StaffDetailPage() {
                 <p className="text-sm text-gray-500 mb-4">Gross: ₹{total.toLocaleString('en-IN')}</p>
               ) : null;
             })()}
+            {canWrite && (
             <button
               onClick={() => updateSalaryMutation.mutate()}
               disabled={!salaryEdited || updateSalaryMutation.isPending}
@@ -894,11 +921,16 @@ export default function StaffDetailPage() {
             >
               {updateSalaryMutation.isPending ? 'Saving…' : 'Save Salary Structure'}
             </button>
+            )}
           </div>
 
           <div className="bg-white rounded-2xl border border-gray-100 p-5">
             <h2 className="font-semibold text-gray-900 mb-4">Salary Slips</h2>
-            {!salarySlips ? (
+            {!canSeePay ? (
+              <p className="text-sm text-gray-400">Your role can&apos;t view salary slips.</p>
+            ) : salarySlipsFailed ? (
+              <ErrorState onRetry={() => refetchSalarySlips()} message="Salary slips couldn't be loaded." />
+            ) : !salarySlips ? (
               <p className="text-sm text-gray-400">Loading…</p>
             ) : salarySlips.length === 0 ? (
               <p className="text-sm text-gray-400">No salary slips generated yet.</p>

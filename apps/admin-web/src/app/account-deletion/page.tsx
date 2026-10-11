@@ -2,9 +2,9 @@ import type { Metadata } from 'next';
 import { LegalShell, H2, P, Bullets } from '@/components/legal/LegalShell';
 
 export const metadata: Metadata = {
-  title: 'Delete Your Account — Resident App - Marzi & Staff App - Marzi',
+  title: 'Delete Your Account — One Community by Marzi & Marzi Staff App',
   description:
-    'How to delete your account and personal data from the Resident App - Marzi and Staff App - Marzi.',
+    'How to delete your account and personal data from One Community by Marzi and the Marzi Staff App.',
 };
 
 const ACCENT = '#821A52';
@@ -15,13 +15,13 @@ export default function AccountDeletionPage() {
   return (
     <LegalShell
       title="Delete Your Account"
-      subtitle="Resident App - Marzi & Staff App - Marzi"
+      subtitle="One Community by Marzi & Marzi Staff App"
       updated="17 June 2026"
     >
       <section>
         <P>
           This page explains how to delete your account and personal data from{' '}
-          <strong>Resident App - Marzi</strong> and <strong>Staff App - Marzi</strong>, developed by
+          <strong>One Community by Marzi</strong> and <strong>Marzi Staff App</strong>, developed by
           Marzi. You can delete your account directly inside the app, or request deletion from this
           page if you can no longer sign in.
         </P>
@@ -30,11 +30,11 @@ export default function AccountDeletionPage() {
       <section>
         <H2>Option 1 — Delete in the app (fastest)</H2>
         <P>
-          <strong>Resident App - Marzi:</strong> open the app → tap the <strong>Profile</strong> tab
-          → scroll to the bottom → tap <strong>Delete Account</strong> → confirm.
+          <strong>One Community by Marzi:</strong> open the app → tap the <strong>Profile</strong> tab
+          → <strong>Settings</strong> → tap <strong>Delete account</strong> → confirm.
         </P>
         <P>
-          <strong>Staff App - Marzi:</strong> open the app → tap the <strong>Profile</strong> tab →
+          <strong>Marzi Staff App:</strong> open the app → tap the <strong>Profile</strong> tab →
           tap <strong>Delete Account</strong> → confirm.
         </P>
         <P>

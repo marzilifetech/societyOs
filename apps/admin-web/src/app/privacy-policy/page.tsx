@@ -2,9 +2,9 @@ import type { Metadata } from 'next';
 import { LegalShell, H2, P, Bullets } from '@/components/legal/LegalShell';
 
 export const metadata: Metadata = {
-  title: 'Privacy Policy — Resident App - Marzi & Staff App - Marzi',
+  title: 'Privacy Policy — One Community by Marzi & Marzi Staff App',
   description:
-    'How Marzi collects, uses, shares, and protects your personal data in the Resident App - Marzi and Staff App - Marzi.',
+    'How Marzi collects, uses, shares, and protects your personal data in One Community by Marzi and the Marzi Staff App.',
 };
 
 const ACCENT = '#821A52';
@@ -13,14 +13,14 @@ export default function PrivacyPolicyPage() {
   return (
     <LegalShell
       title="Privacy Policy"
-      subtitle="Resident App - Marzi & Staff App - Marzi"
+      subtitle="One Community by Marzi & Marzi Staff App"
       updated="17 June 2026"
     >
       <section>
         <P>
           This Privacy Policy explains how Marzi (“we”, “us”, “our”) collects, uses, shares, and
           protects your personal data when you use our mobile applications{' '}
-          <strong>Resident App - Marzi</strong> and <strong>Staff App - Marzi</strong> (together,
+          <strong>One Community by Marzi</strong> and <strong>Marzi Staff App</strong> (together,
           the “Apps”). The Apps help residential communities manage visitors, deliveries,
           complaints, staff tasks, safety alerts, and resident services. We operate from Bengaluru,
           Karnataka, India. For any privacy question, email{' '}
@@ -41,20 +41,20 @@ export default function PrivacyPolicyPage() {
               via one-time password), name, and optionally email address.
             </>,
             <>
-              <strong>Identity verification documents (Resident App)</strong> — KYC documents you
+              <strong>Identity verification documents (One Community)</strong> — KYC documents you
               choose to upload for your society office, such as Aadhaar, PAN, an ID proof, and an
               address proof.
             </>,
             <>
               <strong>Photos and media</strong> — images you choose to capture or upload, such as
-              visitor photos, complaint photos, profile photos, and (Staff App) task and gate-entry
+              visitor photos, complaint photos, profile photos, and (Marzi Staff App) task and gate-entry
               photos.
             </>,
             <>
-              <strong>Location (Staff App)</strong> — precise GPS location captured only at the
+              <strong>Location (Marzi Staff App)</strong> — precise GPS location captured only at the
               moment a staff member takes a task verification photo or raises an emergency SOS
               alert. This is used in the foreground only; we do not track location in the
-              background. In the Resident App, location is used only if you raise an Emergency SOS
+              background. In One Community, location is used only if you raise an Emergency SOS
               alert.
             </>,
             <>

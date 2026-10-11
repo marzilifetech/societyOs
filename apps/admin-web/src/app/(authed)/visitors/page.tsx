@@ -119,7 +119,7 @@ export default function VisitorsPage() {
     return (
       v.name.toLowerCase().includes(q) ||
       v.phone?.includes(q) ||
-      v.purpose.toLowerCase().includes(q) ||
+      (v.purpose ?? '').toLowerCase().includes(q) ||
       v.resident?.name?.toLowerCase().includes(q)
     );
   });

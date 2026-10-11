@@ -146,10 +146,19 @@ export default function NoticesPage() {
       if (pushForm.scheduledAt) {
         payload.scheduledAt = new Date(pushForm.scheduledAt).toISOString();
       }
-      return api.post('/admin/notifications/push', payload);
+      return api.post<{ scheduled?: boolean; sent?: number | boolean }>('/admin/notifications/push', payload);
     },
-    onSuccess: () => {
-      toast.success(pushForm.scheduledAt ? 'Push notification scheduled' : 'Push notification sent');
+    onSuccess: (res) => {
+      // Say what actually happened: a time in the past sends immediately, and
+      // a block, flat or user list can match nobody in this society.
+      if (res?.scheduled) {
+        toast.success('Push notification scheduled');
+      } else if (res?.sent === 0) {
+        toast.warning('Nobody matched those recipients, so nothing was sent. Check the block, flat or user IDs.');
+        return;
+      } else {
+        toast.success(pushForm.scheduledAt ? 'That time has passed, so the notification was sent now' : 'Push notification sent');
+      }
       setShowPushForm(false);
       setPushForm({ title: '', body: '', targetType: 'ALL', targetIds: '', scheduledAt: '' });
     },
