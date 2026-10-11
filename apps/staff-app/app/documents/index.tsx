@@ -6,7 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import WebView from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '@societyos/theme';
-import { api } from '../../src/lib/api';
+import { getUnwrappedArray } from '../../src/lib/unwrapped-get';
 import { ErrorCard } from '../../src/components/ErrorCard';
 import { AppHeader, Button, Card, EmptyState as EmptyStateBase } from '../../src/components/ui';
 
@@ -14,7 +14,9 @@ interface StaffDocument {
   id: string;
   type: string;
   name?: string;
-  fileUrl: string;
+  /** Null for privately stored documents, which can't be previewed in the app. */
+  fileUrl: string | null;
+  isPrivate?: boolean;
   status?: 'VERIFIED' | 'PENDING' | string;
   uploadedAt?: string;
 }
@@ -33,7 +35,7 @@ export default function DocumentsScreen() {
   const [preview, setPreview] = useState<StaffDocument | null>(null);
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['staff-documents'],
-    queryFn: () => api.get<StaffDocument[]>('/staff/documents'),
+    queryFn: () => getUnwrappedArray<StaffDocument>('/staff/documents'),
   });
 
   return (
@@ -70,7 +72,9 @@ export default function DocumentsScreen() {
             (data ?? []).map((doc) => (
               <TouchableOpacity
                 key={doc.id}
-                onPress={() => setPreview(doc)}
+                onPress={() => (doc.fileUrl ? setPreview(doc) : undefined)}
+                disabled={!doc.fileUrl}
+                accessibilityHint={doc.fileUrl ? 'Opens a preview' : 'Stored securely; not viewable in the app'}
                 className="bg-white rounded-2xl p-4 flex-row items-center gap-3 shadow-sm"
               >
                 <View className="w-11 h-11 rounded-full bg-primary-50 items-center justify-center">
@@ -79,7 +83,8 @@ export default function DocumentsScreen() {
                 <View className="flex-1">
                   <Text className="text-base font-semibold text-gray-900">{doc.name ?? doc.type}</Text>
                   <Text className="text-xs text-gray-500 mt-0.5">
-                    {doc.uploadedAt ? new Date(doc.uploadedAt).toLocaleDateString() : '—'}
+                    {doc.uploadedAt ? new Date(doc.uploadedAt).toLocaleDateString('en-IN') : '—'}
+                    {doc.isPrivate ? ' · Stored securely' : ''}
                   </Text>
                 </View>
                 <StatusPill status={doc.status} />
@@ -132,9 +137,9 @@ function PreviewModal({ doc, onClose }: { doc: StaffDocument | null; onClose: ()
           <Text className="text-white font-semibold">{doc?.name ?? doc?.type ?? 'Preview'}</Text>
           <View className="w-12" />
         </View>
-        {doc ? (
+        {doc?.fileUrl ? (
           isPdf ? (
-            <WebView source={{ uri: doc.fileUrl }} style={{ flex: 1 }} />
+            <WebView source={{ uri: doc.fileUrl }} style={{ flex: 1 }} originWhitelist={['https://*']} />
           ) : (
             <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
               <Image source={{ uri: doc.fileUrl }} style={{ width, height: height * 0.8 }} resizeMode="contain" />

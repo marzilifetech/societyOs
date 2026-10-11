@@ -1,6 +1,8 @@
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
+import { useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { settleWithin } from '@societyos/mobile-core';
 
 import en from '../locales/en.json';
 import hi from '../locales/hi.json';
@@ -61,6 +63,44 @@ export async function initI18n() {
     compatibilityJSON: 'v3',
     react: { useSuspense: false },
   });
+}
+
+/** Upper bound on i18n start-up: past it the app shows (English) rather than wait. */
+const I18N_BUDGET_MS = 3000;
+
+let started: Promise<void> | null = null;
+
+/**
+ * Start i18n once. Never rejects and never hangs — it used to sit inside the
+ * boot `Promise.all`, where any throw held the whole app on the splash.
+ */
+export function startI18n(): Promise<void> {
+  if (!started) {
+    started = settleWithin(
+      initI18n().catch((err) => {
+        if (__DEV__) console.warn('[i18n] init failed', err);
+      }),
+      I18N_BUDGET_MS,
+      undefined,
+    );
+  }
+  return started;
+}
+
+/** True once i18n has started (or given up). */
+export function useI18nReady(): boolean {
+  const [ready, setReady] = useState(i18n.isInitialized);
+  useEffect(() => {
+    if (ready) return undefined;
+    let cancelled = false;
+    void startI18n().then(() => {
+      if (!cancelled) setReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [ready]);
+  return ready;
 }
 
 export default i18n;

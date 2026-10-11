@@ -1,13 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
-import { AppState, View, ActivityIndicator } from 'react-native';
-import { Stack, router } from 'expo-router';
+import { useEffect } from 'react';
+import { AppState, View } from 'react-native';
+import { Stack } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { bootstrapWindowMetrics } from '../src/lib/safe-area-bootstrap';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { persistQueryClient } from '@tanstack/react-query-persist-client';
-import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFonts } from 'expo-font';
 import {
   Montserrat_400Regular,
@@ -18,68 +14,55 @@ import {
 import { Lato_400Regular, Lato_700Bold } from '@expo-google-fonts/lato';
 import * as SplashScreen from 'expo-splash-screen';
 import { I18nextProvider } from 'react-i18next';
+import { colorScheme, useColorScheme } from 'nativewind';
+import { StatusBar } from 'expo-status-bar';
+import { toBannerPayload, useBootGate } from '@societyos/mobile-core';
 import '../src/lib/nativewind';
 import './global.css';
-import { queryClient } from '../src/lib/query-client';
+import { bootstrapWindowMetrics } from '../src/lib/safe-area-bootstrap';
+import { queryClient, startQueryLifecycle, startQueryPersistence } from '../src/lib/query-client';
 import { useAuthStore } from '../src/store/auth.store';
+import { useLockStore } from '../src/store/lock.store';
 import { useSettingsStore } from '../src/store/settings.store';
-import i18n, { initI18n } from '../src/lib/i18n';
+import i18n, { startI18n, useI18nReady } from '../src/lib/i18n';
 import { startOfflineDrainListener } from '../src/lib/offline-queue';
 import {
   setupNotificationHandler,
-  attachNotificationTapHandler,
-  detachNotificationTapHandler,
+  setupTapRouting,
   subscribeToForegroundReceived,
 } from '../src/lib/notifications';
 import { NotificationProvider, useNotificationBanner } from '../src/contexts/NotificationContext';
 import { InAppBanner } from '../src/components/InAppBanner';
 import { NotificationOnboarding } from '../src/components/NotificationOnboarding';
 import { AppUpdateGate } from '../src/components/AppUpdateGate';
+import { AppLock } from '../src/components/AppLock';
+import { BootScreen } from '../src/components/BootScreen';
 import { initSentry, setSentryUser } from '../src/lib/sentry';
 import { ErrorBoundary } from '../src/components/ErrorBoundary';
 import { NetworkBanner } from '../src/components/NetworkBanner';
-import { isPinSet } from './(auth)/pin-setup';
-import { colorScheme, useColorScheme } from 'nativewind';
-import { StatusBar } from 'expo-status-bar';
 
 initSentry();
 
+// Configure foreground display before any notification can arrive.
+setupNotificationHandler();
+
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
-function ThemedStatusBar() {
-  const { colorScheme: scheme } = useColorScheme();
-  return <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />;
-}
-
-const persister = createAsyncStoragePersister({
-  storage: AsyncStorage,
-  key: 'rq_cache_v2', // v1 had corrupt error-state entries from 403 loop; discard it
-});
-
-persistQueryClient({
-  queryClient,
-  persister,
-  maxAge: 1000 * 60 * 60 * 24, // 24h
-  dehydrateOptions: {
-    shouldDehydrateQuery: (q) => {
-      if (q.state.status !== 'success') return false;
-      const k = JSON.stringify(q.queryKey);
-      // Cache only the keys mentioned in BRD: summary, assigned, shifts
-      return k.includes('summary') || k.includes('assigned') || k.includes('shifts');
-    },
-  },
-});
+// Read the stored session NOW, at import time, not from an effect. Every
+// expo-module async call — SecureStore and the six font loads included —
+// shares ONE native queue. Started from an effect, the session reads queued
+// behind the fonts. First in the queue, they are never held up by anything
+// cosmetic. Each of these is bounded and never rejects (see the stores), so
+// none of them can hold the app on the splash.
+void useAuthStore.getState().hydrate();
+void useSettingsStore.getState().hydrate();
+void startI18n();
+startQueryPersistence();
 
 export default function RootLayout() {
-  const hydrate = useAuthStore((s) => s.hydrate);
-  const token = useAuthStore((s) => s.token);
-  const settingsHydrate = useSettingsStore((s) => s.hydrate);
-  const settingsTheme = useSettingsStore((s) => s.theme);
+  const authHydrated = useAuthStore((s) => s.isHydrated);
   const settingsHydrated = useSettingsStore((s) => s.hydrated);
-  const autoLockMinutes = useSettingsStore((s) => s.autoLockMinutes);
-  const biometricEnabled = useSettingsStore((s) => s.biometricEnabled);
-  const [ready, setReady] = useState(false);
-  const lastBackgroundedAt = useRef<number | null>(null);
+  const i18nReady = useI18nReady();
 
   const [fontsLoaded, fontError] = useFonts({
     Montserrat_400Regular,
@@ -90,111 +73,38 @@ export default function RootLayout() {
     Lato_700Bold,
   });
 
-  /**
-   * Never hold the app hostage to font loading.
-   *
-   * The render gate below used `fontsLoaded` alone. `useFonts` resolves to
-   * `[false, error]` on failure and simply never flips to true, so a corrupt
-   * font cache or a failed asset read left the app on the maroon spinner
-   * FOREVER, with no crash and nothing in the logs — indistinguishable from a
-   * hang. A 2.5s deadline bounds the worst case: text falls back to the system
-   * font (Montserrat/Lato are a brand nicety, not a functional requirement)
-   * and the app is usable.
-   */
-  const [fontTimedOut, setFontTimedOut] = useState(false);
-  useEffect(() => {
-    if (fontsLoaded) return;
-    const id = setTimeout(() => setFontTimedOut(true), 2500);
-    return () => clearTimeout(id);
-  }, [fontsLoaded]);
-  const fontsReady = fontsLoaded || !!fontError || fontTimedOut;
+  // Everything the first route depends on is bounded, and fonts are only waited
+  // on for FONT_WAIT_MS, so this can't hold the app indefinitely. The old gate
+  // waited on an unbounded `Promise.all` with no catch: one rejected step (a
+  // Keystore error reading the session) and it never opened.
+  const bootReady = useBootGate({
+    isHydrated: authHydrated && settingsHydrated && i18nReady,
+    fontsSettled: fontsLoaded || !!fontError,
+  });
 
-  // Boot work runs EXACTLY ONCE. It previously depended on [fontsLoaded],
-  // which flips false→true a beat after mount, so every launch ran hydrate(),
-  // settingsHydrate(), initI18n() and setupNotificationHandler() twice —
-  // duplicate AsyncStorage reads and a second i18n init on the critical path.
+  useEffect(() => startQueryLifecycle(), []);
+
   useEffect(() => {
-    (async () => {
-      await Promise.all([hydrate(), settingsHydrate(), initI18n(), setupNotificationHandler()]);
-      startOfflineDrainListener();
-      // Remove any errored/stale queries left over from a previous unauthenticated
-      // session so they don't block data loading after the user logs in.
-      queryClient.removeQueries({ predicate: (q) => q.state.status === 'error' });
-      setReady(true);
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Deferred — NetInfo listeners registered at module scope have frozen the
+    // bundle on some Expo/RN combinations.
+    startOfflineDrainListener();
   }, []);
 
-  // Hide the splash once BOTH the boot work and the fonts have settled.
+  // Tap routing for notification responses (warm taps + the tap that launched
+  // the app). Set up once, signed in or not; navigation itself waits for the
+  // signed-in, unlocked shell (see lib/navigation.ts).
   useEffect(() => {
-    if (ready && fontsReady) SplashScreen.hideAsync().catch(() => {});
-  }, [ready, fontsReady]);
-
-  // Keep NativeWind / Tailwind `dark:` in sync with persisted theme (Settings → Theme).
-  useEffect(() => {
-    if (!settingsHydrated) return;
-    colorScheme.set(settingsTheme);
-  }, [settingsHydrated, settingsTheme]);
-
-  // Tag Sentry with the active user.
-  useEffect(() => {
-    const user = useAuthStore.getState().user;
-    setSentryUser(user?.id ?? null);
-  }, [token]);
-
-  // Auth gating: when ready & token present, ensure PIN/biometric or send to phone-entry
-  const gatedRef = useRef(false);
-  useEffect(() => {
-    if (!ready) return;
-    if (gatedRef.current) return;
-    gatedRef.current = true;
-    (async () => {
-      if (!token) return; // unauthenticated; phone-entry is the default
-      const pinSet = await isPinSet();
-      if (!pinSet && !biometricEnabled) {
-        router.replace('/(auth)/pin-setup' as any);
-        return;
-      }
-      router.replace('/(auth)/pin-login' as any);
-    })();
-    return () => {
-      detachNotificationTapHandler();
-    };
-  }, [ready, token]);
-
-  // Attach the notification-tap deep-link handler whenever we have a session.
-  // Permission, channels, iOS categories and device-token registration are all
-  // owned by <NotificationOnboarding /> below.
-  useEffect(() => {
-    if (!ready || !token) return;
-    attachNotificationTapHandler();
-  }, [ready, token]);
-
-  // Auto-lock after idle
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'background' || state === 'inactive') {
-        lastBackgroundedAt.current = Date.now();
-      } else if (state === 'active' && lastBackgroundedAt.current) {
-        const idleMs = Date.now() - lastBackgroundedAt.current;
-        lastBackgroundedAt.current = null;
-        if (idleMs >= autoLockMinutes * 60 * 1000 && useAuthStore.getState().token) {
-          isPinSet().then((set) => {
-            if (set || biometricEnabled) router.replace('/(auth)/pin-login' as any);
-          });
-        }
-      }
-    });
+    const sub = setupTapRouting();
     return () => sub.remove();
-  }, [autoLockMinutes, biometricEnabled]);
+  }, []);
 
-  if (!fontsReady || !ready) {
-    return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#821A52' }}>
-        <ActivityIndicator color="#fff" />
-      </View>
-    );
-  }
+  useEffect(() => {
+    // BootScreen hides the native splash as soon as it draws; this is the
+    // backstop. ErrorBoundary covers a render crash.
+    if (bootReady) SplashScreen.hideAsync().catch(() => {});
+  }, [bootReady]);
+
+  if (!bootReady) return <BootScreen />;
 
   return (
     <ErrorBoundary>
@@ -202,30 +112,13 @@ export default function RootLayout() {
         {/* initialMetrics is NOT optional. SafeAreaProvider renders its native
             view but NO CHILDREN while `insets` is null, and insets start null
             unless seeded — the provider then waits on an async native
-            onInsetsChange event. Under Fabric/bridgeless startup on Android
-            that event is sometimes never delivered and the ENTIRE app tree
-            silently never mounts: no crash, no log, just a blank window.
-            Measured ~50% of cold starts in the resident app before this fix. */}
+            onInsetsChange event that is sometimes never delivered on Android
+            cold starts, leaving a blank window. */}
         <SafeAreaProvider initialMetrics={bootstrapWindowMetrics}>
           <I18nextProvider i18n={i18n} defaultNS="translation">
-            <ThemedStatusBar />
             <QueryClientProvider client={queryClient}>
               <NotificationProvider>
-                <NetworkBanner />
-                {/* Update gate wraps the navigation Stack: when the policy
-                    is 'immediate' the Stack is replaced with the blocker
-                    screen — staff cannot bypass even before PIN login. */}
-                <AppUpdateGate>
-                  <Stack screenOptions={{ headerShown: false }} />
-                </AppUpdateGate>
-                {/* Renders nothing: requests the OS permission once after
-                    sign-in and registers the push token. Replaces the old
-                    always-on "notifications are off" strip, which covered
-                    content and could not be dismissed. Guidance now lives in
-                    Settings → Notifications. */}
-                <NotificationOnboarding active={!!token} />
-                <ForegroundBannerBridge active={!!token} />
-                <InAppBanner />
+                <RootShell />
               </NotificationProvider>
             </QueryClientProvider>
           </I18nextProvider>
@@ -235,35 +128,112 @@ export default function RootLayout() {
   );
 }
 
+function RootShell() {
+  const token = useAuthStore((s) => s.token);
+  const userId = useAuthStore((s) => s.user?.id ?? null);
+  const locked = useLockStore((s) => s.locked);
+  const theme = useSettingsStore((s) => s.theme);
+
+  // Keep NativeWind / Tailwind `dark:` in sync with Settings → Theme.
+  useEffect(() => {
+    colorScheme.set(theme);
+  }, [theme]);
+
+  useEffect(() => {
+    setSentryUser(userId);
+  }, [userId]);
+
+  useAutoLock();
+
+  return (
+    <>
+      <ThemedStatusBar />
+      <NetworkBanner />
+      {/* The update gate wraps the navigator: when the policy is 'immediate'
+          the Stack is replaced with the blocker screen. */}
+      {/* While locked, the app underneath is hidden from screen readers too —
+          the overlay covers it visually, but Android's accessibility tree
+          still exposed it (accessibilityViewIsModal is iOS-only). */}
+      <View
+        style={{ flex: 1 }}
+        importantForAccessibility={token && locked ? 'no-hide-descendants' : 'auto'}
+      >
+        <AppUpdateGate>
+          <Stack screenOptions={{ headerShown: false }}>
+            {/* The root index only redirects. Entering the app from it is a cut,
+              like splash → app: a slide made the first screen visibly arrive
+              twice right after launch. */}
+            <Stack.Screen name="index" options={{ animation: 'none' }} />
+            <Stack.Screen name="(tabs)" options={{ animation: 'none' }} />
+            <Stack.Screen name="(auth)" options={{ animation: 'none' }} />
+          </Stack>
+        </AppUpdateGate>
+      </View>
+      {/* The PIN lock covers the app instead of replacing routes — see
+          src/store/lock.store.ts. */}
+      {token && locked ? <AppLock /> : null}
+      {/* Requests notification permission once per session, after unlock (not
+          over the PIN screen), and keeps this device registered to whoever is
+          signed in. Renders nothing. */}
+      <NotificationOnboarding userId={token && !locked ? userId : null} />
+      {/* Not while the PIN lock is up: the banner draws above the lock and
+          its buttons (accept a task, take a help request) acted for the
+          signed-in guard without the PIN. Pushes arriving meanwhile get the OS
+          banner instead (setupNotificationHandler), and taps on those are held
+          until unlock (lib/navigation.ts). */}
+      <ForegroundBannerBridge active={!!token && !locked} />
+      {/* Last, so it overlays every screen. Hides itself while locked. */}
+      <InAppBanner />
+    </>
+  );
+}
+
+function ThemedStatusBar() {
+  const { colorScheme: scheme } = useColorScheme();
+  return <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />;
+}
+
+/**
+ * Lock again after the app has been in the background for the configured idle
+ * time. Only flips lock state — no navigation, so nothing the guard had open is
+ * lost.
+ */
+function useAutoLock() {
+  const autoLockMinutes = useSettingsStore((s) => s.autoLockMinutes);
+  useEffect(() => {
+    let backgroundedAt: number | null = null;
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'background' || state === 'inactive') {
+        backgroundedAt ??= Date.now();
+        return;
+      }
+      if (state !== 'active' || backgroundedAt === null) return;
+      const idleMs = Date.now() - backgroundedAt;
+      backgroundedAt = null;
+      const { token } = useAuthStore.getState();
+      const { hasPin, lock } = useLockStore.getState();
+      if (token && hasPin && idleMs >= autoLockMinutes * 60_000) lock();
+    });
+    return () => sub.remove();
+  }, [autoLockMinutes]);
+}
+
 /** Pipes foreground-received notifications into the banner queue. */
 function ForegroundBannerBridge({ active }: { active: boolean }) {
   const { showBanner } = useNotificationBanner();
   useEffect(() => {
-    if (!active) return;
+    if (!active) return undefined;
     const sub = subscribeToForegroundReceived((n) => {
       const c = n.request.content;
-      const data = (c.data && typeof c.data === 'object' ? c.data : {}) as Record<string, unknown>;
-      const imageUrl =
-        typeof data.imageUrl === 'string'
-          ? data.imageUrl
-          : (c as any).attachments?.[0]?.url ?? undefined;
-      showBanner({
-        id: n.request.identifier,
-        title: c.title ?? 'Notification',
-        body: c.body ?? '',
-        imageUrl,
-        type: typeof data.type === 'string' ? data.type : undefined,
-        entityId:
-          typeof data.entityId === 'string'
-            ? data.entityId
-            : typeof data.id === 'string'
-            ? data.id
-            : typeof data.visitId === 'string'
-            ? data.visitId
-            : undefined,
-        actionGroup: typeof data.actionGroup === 'string' ? data.actionGroup : undefined,
-        data,
-      });
+      showBanner(
+        toBannerPayload({
+          identifier: n.request.identifier,
+          title: c.title,
+          body: c.body,
+          data: c.data,
+          attachments: (c as { attachments?: { url?: string }[] }).attachments,
+        }),
+      );
     });
     return () => sub.remove();
   }, [active, showBanner]);

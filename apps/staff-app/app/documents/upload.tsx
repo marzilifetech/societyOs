@@ -5,6 +5,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../../src/lib/api';
+import { uploadViaMedia } from '../../src/lib/photo-upload';
+import { compressImageUnder, MAX_DOCUMENT_BYTES, MAX_IMAGE_BYTES } from '../../src/lib/upload';
 
 const TYPES = [
   { key: 'AADHAAR', label: 'Aadhaar' },
@@ -21,54 +23,55 @@ export default function DocumentUploadScreen() {
   const qc = useQueryClient();
 
   const pickFile = async () => {
-    const res = await DocumentPicker.getDocumentAsync({
-      type: ['application/pdf', 'image/*'],
-      copyToCacheDirectory: true,
-    });
-    if (!res.canceled && res.assets?.[0]) setFile(res.assets[0]);
+    try {
+      const res = await DocumentPicker.getDocumentAsync({
+        type: ['application/pdf', 'image/*'],
+        copyToCacheDirectory: true,
+      });
+      if (!res.canceled && res.assets?.[0]) setFile(res.assets[0]);
+    } catch (e: unknown) {
+      Alert.alert("Couldn't open files", e instanceof Error ? e.message : 'Please try again.');
+    }
   };
 
+  /**
+   * Upload through /media as a PRIVATE asset (these are ID documents), then
+   * record it. This used to PUT to a backend-presigned S3 URL, which always
+   * returned 403, and then said "Uploaded" even when recording it failed.
+   */
   const upload = async () => {
     if (!file) return Alert.alert('Pick a file first');
+    const isPdf = (file.mimeType ?? '').includes('pdf') || file.name.toLowerCase().endsWith('.pdf');
+    // The media service refuses PDFs over 5 MB (it used to be checked against
+    // 10 MB here, so 5–10 MB files failed only after uploading).
+    if (isPdf && file.size && file.size > MAX_DOCUMENT_BYTES) {
+      return Alert.alert('File too large', 'Choose a PDF under 5 MB, or take a photo instead.');
+    }
     setUploading(true);
     try {
-      // 1. Ask backend for presigned URL
-      const presigned = await api.post<{ uploadUrl: string; key: string; fileUrl?: string }>(
-        '/staff/documents',
-        {
-          type,
-          fileName: file.name,
-          contentType: file.mimeType ?? 'application/octet-stream',
-        },
-      );
-
-      // 2. PUT file to S3
-      const blob = await (await fetch(file.uri)).blob();
-      const putRes = await fetch(presigned.uploadUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': file.mimeType ?? 'application/octet-stream' },
-        body: blob,
-      });
-      if (!putRes.ok) throw new Error(`Upload failed (${putRes.status})`);
-
-      // 3. Confirm
-      try {
-        await api.post('/staff/documents/confirm', {
-          key: presigned.key,
-          type,
-          fileName: file.name,
-        });
-      } catch (err: any) {
-        // confirm may not exist on backend; ignore
-        if (__DEV__) console.warn('[documents] confirm failed', err?.message);
+      let uri = file.uri;
+      if (!isPdf) {
+        // Phone cameras often save HEIC, which the media service rejects; send
+        // JPEG — and under its 1 MB image limit, shrinking until it fits.
+        const compressed = await compressImageUnder(file.uri, MAX_IMAGE_BYTES);
+        if (compressed.size !== null && compressed.size > MAX_IMAGE_BYTES) {
+          Alert.alert('Photo too large', 'Could not make this photo small enough. Try a closer, simpler shot.');
+          return;
+        }
+        uri = compressed.uri;
       }
-
+      const uploaded = await uploadViaMedia(uri, {
+        visibility: 'private',
+        contentType: isPdf ? 'application/pdf' : 'image/jpeg',
+        filename: `${type.toLowerCase()}-${Date.now()}.${isPdf ? 'pdf' : 'jpg'}`,
+      });
+      await api.post('/staff/documents/confirm', { key: uploaded.s3Key, type });
       qc.invalidateQueries({ queryKey: ['staff-documents'] });
-      Alert.alert('Uploaded', 'Document uploaded successfully', [
+      Alert.alert('Uploaded', 'Your document has been saved securely.', [
         { text: 'OK', onPress: () => router.back() },
       ]);
-    } catch (err: any) {
-      Alert.alert('Upload failed', err.message ?? 'Try again');
+    } catch (err: unknown) {
+      Alert.alert('Upload failed', err instanceof Error ? err.message : 'Try again');
     } finally {
       setUploading(false);
     }

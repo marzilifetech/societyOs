@@ -6,8 +6,8 @@ import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { colors } from '@societyos/theme';
 import i18nInstance from '../../src/lib/i18n';
-import { api } from '../../src/lib/api';
 import { AppHeader, EmptyState, FilterChips } from '../../src/components/ui';
+import { fetchMyLeaves } from '../../src/lib/leave';
 
 const STATUS_META: Record<string, { label: string; color: string; bg: string }> = {
   PENDING: { label: 'Pending', color: 'text-amber-700', bg: 'bg-amber-100' },
@@ -33,13 +33,7 @@ export default function LeaveHistoryScreen() {
 
   const { data: leaves, isLoading } = useQuery({
     queryKey: ['leave-history'],
-    queryFn: () =>
-      api
-        .get<any[]>('/staff/leaves')
-        .catch((e) => {
-          console.warn('[leaves] fetch failed', e?.message);
-          return [] as any[];
-        }),
+    queryFn: fetchMyLeaves,
   });
 
   const filtered = (leaves ?? []).filter((l) =>
@@ -86,15 +80,15 @@ export default function LeaveHistoryScreen() {
           ItemSeparatorComponent={() => <View className="h-3" />}
           renderItem={({ item }) => {
             const meta = STATUS_META[item.status] ?? STATUS_META.PENDING;
-            const from = new Date(item.fromDate);
-            const to = new Date(item.toDate);
+            const from = new Date(item.startDate);
+            const to = new Date(item.endDate);
             const days = Math.round((to.getTime() - from.getTime()) / 86400000) + 1;
             return (
               <View className="bg-white rounded-2xl p-4 shadow-sm">
                 <View className="flex-row items-start justify-between mb-2">
                   <View>
                     <Text className="text-sm font-semibold text-gray-900">
-                      {TYPE_LABELS[item.leaveType] ?? item.leaveType} Leave
+                      {TYPE_LABELS[item.type] ?? item.type} Leave
                     </Text>
                     <Text className="text-xs text-gray-400 mt-0.5">
                       {from.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}

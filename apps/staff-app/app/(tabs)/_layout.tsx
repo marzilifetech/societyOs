@@ -1,4 +1,4 @@
-import type { ComponentProps } from 'react';
+import { useEffect, type ComponentProps } from 'react';
 import { Tabs } from 'expo-router';
 import { View, Text } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -7,6 +7,8 @@ import { Ionicons } from '@expo/vector-icons';
 import i18nInstance from '../../src/lib/i18n';
 import { useColorScheme } from 'nativewind';
 import { useSettingsStore } from '../../src/store/settings.store';
+import { useLockStore } from '../../src/store/lock.store';
+import { appNavigator } from '../../src/lib/navigation';
 import { colors } from '@societyos/theme';
 
 const ACTIVE_LIGHT = colors.primary[500];
@@ -91,6 +93,12 @@ export default function TabLayout() {
   const isDark = colorScheme === 'dark';
   const badges = useSettingsStore((s) => s.badges);
   const insets = useSafeAreaInsets();
+  const locked = useLockStore((s) => s.locked);
+
+  // The signed-in shell is ready for navigation from outside the screen tree
+  // (notification taps) once it is mounted AND unlocked — never on top of the
+  // PIN lock. Held taps run now; see lib/navigation.ts.
+  useEffect(() => (locked ? undefined : appNavigator.markReady()), [locked]);
 
   // Honour the device's safe-area inset (home indicator on iPhone, gesture
   // pill on Android). Previously paddingBottom was a hardcoded 10px, which

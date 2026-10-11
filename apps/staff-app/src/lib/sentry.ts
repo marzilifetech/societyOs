@@ -1,6 +1,5 @@
 // Sentry init for staff-app. Imported once from app/_layout.tsx.
 import * as Sentry from '@sentry/react-native';
-import Constants from 'expo-constants';
 
 let initialized = false;
 
@@ -12,13 +11,16 @@ export function initSentry() {
     initialized = true;
     return;
   }
-  const release =
-    process.env.SENTRY_RELEASE ??
-    `staff@${(Constants?.expoConfig?.version as string | undefined) ?? '0.0.0'}`;
+  // Leave `release` unset unless SENTRY_RELEASE overrides it: the SDK then
+  // tags events with the native release (e.g. "com.marzi.staff@1.0.6+9",
+  // dist "9"), which is the release the Sentry Gradle step uploads source maps
+  // under. A hand-made "staff@<version>" never matched, so every stack trace
+  // would have stayed minified. (Same fix as the resident app.)
+  const release = process.env.SENTRY_RELEASE;
 
   Sentry.init({
     dsn,
-    release,
+    ...(release ? { release } : {}),
     enableAutoSessionTracking: true,
     tracesSampleRate: 0.1,
     // Capture unhandled JS rejections.

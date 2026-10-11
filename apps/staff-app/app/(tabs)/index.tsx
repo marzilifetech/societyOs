@@ -11,7 +11,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import i18nInstance from '../../src/lib/i18n';
 import { useQuery } from '@tanstack/react-query';
-import type { ServiceRequest } from '@societyos/api-client';
+import { flatLabel, type ServiceRequest } from '@societyos/api-client';
 import { useAuthStore } from '../../src/store/auth.store';
 import { getUnwrapped, getUnwrappedArray } from '../../src/lib/unwrapped-get';
 import { SkeletonCard, SkeletonRow } from '../../src/components/attendance/SkeletonCard';
@@ -22,6 +22,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '@societyos/theme';
 import { Card, EmptyState, StatusChip } from '../../src/components/ui';
 import { TASK_STATUS_TONES, toneFor } from '../../src/lib/status-theme';
+import { SOS_ACTIVE_KEY, fetchActiveSos } from '../../src/lib/sos';
+import { HOUSEKEEPING_KEY, fetchMyHousekeeping } from '../../src/lib/housekeeping';
 
 type QuickActionIcon = ComponentProps<typeof Ionicons>['name'];
 
@@ -36,7 +38,7 @@ type TodayShift = {
   role?: string;
 };
 
-type AssignedTask = ServiceRequest & { completedAt?: string | null };
+type AssignedTask = ServiceRequest;
 
 function taskStatusStyleKey(status: string): 'PENDING' | 'ASSIGNED' | 'IN_PROGRESS' {
   if (status === 'ASSIGNED' || status === 'IN_PROGRESS') return status;
@@ -109,10 +111,34 @@ export default function StaffHomeScreen() {
   });
   const unreadInbox = unread?.count ?? 0;
 
+  // Open SOS alerts in the society. A push is the primary signal, but a guard
+  // who missed it (phone off, notifications muted by the OEM) must still see
+  // an emergency the moment they open the app.
+  const { data: openSos = [] } = useQuery({
+    queryKey: SOS_ACTIVE_KEY,
+    queryFn: fetchActiveSos,
+    enabled: !!user,
+    refetchInterval: 30_000,
+  });
+  const sosNeedingHelp = openSos.filter((a) => a.status === 'ACTIVE').length;
+
+  // Shown only to staff who have housekeeping jobs assigned.
+  const { data: housekeeping = [] } = useQuery({
+    queryKey: HOUSEKEEPING_KEY,
+    queryFn: fetchMyHousekeeping,
+    enabled: !!user,
+    staleTime: 5 * 60_000,
+  });
+  const openHousekeeping = housekeeping.filter(
+    (j) => j.status !== 'COMPLETED' && j.status !== 'CANCELLED',
+  ).length;
+
   const pendingTasks = myTasks.filter((task) => task.status !== 'COMPLETED' && task.status !== 'REJECTED');
   const doneToday = myTasks.filter((task) => {
-    if (task.status !== 'COMPLETED' || !task.completedAt) return false;
-    const d = new Date(task.completedAt);
+    // `resolvedAt` is the completion time the API sends; this read
+    // `completedAt`, which it never did, so "done today" was always 0.
+    if (task.status !== 'COMPLETED' || !task.resolvedAt) return false;
+    const d = new Date(task.resolvedAt);
     const now = new Date();
     return d.toDateString() === now.toDateString();
   }).length;
@@ -229,6 +255,24 @@ export default function StaffHomeScreen() {
           </TouchableOpacity>
         </View>
 
+        {sosNeedingHelp > 0 ? (
+          <TouchableOpacity
+            onPress={() => router.push('/sos/alerts' as never)}
+            accessibilityRole="button"
+            accessibilityLabel={`${sosNeedingHelp} SOS alert${sosNeedingHelp > 1 ? 's' : ''} need help. Open.`}
+            className="mx-6 mt-4 mb-2 rounded-2xl bg-red-600 px-4 py-4 flex-row items-center"
+          >
+            <Ionicons name="alert-circle" size={28} color="#FFFFFF" />
+            <View className="flex-1 ml-3">
+              <Text className="text-white font-heading text-base">
+                {sosNeedingHelp === 1 ? 'SOS — someone needs help' : `${sosNeedingHelp} SOS alerts need help`}
+              </Text>
+              <Text className="text-red-100 text-xs mt-0.5">Tap to see who and where</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#FFFFFF" />
+          </TouchableOpacity>
+        ) : null}
+
         {/* Daily briefing card (Task 1) */}
         <View className="px-6 -mt-4 mb-4">
           <Card>
@@ -325,6 +369,14 @@ export default function StaffHomeScreen() {
           <View className="flex-row flex-wrap gap-3">
             <QuickAction icon="time-outline" label={t('home.actionCheckIn')} onPress={() => router.push('/(tabs)/attendance' as any)} />
             <QuickAction icon="construct-outline" label={t('home.actionViewTasks')} onPress={() => router.push('/(tabs)/tasks' as any)} />
+            <QuickAction icon="hand-left-outline" label={t('helpRequests.title')} onPress={() => router.push('/help-requests' as never)} />
+            {openHousekeeping > 0 ? (
+              <QuickAction
+                icon="sparkles-outline"
+                label={`Housekeeping (${openHousekeeping})`}
+                onPress={() => router.push('/housekeeping' as never)}
+              />
+            ) : null}
             <QuickAction icon="qr-code-outline" label={t('home.actionGateScan')} onPress={() => router.push('/scan/qr' as any)} />
             {isSecurity && (
               <QuickAction
@@ -446,11 +498,11 @@ function TaskCard({ task }: { task: AssignedTask }) {
         <View className="flex-1">
           <Text className="text-sm font-semibold text-gray-900 dark:text-gray-100">{task.category}</Text>
           <Text className="text-xs text-gray-400 dark:text-gray-500 mt-0.5" numberOfLines={1}>{task.description}</Text>
-          {task.unit && (
+          {flatLabel(task.resident?.flat) ? (
             <Text className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-              {t('home.flat', { number: task.unit.flatNumber })}
+              {t('home.flat', { number: flatLabel(task.resident?.flat) })}
             </Text>
-          )}
+          ) : null}
         </View>
         <StatusChip tone={toneFor(TASK_STATUS_TONES, key, 'PENDING')} label={label} />
       </Card>

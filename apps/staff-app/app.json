@@ -2,7 +2,7 @@
   "expo": {
     "name": "Marzi Staff App",
     "slug": "societyos-staff",
-    "version": "1.0.5",
+    "version": "1.0.6",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -13,20 +13,23 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.societyos.staff",
+      "bundleIdentifier": "com.marzi.staff",
       "infoPlist": {
-        "UIBackgroundModes": ["remote-notification"]
-      }
+        "UIBackgroundModes": ["remote-notification"],
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "buildNumber": "1"
     },
     "android": {
-      "versionCode": 8,
+      "versionCode": 9,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#6E0043"
       },
       "package": "com.marzi.staff",
       "googleServicesFile": "./google-services.json",
-      "permissions": ["POST_NOTIFICATIONS", "VIBRATE"]
+      "permissions": ["POST_NOTIFICATIONS", "VIBRATE"],
+      "blockedPermissions": ["android.permission.RECORD_AUDIO"]
     },
     "plugins": [
       "expo-router",
@@ -34,13 +37,26 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow SocietyOS Staff to access camera for QR scanning."
+          "cameraPermission": "Marzi Staff uses the camera to scan visitor passes and photograph completed work.",
+          "recordAudioAndroid": false,
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Marzi Staff lets you attach photos of your work and your documents.",
+          "cameraPermission": "Marzi Staff uses the camera to photograph completed work and documents.",
+          "microphonePermission": false
         }
       ],
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Allow SocietyOS Staff to use location for geofence check-in."
+          "locationWhenInUsePermission": "Marzi Staff uses your location to confirm you are at the society when you check in.",
+          "locationAlwaysAndWhenInUsePermission": "Marzi Staff uses your location to confirm you are at the society when you check in.",
+          "isIosBackgroundLocationEnabled": false,
+          "isAndroidBackgroundLocationEnabled": false
         }
       ],
       [
@@ -53,7 +69,6 @@
       ],
       "expo-local-authentication",
       "expo-font",
-      "expo-audio",
       "expo-video",
       "@react-native-community/datetimepicker"
     ],

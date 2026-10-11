@@ -22,6 +22,7 @@ import {
 } from '@societyos/api-client';
 import { api } from '../../src/lib/api';
 import { useAuthStore } from '../../src/store/auth.store';
+import { useLockStore } from '../../src/store/lock.store';
 
 const OTP_LENGTH = 4;
 const RESEND_SECONDS = 30;
@@ -118,6 +119,8 @@ export default function OtpVerifyScreen() {
         phone: `+91${phone}`,
         otp: value,
         societyId,
+        // Unknown numbers are refused instead of becoming pending residents.
+        client: 'staff',
       });
       const res = unwrapApiEnvelope<VerifyOtpPayload>(raw);
 
@@ -142,7 +145,12 @@ export default function OtpVerifyScreen() {
 
       await setAuth(accessToken, res.refreshToken ?? null, user);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      router.replace('/(tabs)');
+      // Every session gets its own PIN (sign-out clears it). This went straight
+      // to Home, so a new sign-in ran with no lock at all until the next cold
+      // start finally asked for one.
+      router.replace(
+        useLockStore.getState().hasPin ? ('/(tabs)' as never) : ('/(auth)/pin-setup' as never),
+      );
     } catch (err) {
       // Inline, not an Alert: the old modal had to be dismissed before the
       // user could even see the boxes again, and it cleared the code out from

@@ -1,7 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
+  Linking,
   ScrollView,
   Text,
   TouchableOpacity,
@@ -12,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '@societyos/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
-import { unwrapApiEnvelope } from '@societyos/api-client';
+import { flatLabel, unwrapApiEnvelope, type ResidentBrief } from '@societyos/api-client';
 import { api } from '../../../src/lib/api';
 
 type VisitorStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'LEFT_AT_SECURITY';
@@ -24,7 +25,14 @@ type VisitorRow = {
   type: 'GUEST' | 'DELIVERY';
   deliveryPartner: string | null;
   approvalStatus: VisitorStatus;
+  resident?: ResidentBrief | null;
 };
+
+/** Poll fast at first, slower after 2 min, stop after 15 — the guard can call instead. */
+const FAST_POLL_MS = 2000;
+const SLOW_POLL_MS = 5000;
+const SLOW_AFTER_MS = 2 * 60_000;
+const STOP_AFTER_MS = 15 * 60_000;
 
 const PRIMARY = colors.primary[500];
 
@@ -39,7 +47,14 @@ const PRIMARY = colors.primary[500];
 export default function AwaitingDecisionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
 
-  const { data: visitor, isLoading } = useQuery({
+  const startedAt = useRef(Date.now());
+  const [waitedLong, setWaitedLong] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setWaitedLong(true), SLOW_AFTER_MS);
+    return () => clearTimeout(t);
+  }, []);
+
+  const { data: visitor, isLoading, isError, refetch } = useQuery({
     queryKey: ['visitor-awaiting', id],
     queryFn: async () => {
       // Staff-scoped endpoint — bypasses the resident-ownership check that
@@ -48,9 +63,15 @@ export default function AwaitingDecisionScreen() {
       return unwrapApiEnvelope<VisitorRow>(raw);
     },
     enabled: !!id,
+    // Keeps polling while there is no answer — including when the first load
+    // failed. It used to stop as soon as `data` was undefined, leaving a
+    // spinner that never resolved.
     refetchInterval: (q) => {
       const data = q.state.data as VisitorRow | undefined;
-      return data?.approvalStatus === 'PENDING' ? 2000 : false;
+      if (data && data.approvalStatus !== 'PENDING') return false;
+      const waited = Date.now() - startedAt.current;
+      if (waited > STOP_AFTER_MS) return false;
+      return waited > SLOW_AFTER_MS ? SLOW_POLL_MS : FAST_POLL_MS;
     },
   });
 
@@ -78,7 +99,16 @@ export default function AwaitingDecisionScreen() {
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 24 }}>
-        {isLoading || !visitor ? (
+        {!visitor && isError && !isLoading ? (
+          <View className="items-center justify-center py-24">
+            <Text className="text-center text-gray-600 dark:text-gray-300 mb-4">
+              Couldn't check the resident's answer. Check your connection.
+            </Text>
+            <TouchableOpacity onPress={() => void refetch()} className="rounded-full bg-primary-500 px-6 py-3">
+              <Text className="font-semibold text-white">Try again</Text>
+            </TouchableOpacity>
+          </View>
+        ) : !visitor ? (
           <View className="items-center justify-center py-24">
             <ActivityIndicator size="large" color={PRIMARY} />
           </View>
@@ -121,6 +151,25 @@ export default function AwaitingDecisionScreen() {
             <View className="mt-8">
               <Outcome status={visitor.approvalStatus} />
             </View>
+
+            {visitor.approvalStatus === 'PENDING' && waitedLong && visitor.resident?.user?.phone ? (
+              <View className="mt-4 rounded-2xl bg-amber-50 p-4 dark:bg-amber-950/40">
+                <Text className="text-sm text-amber-900 dark:text-amber-100">
+                  No answer yet. Their phone may be off or out of signal — call them instead.
+                </Text>
+                <TouchableOpacity
+                  onPress={() => void Linking.openURL(`tel:${visitor.resident!.user!.phone}`)}
+                  accessibilityRole="button"
+                  className="mt-3 flex-row items-center justify-center rounded-full bg-green-600 py-3"
+                >
+                  <Ionicons name="call" size={18} color="#fff" />
+                  <Text className="ml-2 font-semibold text-white">
+                    Call {visitor.resident.user.name ?? 'resident'}
+                    {flatLabel(visitor.resident.flat) ? ` (${flatLabel(visitor.resident.flat)})` : ''}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
 
             {visitor.approvalStatus !== 'PENDING' && (
               <View className="mt-8 gap-3">

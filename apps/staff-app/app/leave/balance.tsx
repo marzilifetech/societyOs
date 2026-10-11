@@ -4,14 +4,9 @@ import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
-import { api } from '../../src/lib/api';
 import { LeaveTypeCard } from '../../src/components/leave/LeaveTypeCard';
+import { fetchLeaveBalance, fetchMyLeaves, leaveDays } from '../../src/lib/leave';
 
-type Balance = {
-  casual: { used: number; total: number };
-  medical: { used: number; total: number };
-  privilege: { used: number; total: number };
-};
 
 const CURRENT_YEAR = new Date().getFullYear();
 const YEARS = [CURRENT_YEAR - 1, CURRENT_YEAR, CURRENT_YEAR + 1];
@@ -21,27 +16,17 @@ export default function LeaveBalanceScreen() {
 
   const { data: balance, isLoading } = useQuery({
     queryKey: ['leave-balance', year],
-    queryFn: () =>
-      api
-        .get<Balance>(`/staff/leave-balance?year=${year}`)
-        .catch((e) => {
-          console.warn('[leave-balance] fetch failed', e?.message);
-          return null;
-        }),
+    queryFn: fetchLeaveBalance,
   });
 
   const { data: leaves } = useQuery({
-    queryKey: ['leave-history-recent', year],
-    queryFn: () =>
-      api
-        .get<any[]>(`/staff/leaves?year=${year}`)
-        .catch((e) => {
-          console.warn('[leaves] fetch failed', e?.message);
-          return [] as any[];
-        }),
+    queryKey: ['leave-history'],
+    queryFn: fetchMyLeaves,
   });
 
-  const recent = (leaves ?? []).slice(0, 5);
+  const recent = (leaves ?? [])
+    .filter((l) => new Date(l.startDate).getFullYear() === year)
+    .slice(0, 5);
 
   return (
     <SafeAreaView className="flex-1 bg-white">
@@ -92,22 +77,22 @@ export default function LeaveBalanceScreen() {
               <LeaveTypeCard
                 label="Casual Leave"
                 type="CASUAL"
-                used={balance.casual?.used ?? 0}
-                total={balance.casual?.total ?? 0}
+                used={balance?.CASUAL?.used ?? 0}
+                total={balance?.CASUAL?.total ?? 0}
                 color="#821A52"
               />
               <LeaveTypeCard
                 label="Medical Leave"
                 type="MEDICAL"
-                used={balance.medical?.used ?? 0}
-                total={balance.medical?.total ?? 0}
+                used={balance?.MEDICAL?.used ?? 0}
+                total={balance?.MEDICAL?.total ?? 0}
                 color="#DC2626"
               />
               <LeaveTypeCard
                 label="Privilege Leave"
                 type="PRIVILEGE"
-                used={balance.privilege?.used ?? 0}
-                total={balance.privilege?.total ?? 0}
+                used={balance?.PRIVILEGE?.used ?? 0}
+                total={balance?.PRIVILEGE?.total ?? 0}
                 color="#059669"
               />
             </>
@@ -129,10 +114,9 @@ export default function LeaveBalanceScreen() {
               <Text className="text-gray-500 text-sm">No leaves taken yet</Text>
             </View>
           ) : (
-            recent.map((l: any) => {
-              const from = new Date(l.fromDate);
-              const to = new Date(l.toDate);
-              const days = Math.round((to.getTime() - from.getTime()) / 86400000) + 1;
+            recent.map((l) => {
+              const from = new Date(l.startDate);
+              const days = leaveDays(l.startDate, l.endDate);
               const statusBadge =
                 l.status === 'APPROVED'
                   ? 'bg-green-100'
@@ -149,7 +133,7 @@ export default function LeaveBalanceScreen() {
                 <View key={l.id} className="bg-gray-50 rounded-2xl p-4 mb-2 flex-row items-center justify-between border border-gray-200">
                   <View className="flex-1">
                     <Text className="text-sm font-semibold text-gray-900">
-                      {l.leaveType} · {days} day{days !== 1 ? 's' : ''}
+                      {l.type} · {days} day{days !== 1 ? 's' : ''}
                     </Text>
                     <Text className="text-xs text-gray-400 mt-0.5">
                       {from.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}

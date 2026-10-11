@@ -1,28 +1,23 @@
-import { useState, useEffect, useCallback } from 'react';
+import { memo, useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   FlatList,
   TouchableOpacity,
   ActivityIndicator,
-  Alert,
   RefreshControl,
 } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import i18nInstance from '../../src/lib/i18n';
-import * as Haptics from 'expo-haptics';
-import type { ServiceRequest } from '@societyos/api-client';
-import { api } from '../../src/lib/api';
+import { flatLabel, type ServiceRequest } from '@societyos/api-client';
 import { getUnwrappedArray } from '../../src/lib/unwrapped-get';
-import { useTimerStore } from '../../src/store/timer.store';
 import { ElapsedChip } from '../../src/components/task/ElapsedChip';
 import { PriorityBadge } from '../../src/components/task/PriorityBadge';
 import { TaskEmptyState } from '../../src/components/task/TaskEmptyState';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import MapView, { Marker } from 'react-native-maps';
 import { colors } from '@societyos/theme';
 import { Card, FilterChips, StatusChip } from '../../src/components/ui';
 import { TASK_STATUS_TONES, toneFor } from '../../src/lib/status-theme';
@@ -46,7 +41,7 @@ const FILTER_MAP: Record<FilterId, string[]> = {
   completed: ['COMPLETED'],
 };
 
-type TaskListItem = ServiceRequest & { lat?: number; lng?: number };
+type TaskListItem = ServiceRequest;
 
 function localeTag(lang: string) {
   return lang === 'en' ? 'en-IN' : `${lang}-IN`;
@@ -54,10 +49,7 @@ function localeTag(lang: string) {
 
 export default function TasksScreen() {
   const { t } = useTranslation(undefined, { i18n: i18nInstance });
-  const qc = useQueryClient();
   const [filter, setFilter] = useState<FilterId>('all');
-  const [view, setView] = useState<'list' | 'map'>('list');
-  const startTimer = useTimerStore((s) => s.start);
 
   useEffect(() => {
     AsyncStorage.getItem(FILTER_KEY).then((v: string | null) => {
@@ -71,23 +63,14 @@ export default function TasksScreen() {
     AsyncStorage.setItem(FILTER_KEY, filter).catch(() => {});
   }, [filter]);
 
-  const { data: tasks = [], isLoading, refetch, isRefetching } = useQuery({
+  const {
+    data: tasks = [],
+    isLoading,
+    refetch,
+    isRefetching,
+  } = useQuery({
     queryKey: ['my-tasks'],
     queryFn: () => getUnwrappedArray<TaskListItem>('/service-requests/assigned'),
-  });
-
-  const updateMutation = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: string }) =>
-      api.patch(`/service-requests/${id}/status`, { status }),
-    onSuccess: (_, vars) => {
-      qc.invalidateQueries({ queryKey: ['my-tasks'] });
-      if (vars.status === 'IN_PROGRESS') {
-        startTimer(vars.id);
-      }
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
-    },
-    onError: (err) =>
-      Alert.alert(t('common.error'), err instanceof Error ? err.message : t('common.error')),
   });
 
   const filtered = tasks.filter((task) => {
@@ -96,26 +79,15 @@ export default function TasksScreen() {
   });
 
   const onRefresh = useCallback(() => refetch(), [refetch]);
+  const renderTask = useCallback(({ item }: { item: TaskListItem }) => <TaskRow item={item} />, []);
 
   return (
     <SafeAreaView className="flex-1 bg-gray-50 dark:bg-gray-950">
-      <View className="px-6 pt-6 pb-4">
-        <View className="flex-row items-center justify-between mb-4">
-          <Text className="text-2xl font-heading text-gray-900 dark:text-gray-100">{t('tasks.title')}</Text>
-          <View className="flex-row bg-gray-200 dark:bg-gray-800 rounded-full p-0.5">
-            <TouchableOpacity
-              className={`px-3 py-1 rounded-full ${view === 'list' ? 'bg-white dark:bg-gray-900' : ''}`}
-              onPress={() => setView('list')}
-            >
-              <Text className="text-xs font-semibold text-gray-700 dark:text-gray-200">{t('tasks.list')}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              className={`px-3 py-1 rounded-full ${view === 'map' ? 'bg-white dark:bg-gray-900' : ''}`}
-              onPress={() => setView('map')}
-            >
-              <Text className="text-xs font-semibold text-gray-700 dark:text-gray-200">{t('tasks.map')}</Text>
-            </TouchableOpacity>
-          </View>
+      <View className="px-6 pb-4 pt-6">
+        <View className="mb-4 flex-row items-center justify-between">
+          <Text className="font-heading text-2xl text-gray-900 dark:text-gray-100">
+            {t('tasks.title')}
+          </Text>
         </View>
 
         <FilterChips
@@ -130,8 +102,6 @@ export default function TasksScreen() {
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator color={colors.primary[500]} />
         </View>
-      ) : view === 'map' ? (
-        <MapTaskView tasks={filtered} />
       ) : filtered.length === 0 ? (
         <TaskEmptyState />
       ) : (
@@ -144,126 +114,93 @@ export default function TasksScreen() {
           contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 32 }}
           ItemSeparatorComponent={() => <View className="h-3" />}
           refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={onRefresh} />}
-          renderItem={({ item }) => (
-            <TaskRow
-              item={item}
-              onUpdate={(status) => updateMutation.mutate({ id: item.id, status })}
-              loading={updateMutation.isPending}
-            />
-          )}
+          renderItem={renderTask}
         />
       )}
     </SafeAreaView>
   );
 }
 
-function TaskRow({
-  item,
-  onUpdate,
-  loading,
-}: {
-  item: TaskListItem;
-  onUpdate: (status: string) => void;
-  loading: boolean;
-}) {
+/**
+ * One task. "Start work" and "Mark complete" open the screens that take the
+ * before/after photos — they used to change the status straight from the
+ * list, which skipped the proof-of-work photos entirely.
+ */
+const TaskRow = memo(function TaskRow({ item }: { item: TaskListItem }) {
   const { t } = useTranslation(undefined, { i18n: i18nInstance });
   const loc = localeTag(i18nInstance.language);
-  const statusKey = ['PENDING', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'REJECTED'].includes(item.status)
+  const statusKey = ['PENDING', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'REJECTED'].includes(
+    item.status,
+  )
     ? item.status
     : 'PENDING';
   const statusLabel = t(`tasks.status.${statusKey}`);
 
   return (
-    <TouchableOpacity
-      activeOpacity={0.85}
-      onPress={() => router.push(`/tasks/${item.id}` as any)}
-    >
+    <TouchableOpacity activeOpacity={0.85} onPress={() => router.push(`/tasks/${item.id}` as any)}>
       <Card>
-      <View className="flex-row items-start justify-between mb-2">
-        <View className="flex-1 mr-3">
-          <Text className="text-sm font-semibold text-gray-900 dark:text-gray-100">{item.category}</Text>
-          {item.unit && (
-            <Text className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-              {t('home.flat', { number: item.unit.flatNumber })}
+        <View className="mb-2 flex-row items-start justify-between">
+          <View className="mr-3 flex-1">
+            <Text className="font-semibold text-sm text-gray-900 dark:text-gray-100">
+              {item.category}
             </Text>
-          )}
+            {flatLabel(item.resident?.flat) ? (
+              <Text className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
+                {item.resident?.user?.name ? `${item.resident.user.name} · ` : ''}
+                {t('home.flat', { number: flatLabel(item.resident?.flat) })}
+              </Text>
+            ) : null}
+          </View>
+          <StatusChip tone={toneFor(TASK_STATUS_TONES, statusKey, 'PENDING')} label={statusLabel} />
         </View>
-        <StatusChip tone={toneFor(TASK_STATUS_TONES, statusKey, 'PENDING')} label={statusLabel} />
-      </View>
 
-      <Text className="text-sm text-gray-600 dark:text-gray-400 mb-3 leading-5" numberOfLines={2}>
-        {item.description}
-      </Text>
-
-      <View className="flex-row items-center gap-2 mb-3">
-        <Text className="text-xs text-gray-400 dark:text-gray-500">
-          {new Date(item.createdAt).toLocaleDateString(loc, {
-            day: 'numeric',
-            month: 'short',
-          })}
+        <Text className="mb-3 text-sm leading-5 text-gray-600 dark:text-gray-400" numberOfLines={2}>
+          {item.description}
         </Text>
-        <PriorityBadge createdAt={item.createdAt} status={item.status} />
-        {item.status === 'IN_PROGRESS' && <ElapsedChip taskId={item.id} />}
-      </View>
-      {(item as any).scheduledTime && (
-        <View className="flex-row items-center gap-1.5 mb-3">
-          <Text className="text-xs text-primary-500 dark:text-primary-400">
-            Scheduled: {new Date((item as any).scheduledTime).toLocaleString(loc, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
-          </Text>
-        </View>
-      )}
 
-      {item.status === 'ASSIGNED' && (
-        <TouchableOpacity
-          className="bg-amber-500 dark:bg-amber-600 rounded-full py-2.5 items-center"
-          onPress={() => onUpdate('IN_PROGRESS')}
-          disabled={loading}
-        >
-          <Text className="text-white font-semibold text-sm">{t('tasks.startWork')}</Text>
-        </TouchableOpacity>
-      )}
-      {item.status === 'IN_PROGRESS' && (
-        <TouchableOpacity
-          className="bg-green-500 dark:bg-green-600 rounded-full py-2.5 items-center"
-          onPress={() =>
-            Alert.alert(t('tasks.completeTitle'), t('tasks.completeConfirm'), [
-              { text: t('common.cancel'), style: 'cancel' },
-              { text: t('tasks.completeAction'), onPress: () => onUpdate('COMPLETED') },
-            ])
-          }
-          disabled={loading}
-        >
-          <Text className="text-white font-semibold text-sm">{t('tasks.markComplete')}</Text>
-        </TouchableOpacity>
-      )}
+        <View className="mb-3 flex-row items-center gap-2">
+          <Text className="text-xs text-gray-400 dark:text-gray-500">
+            {new Date(item.createdAt).toLocaleDateString(loc, {
+              day: 'numeric',
+              month: 'short',
+            })}
+          </Text>
+          <PriorityBadge createdAt={item.createdAt} status={item.status} />
+          {item.status === 'IN_PROGRESS' && <ElapsedChip taskId={item.id} />}
+        </View>
+        {(item as any).scheduledTime && (
+          <View className="mb-3 flex-row items-center gap-1.5">
+            <Text className="text-xs text-primary-500 dark:text-primary-400">
+              Scheduled:{' '}
+              {new Date((item as any).scheduledTime).toLocaleString(loc, {
+                day: 'numeric',
+                month: 'short',
+                hour: '2-digit',
+                minute: '2-digit',
+              })}
+            </Text>
+          </View>
+        )}
+
+        {item.status === 'ASSIGNED' && (
+          <TouchableOpacity
+            className="items-center rounded-full bg-amber-500 py-2.5 dark:bg-amber-600"
+            onPress={() => router.push(`/tasks/${item.id}/start` as never)}
+            accessibilityRole="button"
+          >
+            <Text className="font-semibold text-sm text-white">{t('tasks.startWork')}</Text>
+          </TouchableOpacity>
+        )}
+        {item.status === 'IN_PROGRESS' && (
+          <TouchableOpacity
+            className="items-center rounded-full bg-green-500 py-2.5 dark:bg-green-600"
+            onPress={() => router.push(`/tasks/${item.id}/complete` as never)}
+            accessibilityRole="button"
+          >
+            <Text className="font-semibold text-sm text-white">{t('tasks.markComplete')}</Text>
+          </TouchableOpacity>
+        )}
       </Card>
     </TouchableOpacity>
   );
-}
-
-type TaskWithCoords = TaskListItem & { lat: number; lng: number };
-
-function MapTaskView({ tasks }: { tasks: TaskListItem[] }) {
-  const withCoords: TaskWithCoords[] = tasks.filter(
-    (task): task is TaskWithCoords => typeof task.lat === 'number' && typeof task.lng === 'number',
-  );
-  const first = withCoords[0];
-  const initial = first
-    ? { latitude: first.lat, longitude: first.lng, latitudeDelta: 0.01, longitudeDelta: 0.01 }
-    : { latitude: 12.97, longitude: 77.59, latitudeDelta: 0.05, longitudeDelta: 0.05 };
-  return (
-    <View className="flex-1">
-      <MapView style={{ flex: 1 }} initialRegion={initial}>
-        {withCoords.map((task) => (
-          <Marker
-            key={task.id}
-            coordinate={{ latitude: task.lat, longitude: task.lng }}
-            title={task.category}
-            description={task.description}
-            onCalloutPress={() => router.push(`/tasks/${task.id}` as any)}
-          />
-        ))}
-      </MapView>
-    </View>
-  );
-}
+});

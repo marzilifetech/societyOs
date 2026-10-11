@@ -149,8 +149,13 @@ export async function performOrQueue(req: Omit<QueuedRequest, 'id' | 'createdAt'
         case 'PATCH':
           await api.patch(req.path, req.body);
           break;
-        default:
-          await api.post(req.path, req.body);
+        // These used to fall through to POST — the wrong handler, or a 404.
+        case 'PUT':
+          await api.put(req.path, req.body);
+          break;
+        case 'DELETE':
+          await api.delete(req.path);
+          break;
       }
       return true;
     } catch {

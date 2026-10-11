@@ -301,10 +301,12 @@ ${CHANNELS.map(channelKotlin).join('\n')}
 const MODULE_KT = `package ${JAVA_PACKAGE}
 
 import android.app.NotificationManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
 import android.provider.Settings
 import androidx.core.app.NotificationManagerCompat
 import com.facebook.react.bridge.Arguments
@@ -341,7 +343,94 @@ class MarziNotificationsModule(private val reactContext: ReactApplicationContext
     // Lets JS skip its own ~14 async channel-creation round-trips on login.
     "channelsReady" to MarziNotificationChannels.isReady(),
     "defaultChannelId" to MarziNotificationChannels.DEFAULT_CHANNEL_ID,
+    // Lets JS tailor the "keep alerts arriving" steps to the phone's maker.
+    "manufacturer" to (Build.MANUFACTURER ?: ""),
   )
+
+  /**
+   * True when Android will not defer this app for battery saving (Doze / App
+   * Standby). On most budget Android phones sold in India, an optimised app
+   * that has been idle has its pushes held back — a guard's SOS alert can
+   * arrive minutes late, or only when the screen is next turned on.
+   */
+  @ReactMethod
+  fun isIgnoringBatteryOptimizations(promise: Promise) {
+    try {
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+        promise.resolve(true)
+        return
+      }
+      val pm = reactContext.getSystemService(Context.POWER_SERVICE) as PowerManager
+      promise.resolve(pm.isIgnoringBatteryOptimizations(reactContext.packageName))
+    } catch (t: Throwable) {
+      promise.reject("E_BATTERY_STATE", t)
+    }
+  }
+
+  /**
+   * The system list where the user marks the app "Don't optimise". Uses the
+   * settings LIST (no special permission) rather than the direct exemption
+   * dialog, whose permission Play only allows for a few app categories.
+   */
+  @ReactMethod
+  fun openBatteryOptimizationSettings(promise: Promise) {
+    try {
+      launch(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+      promise.resolve(true)
+    } catch (t: Throwable) {
+      try {
+        launch(appDetailsIntent())
+        promise.resolve(true)
+      } catch (t2: Throwable) {
+        promise.reject("E_OPEN_BATTERY", t2)
+      }
+    }
+  }
+
+  /**
+   * The phone maker's own "auto-start" / "background activity" screen. Xiaomi,
+   * Oppo, Realme, Vivo and others kill swiped-away apps and block them from
+   * restarting unless this is allowed — FCM can then deliver nothing at all.
+   * Resolves false when this phone has no such screen.
+   *
+   * Explicit intents are launched directly rather than looked up first: on
+   * Android 11+ package-visibility rules hide other apps from queries, but
+   * starting an exported activity by component still works.
+   */
+  @ReactMethod
+  fun openAutostartSettings(promise: Promise) {
+    for (component in AUTOSTART_SCREENS) {
+      try {
+        launch(Intent().setComponent(component))
+        promise.resolve(true)
+        return
+      } catch (_: Throwable) {
+        // Not on this phone, or not exported — try the next maker's screen.
+      }
+    }
+    promise.resolve(false)
+  }
+
+  private fun appDetailsIntent(): Intent =
+    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+      .setData(Uri.fromParts("package", reactContext.packageName, null))
+
+  companion object {
+    private val AUTOSTART_SCREENS = listOf(
+      ComponentName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"),
+      ComponentName("com.coloros.safecenter", "com.coloros.safecenter.permission.startup.StartupAppListActivity"),
+      ComponentName("com.coloros.safecenter", "com.coloros.safecenter.startupapp.StartupAppListActivity"),
+      ComponentName("com.oppo.safe", "com.oppo.safe.permission.startup.StartupAppListActivity"),
+      ComponentName("com.vivo.permissionmanager", "com.vivo.permissionmanager.activity.BgStartUpManagerActivity"),
+      ComponentName("com.iqoo.secure", "com.iqoo.secure.ui.phoneoptimize.BgStartUpManager"),
+      ComponentName("com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"),
+      ComponentName("com.huawei.systemmanager", "com.huawei.systemmanager.optimize.process.ProtectActivity"),
+      ComponentName("com.samsung.android.lool", "com.samsung.android.sm.battery.ui.BatteryActivity"),
+      ComponentName("com.samsung.android.lool", "com.samsung.android.sm.ui.battery.BatteryActivity"),
+      ComponentName("com.asus.mobilemanager", "com.asus.mobilemanager.entry.FunctionActivity"),
+      ComponentName("com.letv.android.letvsafe", "com.letv.android.letvsafe.AutobootManageActivity"),
+    )
+  }
 
   /** True when the user has not blocked notifications for the whole app. */
   @ReactMethod

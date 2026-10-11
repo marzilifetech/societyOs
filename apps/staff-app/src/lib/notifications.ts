@@ -2,20 +2,44 @@ import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { router } from 'expo-router';
+import {
+  readNotificationData,
+  notificationEntityId,
+  notificationType,
+  settleWithin,
+} from '@societyos/mobile-core';
+import type { ApiClient } from '@societyos/api-client';
 import { api } from './api';
 import { nativeChannelsReady } from './native-notifications';
+import { appNavigator } from './navigation';
+import { useLockStore } from '../store/lock.store';
+import { hrefForNotification, performNotificationAction } from './notification-routes';
 
-// Last registered FCM token cache. Module-scope was fragile (a logout couldn't
-// force a re-register); AsyncStorage means the comparison survives across cold
-// starts and only POSTs when the token actually changed.
-const DEVICE_TOKEN_KEY = 'fcm_device_token';
+/**
+ * Legacy AsyncStorage cache of the last registered FCM token. It made
+ * registration skip the POST whenever the token was unchanged — which is
+ * exactly the case on a shared guard phone when a different guard signs in, so
+ * the server kept routing guard A's pushes to the phone guard B now held, and
+ * guard B never got their own. Only removed now (see unregisterDeviceToken).
+ */
+const LEGACY_DEVICE_TOKEN_KEY = 'fcm_device_token';
 
-let responseSub: Notifications.Subscription | null = null;
-let tokenSub: Notifications.Subscription | null = null;
+/** `${userId}:${token}` last confirmed by the server in THIS process. */
+let registeredKey: string | null = null;
+/** The token most recently obtained, for unregistering at sign-out. */
+let lastKnownToken: string | null = null;
 
 // appType the backend expects for device-token routing.
 const APP_TYPE = 'staff' as const;
+
+/**
+ * The auth store, required lazily: it imports this module (sign-out
+ * unregisters the device token), so a top-level import would be a cycle.
+ */
+function authStore(): (typeof import('../store/auth.store'))['useAuthStore'] {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require('../store/auth.store').useAuthStore;
+}
 
 /**
  * iOS action categories. The identifier MUST match the backend's
@@ -67,22 +91,61 @@ export async function setupNotificationCategories() {
 }
 
 /**
- * POST the device push token to the backend. Preferred over the legacy
- * /auth/device-token route — /notifications/devices stores the platform and
- * supports multiple devices per user, and is what push.service.ts reads from.
+ * POST the device push token to the backend (an upsert: the token moves to
+ * whoever is signed in now). Throws on failure so the caller can retry.
+ *
+ * Deduplicated per user+token in memory only, so every sign-in and every cold
+ * start confirms the mapping once — cheap, and self-healing if the server
+ * dropped the row (stale-token cleanup) or another account claimed it.
  */
 async function postDeviceToken(token: string): Promise<void> {
+  const userId = authStore().getState().user?.id;
+  if (!userId) return;
+  const key = `${userId}:${token}`;
+  lastKnownToken = token;
+  if (registeredKey === key) return;
+  await api.post('/notifications/devices', {
+    token,
+    platform: Platform.OS,
+    appType: APP_TYPE,
+  });
+  registeredKey = key;
+}
+
+/**
+ * Forget this device's push token on the server. Best-effort and bounded:
+ * sign-out must never hang on it.
+ *
+ * @param client Sign-out passes a client holding the session it has already
+ *   wiped locally (see clientForSession); the default is the live session.
+ */
+export async function unregisterDeviceToken(
+  client: Pick<ApiClient, 'delete'> = api,
+): Promise<void> {
+  // Forgotten locally FIRST: if the next guard signs in while this call is
+  // still out, their registration must not be undone by its cleanup.
+  const known = lastKnownToken;
+  registeredKey = null;
+  lastKnownToken = null;
   try {
-    const stored = await AsyncStorage.getItem(DEVICE_TOKEN_KEY);
-    if (token === stored) return;
-    await api.post('/notifications/devices', {
-      token,
-      platform: Platform.OS,
-      appType: APP_TYPE,
-    });
-    await AsyncStorage.setItem(DEVICE_TOKEN_KEY, token);
-  } catch (err: any) {
-    if (__DEV__) console.warn('[notifications] register device failed', err?.message);
+    const token =
+      known ??
+      (await settleWithin(
+        Notifications.getDevicePushTokenAsync().then((t) => t.data as unknown as string),
+        3000,
+        null,
+      ));
+    if (token) {
+      await settleWithin(
+        client.delete(`/notifications/devices/${encodeURIComponent(token)}`),
+        5000,
+        undefined,
+      );
+    }
+  } catch {
+    /* best-effort */
+  } finally {
+    await AsyncStorage.removeItem(LEGACY_DEVICE_TOKEN_KEY).catch(() => undefined);
   }
 }
 
@@ -90,20 +153,19 @@ async function postDeviceToken(token: string): Promise<void> {
  * Foreground display behaviour. While a session is active, the
  * ForegroundBannerBridge in app/_layout.tsx renders EVERY foreground push as
  * the rich in-app banner, so the OS banner would be a duplicate — suppress
- * it. Logged out the bridge is unmounted, so keep the OS alert as fallback.
+ * it. Logged out or PIN-locked the bridge is off, so keep the OS alert then.
  *
  * shouldSetBadge stays true: the backend sends the recipient's unread
  * NotificationLog count as the badge; the inbox screen clears it on focus.
  */
-export async function setupNotificationHandler() {
+export function setupNotificationHandler() {
   Notifications.setNotificationHandler({
     handleNotification: async () => {
       let bannerCoversForeground = false;
       try {
-        // Lazy import to keep this module free of a load-order dependency on
-        // the auth store.
-        const { useAuthStore } = await import('../store/auth.store');
-        bannerCoversForeground = !!useAuthStore.getState().token;
+        // The in-app banner is off while the PIN lock is up (it drew above
+        // the lock, actions included), so the OS banner covers that window.
+        bannerCoversForeground = !!authStore().getState().token && !useLockStore.getState().locked;
       } catch {
         /* conservative: keep the OS alert */
       }
@@ -250,9 +312,18 @@ export async function setupAndroidChannels() {
   await Notifications.setNotificationChannelAsync('sos', { ...emergency });
 }
 
-export async function registerForPushNotifications(): Promise<string | null> {
+/**
+ * Ask for permission if it has never been asked, then register this device's
+ * FCM token for the signed-in user. Returns the token, or null when permission
+ * is missing or registration failed. Cheap to call repeatedly — a token already
+ * confirmed for this user is not re-posted unless `force` is set.
+ */
+export async function registerForPushNotifications({
+  force = false,
+}: { force?: boolean } = {}): Promise<string | null> {
   // Skip silently on iOS Simulator — push tokens are not issued there.
   if (!Constants.isDevice) return null;
+  if (force) registeredKey = null;
   try {
     const { status: existing } = await Notifications.getPermissionsAsync();
     let final = existing;
@@ -283,29 +354,30 @@ export async function registerForPushNotifications(): Promise<string | null> {
     // FCM device token. We deliberately do NOT fall back to Expo push tokens:
     // the backend /notifications/devices contract + push.service.ts speak raw
     // FCM, so an Expo token here would be unusable server-side.
-    let token: string | null = null;
-    try {
-      const t = await Notifications.getDevicePushTokenAsync();
-      token = t.data as unknown as string;
-    } catch {
-      token = null;
-    }
+    const token = await settleWithin(
+      Notifications.getDevicePushTokenAsync().then((t) => t.data as unknown as string),
+      10_000,
+      null,
+    );
     if (!token) return null;
 
     await postDeviceToken(token);
-
-    // Re-register if FCM rotates the token mid-session.
-    if (!tokenSub) {
-      tokenSub = Notifications.addPushTokenListener((t) => {
-        const next = t.data as unknown as string;
-        if (next) postDeviceToken(next).catch(() => {});
-      });
-    }
     return token;
   } catch (err) {
-    if (__DEV__) console.warn('[notifications] error', err);
+    if (__DEV__) console.warn('[notifications] register failed', err);
     return null;
   }
+}
+
+/**
+ * Re-register when FCM rotates the token. Subscribed while signed in only;
+ * the caller owns the subscription.
+ */
+export function subscribeToTokenRotation(): Notifications.Subscription {
+  return Notifications.addPushTokenListener((t) => {
+    const next = t.data as unknown as string;
+    if (next) postDeviceToken(next).catch(() => {});
+  });
 }
 
 /** A single notification category preference returned by the backend. */
@@ -330,74 +402,35 @@ export async function updateNotificationPreferences(
 }
 
 /**
- * Handle a lockscreen action-button tap. Each action is idempotent server-side,
- * so duplicate taps and multi-device fan-out collapse safely.
+ * Handle a lockscreen action-button tap (iOS; Android pushes are drawn by the
+ * FCM SDK without buttons). Every action is idempotent server-side.
  *
- * WHY THE PATHS LOOK THE WAY THEY DO
- * ----------------------------------
- * Every one of these was previously wrong, and the failures were invisible:
- *
- *   task accept/reject   → called PATCH /tasks/:id/accept|reject. There is no
- *                          `/tasks` controller in the API at all.
- *   help accept          → called PATCH /help-requests/:id/accept. The route is
- *                          POST, and it lives under /staff/help-requests.
- *   help decline         → called PATCH /help-requests/:id/decline, which did
- *                          not exist as a route anywhere.
- *
- * All four 404'd. The old implementation caught the error and logged it only
- * under __DEV__, so in a release build the staff member tapped "Accept", the
- * notification dismissed itself, and nothing whatsoever happened — no error,
- * no retry, no trace. That silence is why this went unnoticed.
- *
- * Failures now surface: a local notification tells the user the action did not
- * go through and to open the app. Anything that can fail on a lockscreen and
- * leave no evidence WILL eventually be relied upon and quietly lose work.
+ * Failures surface as a local notification: the app is usually backgrounded
+ * when a lockscreen button is tapped, so an in-app alert would never be read.
+ * Anything that can fail on a lockscreen and leave no evidence WILL eventually
+ * be relied upon and quietly lose work.
  */
-async function handleActionButton(actionId: string, data: Record<string, any>): Promise<void> {
-  const entityId = data.entityId ?? data.visitId ?? data.id;
+async function handleActionButton(actionId: string, data: Record<string, unknown>): Promise<void> {
+  const entityId = notificationEntityId(data);
+  const group = typeof data.actionGroup === 'string' ? data.actionGroup : undefined;
   if (!entityId) return;
-
-  let label = 'action';
   try {
-    if (data.type === 'VISITOR_APPROVAL_REQUEST' || data.actionGroup === 'visitor_approval') {
-      label = actionId === 'APPROVE' ? 'approval' : 'rejection';
-      await api.post(`/visitors/${entityId}/decision`, {
-        action: actionId === 'APPROVE' ? 'APPROVE' : 'REJECT',
-      });
-      return;
-    }
-    if (data.actionGroup === 'help_request' || data.type === 'HELP_REQUEST') {
-      label = actionId === 'ACCEPT' ? 'accept' : 'decline';
-      if (actionId === 'ACCEPT') await api.post(`/staff/help-requests/${entityId}/accept`, {});
-      else if (actionId === 'DECLINE') await api.post(`/staff/help-requests/${entityId}/decline`, {});
-      return;
-    }
-    if (data.actionGroup === 'task_assignment' || data.type === 'TASK_ASSIGNED') {
-      label = actionId === 'ACCEPT' ? 'accept' : 'decline';
-      if (actionId === 'ACCEPT') await api.post(`/service-requests/${entityId}/accept`, {});
-      else if (actionId === 'REJECT') await api.post(`/service-requests/${entityId}/reject`, {});
-      return;
-    }
-  } catch (err: any) {
-    if (__DEV__) console.warn('[notifications] action failed', actionId, err?.message);
-    await notifyActionFailed(label, err?.message);
+    // The API needs the stored session; a button can be tapped on a cold start.
+    await authStore().getState().hydrate();
+    if (!authStore().getState().token) return;
+    await performNotificationAction(group, actionId, entityId);
+  } catch (err: unknown) {
+    if (__DEV__) console.warn('[notifications] action failed', actionId, err);
+    await notifyActionFailed(err instanceof Error ? err.message : undefined);
   }
 }
 
-/**
- * Tell the user their lockscreen action did not land.
- *
- * Presented as a local notification rather than an in-app alert because the
- * app is very often backgrounded when an action button is tapped — an Alert
- * would queue up invisibly and be dismissed on next launch without ever being
- * read.
- */
-async function notifyActionFailed(label: string, detail?: string): Promise<void> {
+async function notifyActionFailed(detail?: string): Promise<void> {
   try {
     await Notifications.scheduleNotificationAsync({
       content: {
         title: "That didn't go through",
-        body: `Your ${label} could not be saved${detail ? ` (${detail})` : ''}. Open the app to try again.`,
+        body: `Your response could not be saved${detail ? ` (${detail})` : ''}. Open the app to try again.`,
         data: { type: 'ACTION_FAILED' },
       },
       trigger: null,
@@ -407,72 +440,31 @@ async function notifyActionFailed(label: string, detail?: string): Promise<void>
   }
 }
 
-let coldStartRouted = false;
-
 /**
- * Route a single notification-tap response to the right screen (or run its
- * lockscreen action). Shared by the warm-tap listener AND the cold-start path
- * so a killed-state tap (guard taps a gate/SOS push to launch the app) still
- * deep-links instead of just opening Home.
+ * Route one notification response. Shared by the warm-tap listener AND the
+ * cold-start path, so a tap that launches a killed app (a guard opening a gate
+ * or SOS push) still deep-links instead of just opening Home.
+ *
+ * Navigation goes through `appNavigator`, which holds it until the tabs are up
+ * and the PIN lock is passed: it used to be pushed straight away, which either
+ * threw ("navigate before mounting") and was lost, or put the target screen on
+ * top of the lock screen, readable without a PIN.
  */
-function routeNotificationResponse(resp: Notifications.NotificationResponse) {
-  const data = (resp.notification.request.content.data ?? {}) as Record<string, any>;
-  const type = data.type;
-  const id = data.id ?? data.entityId;
+async function handleResponse(resp: Notifications.NotificationResponse): Promise<void> {
+  const data = readNotificationData(resp.notification.request.content.data);
   const action = resp.actionIdentifier;
 
   // Action-button taps short-circuit the default deep-link: the user has
   // already expressed intent on the lockscreen, no need to open a screen.
   if (action && action !== Notifications.DEFAULT_ACTION_IDENTIFIER) {
-    void handleActionButton(action, data);
+    await handleActionButton(action, data);
     return;
   }
-  try {
-    switch (type) {
-        // Backend notification categories (data.type == category key).
-        case 'staff_tasks':
-        case 'task':
-        case 'TASK_ASSIGNED':
-          if (id) router.push(`/tasks/${id}` as any);
-          else router.push('/(tabs)/tasks' as any);
-          break;
-        case 'approval_results':
-        case 'visitor_approvals':
-        case 'visitors_gate':
-        case 'deliveries':
-        case 'VISITOR_APPROVAL_REQUEST':
-          // Visitor/approval categories -> visitors screen (same routing as
-          // the in-app banner and inbox deep links).
-          router.push('/visitors' as any);
-          break;
-        case 'notices':
-        case 'notices_urgent':
-        case 'community':
-        case 'notice':
-        case 'NOTICE_PUBLISHED':
-          router.push('/community/notices' as any);
-          break;
-        case 'emergency_sos':
-        case 'sos':
-        case 'SOS_TRIGGERED':
-          if (id) router.push(`/help-requests/${id}` as any);
-          else router.push('/help-requests' as any);
-          break;
-        // Legacy / app-specific types.
-        case 'review':
-          router.push('/reviews' as any);
-          break;
-        case 'leave':
-          router.push('/leave/balance' as any);
-          break;
-        case 'staff_help_requests':
-        case 'help':
-        case 'HELP_REQUEST':
-          if (id) router.push(`/help-requests/${id}` as any);
-          else router.push('/help-requests' as any);
-          break;
-      }
-    } catch {}
+  // Only route into a signed-in app; a tap that arrives after sign-out points
+  // into someone else's session.
+  await authStore().getState().hydrate();
+  if (!authStore().getState().token) return;
+  appNavigator.navigateWhenReady(hrefForNotification(notificationType(data), data));
 }
 
 /**
@@ -480,14 +472,12 @@ function routeNotificationResponse(resp: Notifications.NotificationResponse) {
  *
  * `getLastNotificationResponseAsync()` does NOT mean "this launch was caused by
  * a notification tap" — it returns the last response RECORDED ON THE DEVICE,
- * and that value survives app restarts. The `coldStartRouted` flag below is
- * module scope, so it resets on every process start and cannot prevent the
- * replay. Without a PERSISTED guard, every cold start deep-links to whatever
- * push the user last tapped, including launches from the home-screen icon.
+ * and that value survives app restarts. Without a PERSISTED guard, every cold
+ * start deep-links to whatever push the user last tapped, including launches
+ * from the home-screen icon.
  */
 const HANDLED_RESPONSE_KEY = 'last_handled_notification_response';
 
-/** Remember a response so neither this launch nor any later one re-routes on it. */
 async function markResponseHandled(resp: Notifications.NotificationResponse) {
   try {
     await AsyncStorage.setItem(HANDLED_RESPONSE_KEY, resp.notification.request.identifier);
@@ -496,14 +486,16 @@ async function markResponseHandled(resp: Notifications.NotificationResponse) {
   }
 }
 
-export function attachNotificationTapHandler() {
-  if (responseSub) return responseSub;
-  // Cold start: a tap that LAUNCHED the app from a killed state is NOT
-  // delivered to the listener below — pull it explicitly so a guard tapping a
-  // gate/visitor/SOS push to open the app still deep-links to the right screen.
-  // Only route responses we have NOT already handled (see above).
-  if (!coldStartRouted) {
-    coldStartRouted = true;
+let tapRoutingStarted = false;
+
+/**
+ * Start routing notification taps. Called once from the root layout at mount,
+ * signed in or not — the cold-start tap must be read before anything else
+ * consumes it.
+ */
+export function setupTapRouting(): Notifications.Subscription {
+  if (!tapRoutingStarted) {
+    tapRoutingStarted = true;
     Notifications.getLastNotificationResponseAsync()
       .then(async (resp) => {
         if (!resp) return;
@@ -511,36 +503,24 @@ export function attachNotificationTapHandler() {
         const seen = await AsyncStorage.getItem(HANDLED_RESPONSE_KEY).catch(() => null);
         if (seen === id) return; // stale replay of an old tap — ignore
         await markResponseHandled(resp);
-        routeNotificationResponse(resp);
+        await handleResponse(resp);
       })
       .catch(() => {});
   }
   // Warm taps are recorded too, so the same tap isn't replayed as a "cold
   // start" route on the next launch.
-  responseSub = Notifications.addNotificationResponseReceivedListener((resp) => {
+  return Notifications.addNotificationResponseReceivedListener((resp) => {
     void markResponseHandled(resp);
-    routeNotificationResponse(resp);
+    void handleResponse(resp);
   });
-  return responseSub;
 }
 
 /**
- * Foreground receiver — drives the in-app banner. Subscribed once after login,
- * detached on logout via the returned subscription.
+ * Foreground receiver — drives the in-app banner. Subscribed while signed in;
+ * the caller owns the subscription.
  */
 export function subscribeToForegroundReceived(
   cb: (n: Notifications.Notification) => void,
 ): Notifications.Subscription {
   return Notifications.addNotificationReceivedListener(cb);
-}
-
-export function detachNotificationTapHandler() {
-  if (responseSub) {
-    responseSub.remove();
-    responseSub = null;
-  }
-  if (tokenSub) {
-    tokenSub.remove();
-    tokenSub = null;
-  }
 }

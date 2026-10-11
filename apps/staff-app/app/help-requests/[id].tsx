@@ -1,132 +1,120 @@
-import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, Alert } from 'react-native';
+import { Alert, Linking, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
+import { Ionicons } from '@expo/vector-icons';
+import { flatLabel } from '@societyos/api-client';
+import { swallow } from '@societyos/mobile-core';
 import { api } from '../../src/lib/api';
-import type { HelpRequest } from './index';
+import { AppHeader, Button, Card } from '../../src/components/ui';
+import { QueryScreen } from '../../src/components/QueryScreen';
+import {
+  HELP_REQUESTS_KEY,
+  fetchHelpRequest,
+  helpRequestKey,
+  helpTypeLabel,
+  isUnclaimed,
+} from '../../src/lib/help-requests';
 
-const LABELS: Record<string, string> = {
-  HELP_HEAVY: 'Heavy item assistance',
-  HELP_DOCUMENT: 'Document collection',
-  HELP_PACKAGE: 'Package pickup',
-};
+type Action = 'accept' | 'decline' | 'start';
 
 export default function HelpRequestDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const qc = useQueryClient();
-
-  const { data, isLoading } = useQuery({
-    queryKey: ['help-request', id],
-    queryFn: async () => {
-      try {
-        return await api.get<HelpRequest>(`/staff/help-requests/${id}`);
-      } catch (e: any) {
-        if (__DEV__) console.warn('[help-request detail] fetch failed', e?.message);
-        return null;
-      }
-    },
+  const query = useQuery({
+    queryKey: helpRequestKey(id),
+    queryFn: () => fetchHelpRequest(id),
     enabled: !!id,
   });
 
-  const advance = useMutation({
-    mutationFn: async (next: 'IN_PROGRESS' | 'COMPLETED') => {
-      if (next === 'COMPLETED') {
-        return api.post(`/staff/help-requests/${id}/complete`, {});
-      }
-      // best-effort accept/in-progress endpoint — fall back if missing
-      try {
-        return await api.patch(`/staff/help-requests/${id}/status`, { status: next });
-      } catch {
-        return api.post(`/staff/help-requests/${id}/accept`, {});
-      }
+  const act = useMutation({
+    mutationFn: (action: Action) => {
+      const base = `/staff/help-requests/${encodeURIComponent(id)}`;
+      if (action === 'start') return api.patch(`${base}/status`, { status: 'IN_PROGRESS' });
+      return api.post(`${base}/${action}`, {});
     },
-    onSuccess: () => {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      qc.invalidateQueries({ queryKey: ['help-requests'] });
-      qc.invalidateQueries({ queryKey: ['help-request', id] });
+    onSuccess: (_d, action) => {
+      void swallow(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success));
+      void qc.invalidateQueries({ queryKey: HELP_REQUESTS_KEY });
+      if (action === 'decline') {
+        router.back();
+        return;
+      }
+      void qc.invalidateQueries({ queryKey: helpRequestKey(id) });
     },
-    onError: (err: any) => Alert.alert('Could not update', err?.message ?? 'Try again'),
+    onError: (err: unknown) =>
+      Alert.alert('Not saved', err instanceof Error ? err.message : 'Please try again.'),
   });
 
-  if (isLoading) {
-    return (
-      <SafeAreaView className="flex-1 bg-gray-50 items-center justify-center">
-        <ActivityIndicator />
-      </SafeAreaView>
-    );
-  }
-
-  if (!data) {
-    return (
-      <SafeAreaView className="flex-1 bg-gray-50">
-        <Stack.Screen options={{ headerShown: false }} />
-        <View className="bg-primary-500 px-5 py-4 flex-row items-center">
-          <TouchableOpacity onPress={() => router.back()} className="w-10 h-10 items-center justify-center">
-            <Text className="text-white text-2xl">‹</Text>
-          </TouchableOpacity>
-          <Text className="text-white text-lg font-bold ml-2">Help Request</Text>
-        </View>
-        <View className="flex-1 items-center justify-center px-8">
-          <Text className="text-gray-500 text-center">Request not found.</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  const status = data.status;
-  const isPending = status === 'PENDING' || status === 'ASSIGNED';
-  const isInProgress = status === 'IN_PROGRESS';
-  const isDone = status === 'COMPLETED';
-
   return (
-    <SafeAreaView className="flex-1 bg-gray-50" edges={['top']}>
-      <Stack.Screen options={{ headerShown: false }} />
-      <View className="bg-primary-500 px-5 py-4 flex-row items-center">
-        <TouchableOpacity onPress={() => router.back()} className="w-10 h-10 items-center justify-center">
-          <Text className="text-white text-2xl">‹</Text>
-        </TouchableOpacity>
-        <Text className="text-white text-lg font-bold ml-2">Help Request</Text>
-      </View>
-      <ScrollView className="flex-1" contentContainerClassName="p-5 gap-4">
-        <View className="bg-white rounded-2xl p-5 shadow-sm">
-          <Text className="text-xs text-gray-400 uppercase tracking-wider">{LABELS[data.category] ?? data.category}</Text>
-          <Text className="text-lg font-semibold text-gray-900 mt-1">
-            {data.resident?.name ?? 'Resident'} · Flat {data.resident?.flat ?? '—'}
-          </Text>
-          <Text className="text-sm text-gray-600 mt-3">{data.description ?? '—'}</Text>
-          <Text className="text-xs text-gray-400 mt-3">
-            Requested {new Date(data.createdAt).toLocaleString()}
-          </Text>
-        </View>
+    <QueryScreen query={query} title="Help request">
+      {(r) => {
+        const name = r.resident?.user?.name ?? 'Resident';
+        const phone = r.resident?.user?.phone;
+        const flat = flatLabel(r.resident?.flat);
+        const open = isUnclaimed(r);
+        const mine = !!r.assignedStaffId;
+        const busy = act.isPending;
+        return (
+          <SafeAreaView className="flex-1 bg-gray-50 dark:bg-gray-950" edges={['top']}>
+            <Stack.Screen options={{ headerShown: false }} />
+            <AppHeader title="Help request" />
+            <ScrollView className="flex-1" contentContainerClassName="p-5 gap-4">
+              <Card padding="lg">
+                <Text className="text-xs uppercase tracking-wider text-gray-400">{helpTypeLabel(r.type)}</Text>
+                <Text className="mt-1 text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  {name}
+                  {flat ? ` · Flat ${flat}` : ''}
+                </Text>
+                <Text className="mt-3 text-sm leading-5 text-gray-600 dark:text-gray-300">{r.description}</Text>
+                <Text className="mt-3 text-xs text-gray-400">
+                  Requested {new Date(r.createdAt).toLocaleString('en-IN')}
+                </Text>
+                {phone && mine ? (
+                  <TouchableOpacity
+                    onPress={() => void Linking.openURL(`tel:${phone}`)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Call ${name}`}
+                    className="mt-4 flex-row items-center justify-center rounded-full bg-green-600 py-3"
+                  >
+                    <Ionicons name="call" size={18} color="#fff" />
+                    <Text className="ml-2 font-semibold text-white">Call {name}</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </Card>
 
-        <View className="bg-white rounded-2xl p-5 gap-3">
-          <Text className="text-sm font-semibold text-gray-700">Status: {status}</Text>
-          {isPending ? (
-            <TouchableOpacity
-              onPress={() => advance.mutate('IN_PROGRESS')}
-              disabled={advance.isPending}
-              className="bg-primary-500 rounded-xl py-3 items-center"
-            >
-              <Text className="text-white font-semibold">Accept & Start</Text>
-            </TouchableOpacity>
-          ) : null}
-          {isInProgress ? (
-            <TouchableOpacity
-              onPress={() => advance.mutate('COMPLETED')}
-              disabled={advance.isPending}
-              className="bg-green-600 rounded-xl py-3 items-center"
-            >
-              <Text className="text-white font-semibold">Mark Complete</Text>
-            </TouchableOpacity>
-          ) : null}
-          {isDone ? (
-            <View className="bg-green-50 rounded-xl py-3 items-center">
-              <Text className="text-green-700 font-semibold">Completed</Text>
-            </View>
-          ) : null}
-        </View>
-      </ScrollView>
-    </SafeAreaView>
+              <Card padding="lg" className="gap-3">
+                {open ? (
+                  <Button label="I'll do it" onPress={() => act.mutate('accept')} loading={busy} />
+                ) : null}
+                {mine && (r.status === 'ASSIGNED' || r.status === 'ACCEPTED') ? (
+                  <Button label="Start now" onPress={() => act.mutate('start')} loading={busy} />
+                ) : null}
+                {mine && r.status === 'IN_PROGRESS' ? (
+                  <Button
+                    label="Mark complete"
+                    onPress={() => router.push(`/help-requests/${r.id}/complete` as never)}
+                  />
+                ) : null}
+                {mine && r.status !== 'COMPLETED' ? (
+                  <Button
+                    label="I can't do this — give it back"
+                    variant="secondary"
+                    onPress={() => act.mutate('decline')}
+                    disabled={busy}
+                  />
+                ) : null}
+                {r.status === 'COMPLETED' ? (
+                  <View className="items-center rounded-xl bg-green-50 py-3 dark:bg-green-950/40">
+                    <Text className="font-semibold text-green-700 dark:text-green-300">Completed</Text>
+                  </View>
+                ) : null}
+              </Card>
+            </ScrollView>
+          </SafeAreaView>
+        );
+      }}
+    </QueryScreen>
   );
 }

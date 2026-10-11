@@ -15,3 +15,14 @@ export async function getUnwrappedArray<T>(path: string): Promise<T[]> {
   const value = unwrapApiEnvelope<T[]>(raw);
   return Array.isArray(value) ? value : [];
 }
+
+/**
+ * A list endpoint that may answer with a bare array or a paginated
+ * `{ data: [...], meta }` page — always resolves to the array.
+ */
+export async function unwrapList<T>(path: string): Promise<T[]> {
+  const value = await getUnwrapped<unknown>(path);
+  if (Array.isArray(value)) return value as T[];
+  const page = value as { data?: unknown } | null;
+  return Array.isArray(page?.data) ? (page!.data as T[]) : [];
+}

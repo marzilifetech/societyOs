@@ -348,12 +348,13 @@ describe('performOrQueue', () => {
     expect(AS.setItem).toHaveBeenCalled();
   });
 
-  it('default switch branch falls back to api.post for unknown method (e.g. PUT)', async () => {
-    mockNetInfo.fetch.mockResolvedValueOnce({ isConnected: true, isInternetReachable: true });
-    const result = await performOrQueue({ method: 'PUT', path: '/items/1', body: { flag: true } });
-    expect(result).toBe(true);
-    // Falls through to default → calls api.post
-    expect(mockApi.post).toHaveBeenCalledWith('/items/1', { flag: true });
+  it('sends PUT and DELETE as themselves, not as POST', async () => {
+    mockNetInfo.fetch.mockResolvedValue({ isConnected: true, isInternetReachable: true });
+    expect(await performOrQueue({ method: 'PUT', path: '/items/1', body: { flag: true } })).toBe(true);
+    expect(await performOrQueue({ method: 'DELETE', path: '/items/2' })).toBe(true);
+    expect(mockApi.put).toHaveBeenCalledWith('/items/1', { flag: true });
+    expect(mockApi.delete).toHaveBeenCalledWith('/items/2');
+    expect(mockApi.post).not.toHaveBeenCalled();
   });
 
   it('enqueues when isInternetReachable is null (treated as reachable)', async () => {

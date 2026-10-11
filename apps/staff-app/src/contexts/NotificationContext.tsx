@@ -1,4 +1,13 @@
-import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { useAuthStore } from '../store/auth.store';
 
 /**
  * Foreground rich-notification queue. Mirrors the resident-app implementation
@@ -59,54 +68,94 @@ const DISMISS_MS: Record<BannerType, number | null> = {
   EMERGENCY: null, // sticky — staff must explicitly acknowledge SOS
 };
 
+const MAX_QUEUED = 5;
+
+const isEmergency = (n: BannerNotification) => classifyBannerType(n) === 'EMERGENCY';
+
+/**
+ * Hold the queue to MAX_QUEUED by dropping ROUTINE banners from the back. An
+ * SOS is never dropped, even if that means going over the cap: a missed
+ * routine banner is still in the inbox, a missed SOS is a guard who never ran.
+ */
+function trimQueue(queue: BannerNotification[]): void {
+  for (let i = queue.length - 1; i >= 0 && queue.length > MAX_QUEUED; i--) {
+    if (!isEmergency(queue[i])) queue.splice(i, 1);
+  }
+}
+
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
   const [current, setCurrent] = useState<BannerNotification | null>(null);
+  // The banner on screen, as a ref: `showBanner` used to read `current` from
+  // its render closure, so two pushes landing in the same frame both saw an
+  // empty slot and the second silently replaced the first.
+  const currentRef = useRef<BannerNotification | null>(null);
   const queueRef = useRef<BannerNotification[]>([]);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const clearTimer = () => {
+  const clearTimer = useCallback(() => {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
     }
-  };
-
-  const startDismissTimer = (n: BannerNotification) => {
-    const ms = DISMISS_MS[classifyBannerType(n)];
-    if (ms === null) return;
-    timerRef.current = setTimeout(() => {
-      setCurrent(null);
-      showNext();
-    }, ms);
-  };
-
-  const showNext = useCallback(() => {
-    const next = queueRef.current.shift() ?? null;
-    setCurrent(next);
-    clearTimer();
-    if (next) startDismissTimer(next);
   }, []);
 
+  const present = useCallback(
+    (n: BannerNotification | null) => {
+      clearTimer();
+      currentRef.current = n;
+      setCurrent(n);
+      if (!n) return;
+      const ms = DISMISS_MS[classifyBannerType(n)];
+      if (ms === null) return;
+      timerRef.current = setTimeout(() => present(queueRef.current.shift() ?? null), ms);
+    },
+    [clearTimer],
+  );
+
   const dismiss = useCallback(() => {
-    clearTimer();
-    setCurrent(null);
-    showNext();
-  }, [showNext]);
+    present(queueRef.current.shift() ?? null);
+  }, [present]);
 
   const showBanner = useCallback(
     (n: BannerNotification) => {
-      if (current) {
-        if (queueRef.current.length < 5) {
-          queueRef.current.push(n);
-        }
+      const showing = currentRef.current;
+      if (!showing) {
+        present(n);
         return;
       }
-      setCurrent(n);
-      clearTimer();
-      startDismissTimer(n);
+      const queue = queueRef.current;
+      if (isEmergency(n)) {
+        // An emergency never waits behind routine banners: it takes the screen
+        // now and the interrupted banner goes back to the front of the queue.
+        if (!isEmergency(showing)) {
+          queue.unshift(showing);
+          trimQueue(queue);
+          present(n);
+          return;
+        }
+        // Another SOS is up (sticky until acknowledged): this one is next —
+        // after any SOS already waiting, ahead of every routine banner. It
+        // used to join the BACK of the queue, or be dropped when it was full.
+        const firstRoutine = queue.findIndex((q) => !isEmergency(q));
+        queue.splice(firstRoutine === -1 ? queue.length : firstRoutine, 0, n);
+        trimQueue(queue);
+        return;
+      }
+      if (queue.length < MAX_QUEUED) queue.push(n);
     },
-    [current, showNext],
+    [present],
   );
+
+  // Sign-out: this guard's banners (and their action buttons) must not be
+  // left on screen, or queued, for whoever signs in next.
+  const token = useAuthStore((st) => st.token);
+  useEffect(() => {
+    if (token) return;
+    queueRef.current = [];
+    present(null);
+  }, [token, present]);
+
+  useEffect(() => clearTimer, [clearTimer]);
 
   const value = useMemo(() => ({ current, showBanner, dismiss }), [current, showBanner, dismiss]);
 

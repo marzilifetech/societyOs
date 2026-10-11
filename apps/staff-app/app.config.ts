@@ -13,9 +13,10 @@ import { ExpoConfig, ConfigContext } from '@expo/config';
  *
  * Android: R8 minification + resource shrinking are enabled for release builds
  * (smaller APK, Play deobfuscation mapping). The keep rules below protect the
- * native libs the staff app invokes reflectively — reanimated, Sentry, MLKit
- * barcode (QR gate-pass scanning) and Google Maps (attendance/SOS). Unlike the
- * resident app, staff has NO Razorpay. These live here so they survive
+ * native libs the staff app invokes reflectively — reanimated, Sentry and MLKit
+ * barcode (QR gate-pass scanning). Unlike the resident app, staff has NO
+ * Razorpay and NO Google Maps (the tasks map view crashed release builds — no
+ * Maps API key — and was removed). These live here so they survive
  * `expo prebuild --clean`.
  */
 const extraProguardRules = `
@@ -41,11 +42,6 @@ const extraProguardRules = `
 -keep class com.google.android.gms.internal.mlkit_vision_barcode.** { *; }
 -keep class com.google.android.gms.vision.** { *; }
 -dontwarn com.google.mlkit.**
-
-# ─── react-native-maps + Google Maps SDK (attendance / SOS map) ─────────────
--keep class com.google.android.gms.maps.** { *; }
--keep interface com.google.android.gms.maps.** { *; }
--keep class com.airbnb.android.react.maps.** { *; }
 -dontwarn com.google.android.gms.**
 
 # ─── react-native-gesture-handler ───────────────────────────────────────────
@@ -87,6 +83,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // the plugin. Same fix as the resident app.
       './plugins/withIosFmtCxx17',
       './plugins/withAndroidNoSystemSplash',
+      // Split screen, pop-up view and fold/unfold no longer recreate the
+      // activity (which rebooted the JS app to the PIN screen and lost any
+      // open form). Shared with the resident app.
+      '@societyos/mobile-core/plugins/withAndroidActivityConfigChanges',
       // Release signing lives here rather than hand-edited into the gitignored
       // android/ folder, where every `expo prebuild` silently reverted it to
       // the debug keystore. Credentials stay out of git — see the plugin.

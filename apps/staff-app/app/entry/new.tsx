@@ -24,6 +24,7 @@ import { unwrapApiEnvelope } from '@societyos/api-client';
 import { api } from '../../src/lib/api';
 import { ensurePermission } from '../../src/lib/permissions';
 import { uploadViaMedia } from '../../src/lib/photo-upload';
+import { compressImage } from '../../src/lib/upload';
 import { DELIVERY_PARTNERS } from '../../src/constants/delivery-partners';
 
 type FlatRow = {
@@ -198,13 +199,23 @@ export default function AddEntryScreen() {
         'A photo of the visitor is required before an entry can be logged at the gate.',
     });
     if (!perm.granted) return;
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.75,
-      allowsEditing: false,
-    });
-    if (result.canceled || !result.assets?.[0]) return;
-    const uri = result.assets[0].uri;
+    let shot: string | undefined;
+    try {
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ['images'],
+        quality: 0.7,
+        allowsEditing: false,
+        exif: false,
+      });
+      shot = result.canceled ? undefined : result.assets?.[0]?.uri;
+    } catch (err: unknown) {
+      Alert.alert('Camera unavailable', err instanceof Error ? err.message : 'Please try again.');
+      return;
+    }
+    if (!shot) return;
+    // A visitor photo at full camera resolution was ~3 MB over mobile data
+    // while the visitor waited at the gate; 1024px is plenty to recognise a face.
+    const uri = await compressImage(shot, { maxWidth: 1024, quality: 0.7 });
     setPhotoUri(uri);
     setPhotoUploadedUrl(null);
     setPhotoBusy(true);

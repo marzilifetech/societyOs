@@ -1,75 +1,73 @@
-import { useMemo, type ComponentProps } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
+import { useMemo } from 'react';
+import { ActivityIndicator, RefreshControl, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { router, Stack } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '@societyos/theme';
+import { flatLabel } from '@societyos/api-client';
 import i18nInstance from '../../src/lib/i18n';
-import { api } from '../../src/lib/api';
 import { ErrorCard } from '../../src/components/ErrorCard';
 import { AppHeader, Card, EmptyState } from '../../src/components/ui';
-
-export interface HelpRequest {
-  id: string;
-  category: 'HELP_HEAVY' | 'HELP_DOCUMENT' | 'HELP_PACKAGE' | string;
-  status: 'PENDING' | 'ASSIGNED' | 'IN_PROGRESS' | 'COMPLETED' | string;
-  description?: string;
-  createdAt: string;
-  resident?: { name?: string; flat?: string };
-}
-
-type CategoryIcon = ComponentProps<typeof Ionicons>['name'];
-
-const ICONS: Record<string, CategoryIcon> = {
-  HELP_HEAVY: 'cube-outline',
-  HELP_DOCUMENT: 'document-text-outline',
-  HELP_PACKAGE: 'gift-outline',
-};
-
-const LABELS: Record<string, string> = {
-  HELP_HEAVY: 'Heavy item',
-  HELP_DOCUMENT: 'Document collection',
-  HELP_PACKAGE: 'Package pickup',
-};
+import {
+  HELP_REQUESTS_KEY,
+  HELP_TYPE_ICONS,
+  fetchHelpRequests,
+  helpTypeLabel,
+  isMineActive,
+  isUnclaimed,
+  type HelpRequestRow,
+} from '../../src/lib/help-requests';
 
 export default function HelpRequestsScreen() {
   const { t } = useTranslation(undefined, { i18n: i18nInstance });
-  const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['help-requests'],
-    queryFn: () => api.get<HelpRequest[]>('/staff/help-requests'),
+  const { data, isLoading, isError, error, refetch, isRefetching } = useQuery({
+    queryKey: HELP_REQUESTS_KEY,
+    queryFn: fetchHelpRequests,
+    refetchInterval: 60_000,
   });
 
-  const grouped = useMemo(() => {
+  const groups = useMemo(() => {
     const list = data ?? [];
     return {
-      active: list.filter((r) => r.status !== 'COMPLETED'),
-      completed: list.filter((r) => r.status === 'COMPLETED'),
+      waiting: list.filter(isUnclaimed),
+      mine: list.filter(isMineActive),
+      done: list.filter((r) => r.status === 'COMPLETED'),
     };
   }, [data]);
 
   return (
-    <SafeAreaView className="flex-1 bg-gray-50" edges={['top']}>
+    <SafeAreaView className="flex-1 bg-gray-50 dark:bg-gray-950" edges={['top']}>
       <Stack.Screen options={{ headerShown: false }} />
       <AppHeader title={t('helpRequests.title')} />
 
       {isLoading ? (
         <View className="flex-1 items-center justify-center">
-          <ActivityIndicator />
+          <ActivityIndicator color={colors.primary[500]} />
         </View>
       ) : isError ? (
         <ErrorCard
-          message="Help requests couldn't be loaded. Please try again."
-          onRetry={() => refetch()}
+          message="Help requests couldn't be loaded."
+          detail={error instanceof Error ? error.message : undefined}
+          onRetry={() => void refetch()}
         />
       ) : (
-        <ScrollView className="flex-1" contentContainerClassName="p-5 gap-4">
-          <Section title={`Active (${grouped.active.length})`} items={grouped.active} />
-          <Section title={`Completed (${grouped.completed.length})`} items={grouped.completed} />
+        <ScrollView
+          className="flex-1"
+          contentContainerClassName="p-5 gap-5"
+          refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={() => void refetch()} />}
+        >
+          <Section title="Waiting for someone" items={groups.waiting} />
+          <Section title="Yours" items={groups.mine} />
+          <Section title="Done" items={groups.done} />
           {(data ?? []).length === 0 ? (
-            <Card padding="none" className="mt-4">
-              <EmptyState icon="hand-left-outline" title="No help requests yet" />
+            <Card padding="none">
+              <EmptyState
+                icon="hand-left-outline"
+                title="No help requests right now"
+                body="You'll get a notification when a resident needs a hand."
+              />
             </Card>
           ) : null}
         </ScrollView>
@@ -78,46 +76,58 @@ export default function HelpRequestsScreen() {
   );
 }
 
-function Section({ title, items }: { title: string; items: HelpRequest[] }) {
+function Section({ title, items }: { title: string; items: HelpRequestRow[] }) {
   if (items.length === 0) return null;
   return (
     <View className="gap-2">
-      <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider px-1">{title}</Text>
+      <Text className="px-1 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+        {title} ({items.length})
+      </Text>
       {items.map((r) => (
-        <TouchableOpacity
-          key={r.id}
-          onPress={() => router.push(`/help-requests/${r.id}` as any)}
-          className="bg-white rounded-2xl p-4 flex-row items-center gap-3 shadow-sm"
-        >
-          <View className="w-11 h-11 rounded-full bg-primary-50 items-center justify-center">
-            <Ionicons name={ICONS[r.category] ?? 'help-buoy-outline'} size={20} color={colors.primary[500]} />
-          </View>
-          <View className="flex-1">
-            <Text className="text-base font-semibold text-gray-900">{LABELS[r.category] ?? r.category}</Text>
-            <Text className="text-xs text-gray-500 mt-0.5">
-              {r.resident?.name ?? 'Resident'} · {r.resident?.flat ?? '—'}
-            </Text>
-            <Text className="text-xs text-gray-400 mt-0.5">
-              {new Date(r.createdAt).toLocaleString()}
-            </Text>
-          </View>
-          <StatusBadge status={r.status} />
-        </TouchableOpacity>
+        <HelpRequestCard key={r.id} request={r} />
       ))}
     </View>
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, { bg: string; text: string; label: string }> = {
-    PENDING: { bg: 'bg-amber-100', text: 'text-amber-700', label: 'New' },
-    ASSIGNED: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'Assigned' },
-    IN_PROGRESS: { bg: 'bg-indigo-100', text: 'text-indigo-700', label: 'In Progress' },
-    COMPLETED: { bg: 'bg-green-100', text: 'text-green-700', label: 'Done' },
-  };
-  const s = map[status] ?? { bg: 'bg-gray-100', text: 'text-gray-700', label: status };
+function HelpRequestCard({ request: r }: { request: HelpRequestRow }) {
+  const flat = flatLabel(r.resident?.flat);
   return (
-    <View className={`px-2.5 py-1 rounded-full ${s.bg}`}>
+    <TouchableOpacity
+      onPress={() => router.push(`/help-requests/${r.id}` as never)}
+      accessibilityRole="button"
+      accessibilityLabel={`${helpTypeLabel(r.type)} for ${r.resident?.user?.name ?? 'a resident'}`}
+    >
+      <Card className="flex-row items-center gap-3">
+        <View className="h-11 w-11 items-center justify-center rounded-full bg-primary-50 dark:bg-primary-900/50">
+          <Ionicons name={HELP_TYPE_ICONS[r.type] ?? 'help-buoy-outline'} size={20} color={colors.primary[500]} />
+        </View>
+        <View className="flex-1">
+          <Text className="text-base font-semibold text-gray-900 dark:text-gray-100">{helpTypeLabel(r.type)}</Text>
+          <Text className="mt-0.5 text-xs text-gray-500 dark:text-gray-400" numberOfLines={1}>
+            {r.resident?.user?.name ?? 'Resident'}
+            {flat ? ` · Flat ${flat}` : ''}
+          </Text>
+          <Text className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
+            {new Date(r.createdAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+          </Text>
+        </View>
+        <StatusBadge request={r} />
+      </Card>
+    </TouchableOpacity>
+  );
+}
+
+function StatusBadge({ request }: { request: HelpRequestRow }) {
+  const s = isUnclaimed(request)
+    ? { bg: 'bg-amber-100', text: 'text-amber-700', label: 'New' }
+    : request.status === 'IN_PROGRESS'
+      ? { bg: 'bg-indigo-100', text: 'text-indigo-700', label: 'In progress' }
+      : request.status === 'COMPLETED'
+        ? { bg: 'bg-green-100', text: 'text-green-700', label: 'Done' }
+        : { bg: 'bg-blue-100', text: 'text-blue-700', label: 'Yours' };
+  return (
+    <View className={`rounded-full px-2.5 py-1 ${s.bg}`}>
       <Text className={`text-xs font-semibold ${s.text}`}>{s.label}</Text>
     </View>
   );

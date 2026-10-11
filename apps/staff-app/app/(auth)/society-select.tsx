@@ -3,26 +3,26 @@ import { ActivityIndicator, FlatList, Text, TextInput, TouchableOpacity, View } 
 import { router } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { api } from '../../src/lib/api';
+import { getUnwrappedArray } from '../../src/lib/unwrapped-get';
 
 interface Society {
   id: string;
   name: string;
-  city: string;
+  city: string | null;
 }
 
 export default function SocietySelectScreen() {
   const [search, setSearch] = useState('');
 
-  const { data: societies, isLoading } = useQuery<Society[]>({
+  const { data: societies, isLoading, isError, refetch, isRefetching } = useQuery<Society[]>({
     queryKey: ['societies'],
-    queryFn: () => api.get<Society[]>('/societies'),
+    queryFn: () => getUnwrappedArray<Society>('/societies'),
   });
 
+  const q = search.trim().toLowerCase();
+  // `city` can be missing; `.toLowerCase()` on it crashed the first screen.
   const filtered = societies?.filter(
-    (s: Society) =>
-      s.name.toLowerCase().includes(search.toLowerCase()) ||
-      s.city.toLowerCase().includes(search.toLowerCase()),
+    (s) => !q || s.name.toLowerCase().includes(q) || (s.city ?? '').toLowerCase().includes(q),
   );
 
   const handleSelect = (society: Society) => {
@@ -47,13 +47,33 @@ export default function SocietySelectScreen() {
             placeholderTextColor="#9CA3AF"
             value={search}
             onChangeText={setSearch}
-            autoFocus
+            accessibilityLabel="Search societies"
           />
         </View>
 
         {isLoading ? (
           <View className="items-center pt-10">
             <ActivityIndicator color="#821A52" size="large" />
+          </View>
+        ) : isError ? (
+          // Offline or a server error used to read "No societies found" with
+          // no way forward, on the very first screen of the app.
+          <View className="items-center pt-16 px-4">
+            <Text className="text-base text-gray-700 text-center">
+              Couldn't load societies. Check your internet connection.
+            </Text>
+            <TouchableOpacity
+              onPress={() => void refetch()}
+              disabled={isRefetching}
+              accessibilityRole="button"
+              className="mt-5 rounded-full bg-primary-500 px-6 py-3"
+            >
+              {isRefetching ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text className="font-semibold text-white">Try again</Text>
+              )}
+            </TouchableOpacity>
           </View>
         ) : (
           <FlatList
@@ -70,7 +90,7 @@ export default function SocietySelectScreen() {
                 className="bg-gray-50 border border-gray-200 rounded-2xl px-5 py-4 mb-2.5 min-h-[72px] justify-center"
               >
                 <Text className="text-base font-semibold text-gray-900">{item.name}</Text>
-                <Text className="text-sm text-gray-500 mt-1">{item.city}</Text>
+                {item.city ? <Text className="text-sm text-gray-500 mt-1">{item.city}</Text> : null}
               </TouchableOpacity>
             )}
             ListEmptyComponent={

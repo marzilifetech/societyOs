@@ -4,13 +4,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../src/lib/api';
 import { CategoryPill } from '../../src/components/community/CategoryPill';
+import { ErrorCard } from '../../src/components/ErrorCard';
 
 type Notice = {
   id: string;
   title: string;
   body: string;
   category: 'POLICY' | 'SAFETY' | 'SCHEDULE' | 'WELFARE';
-  publishedAt: string;
+  publishedAt: string | null;
+  createdAt?: string;
   pinnedUntil?: string | null;
   attachments?: { url: string; name: string }[];
 };
@@ -22,15 +24,11 @@ export default function NoticesScreen() {
   const [cat, setCat] = useState<Cat>('All');
   const [expanded, setExpanded] = useState<string | null>(null);
 
-  const { data, isLoading } = useQuery({
+  // A failed load used to be swallowed into an empty list, so a guard opening
+  // an urgent broadcast offline saw "No notices" with no way to retry.
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['notices'],
-    queryFn: () =>
-      api
-        .get<Notice[]>('/staff/community/notices')
-        .catch((e) => {
-          console.warn('[notices] fetch failed', e?.message);
-          return [] as Notice[];
-        }),
+    queryFn: () => api.get<Notice[]>('/staff/community/notices'),
   });
 
   const filtered = (data ?? []).filter((n) => cat === 'All' || n.category === cat);
@@ -57,7 +55,13 @@ export default function NoticesScreen() {
         </ScrollView>
       </View>
 
-      {isLoading ? (
+      {isError && !data ? (
+        <ErrorCard
+          message="Notices couldn't be loaded."
+          detail={error instanceof Error ? error.message : undefined}
+          onRetry={() => void refetch()}
+        />
+      ) : isLoading ? (
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator color="#821A52" />
         </View>
@@ -92,7 +96,7 @@ export default function NoticesScreen() {
                 <View className="flex-row items-center justify-between mb-2">
                   <CategoryPill category={item.category} />
                   <Text className="text-[10px] text-gray-400">
-                    {new Date(item.publishedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                    {formatDay(item.publishedAt ?? item.createdAt)}
                   </Text>
                 </View>
                 <Text className="text-base font-semibold text-gray-900 mb-1">{item.title}</Text>
@@ -114,4 +118,10 @@ export default function NoticesScreen() {
       )}
     </SafeAreaView>
   );
+}
+
+function formatDay(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 }

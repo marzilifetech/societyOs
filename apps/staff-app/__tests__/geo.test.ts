@@ -5,6 +5,7 @@ import {
   distanceMeters,
   pointInPolygon,
   distanceToPolygon,
+  checkGeofence,
   type LatLng,
 } from '../src/lib/geo';
 
@@ -134,5 +135,38 @@ describe('distanceToPolygon', () => {
     const far: LatLng = { lat: 10, lng: 10 };
     const d = distanceToPolygon(far, square);
     expect(d).toBeGreaterThan(1_000_000); // >1000 km
+  });
+});
+
+describe('checkGeofence', () => {
+  const square: LatLng[] = [
+    { lat: 0, lng: 0 },
+    { lat: 1, lng: 0 },
+    { lat: 1, lng: 1 },
+    { lat: 0, lng: 1 },
+  ];
+  const circle = { geofenceCenter: { lat: 19.076, lng: 72.8777 }, geofenceRadius: 100 };
+
+  it('allows when the society has no geofence', () => {
+    expect(checkGeofence({ lat: 5, lng: 5 }, {})).toEqual({ configured: false, inside: true, distance: null });
+    expect(checkGeofence(null, null)).toEqual({ configured: false, inside: true, distance: null });
+  });
+
+  it('withholds when a geofence exists but there is no fix', () => {
+    expect(checkGeofence(null, circle)).toEqual({ configured: true, inside: false, distance: null });
+  });
+
+  it('judges a polygon', () => {
+    expect(checkGeofence({ lat: 0.5, lng: 0.5 }, { geofence: square })).toMatchObject({ inside: true, distance: 0 });
+    const out = checkGeofence({ lat: 2, lng: 2 }, { geofence: square });
+    expect(out.inside).toBe(false);
+    expect(out.distance).toBeGreaterThan(0);
+  });
+
+  it('judges a circle, reporting metres beyond the edge', () => {
+    expect(checkGeofence({ lat: 19.076, lng: 72.8777 }, circle)).toMatchObject({ inside: true, distance: 0 });
+    const out = checkGeofence({ lat: 19.086, lng: 72.8777 }, circle);
+    expect(out.inside).toBe(false);
+    expect(out.distance).toBeGreaterThan(900);
   });
 });

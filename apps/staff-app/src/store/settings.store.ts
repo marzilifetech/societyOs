@@ -1,7 +1,11 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
+import { settleWithin } from '@societyos/mobile-core';
 import { api } from '../lib/api';
+
+/** Same bound as the session read: the boot gate waits on settings too. */
+const HYDRATE_BUDGET_MS = 8000;
 
 /**
  * Local pref key → backend notification-category key. Only keys with a true
@@ -13,7 +17,8 @@ import { api } from '../lib/api';
 const BACKEND_CATEGORY_MAP: Partial<Record<keyof NotificationPrefs, string>> = {
   tasks: 'staff_tasks',
   announcements: 'notices',
-  helpRequests: 'staff_tasks',
+  // Its own category, so turning it off no longer overrides the Tasks toggle.
+  helpRequests: 'staff_help_requests',
 };
 
 let prefSyncTimer: ReturnType<typeof setTimeout> | null = null;
@@ -131,8 +136,14 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     set({ badges: { ...get().badges, [key]: n } });
   },
   hydrate: async () => {
+    if (get().hydrated) return;
+    // Never rejects and never hangs: a corrupt record or a Keystore that does
+    // not answer leaves the defaults in place, and boot carries on.
+    const [raw, bio] = await Promise.all([
+      settleWithin(AsyncStorage.getItem(KEY), HYDRATE_BUDGET_MS, null),
+      settleWithin(SecureStore.getItemAsync(BIO_KEY), HYDRATE_BUDGET_MS, null),
+    ]);
     try {
-      const raw = await AsyncStorage.getItem(KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
         // Migration: every install before the "default to light" change
@@ -159,10 +170,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           notifications: { ...defaultNotifications, ...(parsed.notifications ?? {}) },
         });
       }
-      const bio = await SecureStore.getItemAsync(BIO_KEY);
-      set({ biometricEnabled: bio === '1' });
-    } catch {}
-    set({ hydrated: true, themeMigrated: true });
+    } catch {
+      /* corrupt settings record: keep the defaults */
+    }
+    set({ biometricEnabled: bio === '1', hydrated: true, themeMigrated: true });
   },
 }));
 

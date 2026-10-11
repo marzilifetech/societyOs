@@ -3,10 +3,21 @@ import { router, Stack } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { colors } from '@societyos/theme';
+import { flatLabel, type ResidentBrief } from '@societyos/api-client';
 import { api } from '../../src/lib/api';
 import { getUnwrappedArray } from '../../src/lib/unwrapped-get';
 import { ErrorCard } from '../../src/components/ErrorCard';
 import { AppHeader, Card, EmptyState } from '../../src/components/ui';
+
+/**
+ * GET /staff/visitors has sent the resident in two shapes: `user.name` +
+ * `flat.{block,number}` (ResidentBrief), and `name` + `unit.{tower,flatNumber}`.
+ * Reading only the first rendered "Visiting resident · Flat —" for the other.
+ */
+type VisitorResident = ResidentBrief & {
+  name?: string | null;
+  unit?: { tower?: string | null; flatNumber?: string | null } | null;
+};
 
 type VisitorRow = {
   id: string;
@@ -15,9 +26,20 @@ type VisitorRow = {
   purpose?: string;
   approvalStatus?: string;
   status?: string;
-  resident?: { name?: string; unit?: { flatNumber?: string; tower?: string } };
+  resident?: VisitorResident | null;
   createdAt?: string;
 };
+
+function residentName(r: VisitorResident | null | undefined): string | null {
+  return r?.user?.name || r?.name || null;
+}
+
+function residentFlat(r: VisitorResident | null | undefined): string | null {
+  return (
+    flatLabel(r?.flat) ??
+    flatLabel(r?.unit ? { block: r.unit.tower ?? '', number: r.unit.flatNumber ?? '' } : null)
+  );
+}
 
 export default function VisitorApprovalsScreen() {
   const qc = useQueryClient();
@@ -91,16 +113,15 @@ export default function VisitorApprovalsScreen() {
           ) : (
             <View className="gap-3 pb-8">
               {visitors.map((v) => {
-                const flat = v.resident?.unit?.flatNumber;
-                const tower = v.resident?.unit?.tower;
-                const unitLabel = [tower, flat].filter(Boolean).join('-') || '—';
+                const unitLabel = residentFlat(v.resident) ?? '—';
                 const busy = approve.isPending || reject.isPending;
+                const approving = approve.isPending && approve.variables === v.id;
 
                 return (
                   <View key={v.id} className="bg-white rounded-2xl p-4 shadow-sm">
                     <Text className="text-lg font-bold text-gray-900">{v.name}</Text>
                     <Text className="text-xs text-gray-500 mt-1">
-                      Visiting {v.resident?.name ?? 'resident'} · Flat {unitLabel}
+                      Visiting {residentName(v.resident) ?? 'resident'} · Flat {unitLabel}
                     </Text>
                     {v.purpose ? (
                       <Text className="text-sm text-gray-600 mt-2">{v.purpose}</Text>
@@ -122,7 +143,7 @@ export default function VisitorApprovalsScreen() {
                         disabled={busy}
                         onPress={() => approve.mutate(v.id)}
                       >
-                        {approve.isPending ? (
+                        {approving ? (
                           <ActivityIndicator color="#fff" />
                         ) : (
                           <Text className="text-white font-semibold text-sm">Approve</Text>

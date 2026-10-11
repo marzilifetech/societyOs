@@ -1,5 +1,6 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
+  BackHandler,
   View,
   Text,
   TextInput,
@@ -12,82 +13,10 @@ import {
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import * as SecureStore from 'expo-secure-store';
 import * as Haptics from 'expo-haptics';
 import { PinDots } from '../../src/components/ui/PinDots';
-
-const PIN_KEY = 'staff_pin_hash';
-const ATTEMPTS_KEY = 'staff_pin_attempts';
-const PIN_LENGTH = 4;
-
-// Tiny non-cryptographic hash. Sufficient as obfuscation for a 4-digit PIN
-// stored in SecureStore (which is already hardware-backed on iOS/Android).
-function hashPin(pin: string): string {
-  let h = 5381;
-  for (let i = 0; i < pin.length; i++) h = ((h << 5) + h) ^ pin.charCodeAt(i);
-  return (h >>> 0).toString(16);
-}
-
-export async function isPinSet(): Promise<boolean> {
-  const v = await SecureStore.getItemAsync(PIN_KEY);
-  return !!v;
-}
-
-export async function verifyPin(pin: string): Promise<boolean> {
-  const stored = await SecureStore.getItemAsync(PIN_KEY);
-  if (!stored) return false;
-  return stored === hashPin(pin);
-}
-
-export async function setPin(pin: string): Promise<void> {
-  await SecureStore.setItemAsync(PIN_KEY, hashPin(pin));
-  await resetPinAttempts();
-}
-
-export async function clearPin(): Promise<void> {
-  await SecureStore.deleteItemAsync(PIN_KEY);
-  await resetPinAttempts();
-}
-
-/**
- * Failed-attempt counter, PERSISTED.
- *
- * The lockout used to live in React state on the PIN screen, so force-quitting
- * the app reset it to zero — the "5 attempts then sign out" rule could be
- * bypassed indefinitely by killing and reopening the app, which makes a
- * 4-digit PIN exhaustively guessable on a stolen phone. Persisting it in
- * SecureStore is what makes the limit real.
- */
-export async function getPinAttempts(): Promise<number> {
-  try {
-    const raw = await SecureStore.getItemAsync(ATTEMPTS_KEY);
-    const n = raw ? parseInt(raw, 10) : 0;
-    return Number.isFinite(n) && n > 0 ? n : 0;
-  } catch {
-    return 0;
-  }
-}
-
-export async function recordFailedPinAttempt(): Promise<number> {
-  const next = (await getPinAttempts()) + 1;
-  try {
-    await SecureStore.setItemAsync(ATTEMPTS_KEY, String(next));
-  } catch {
-    /* counter is best-effort; never block the UI on it */
-  }
-  return next;
-}
-
-export async function resetPinAttempts(): Promise<void> {
-  try {
-    await SecureStore.deleteItemAsync(ATTEMPTS_KEY);
-  } catch {
-    /* ignore */
-  }
-}
-
-/** PINs that offer no protection at all. Warned about, not blocked. */
-const WEAK_PINS = new Set(['0000', '1111', '2222', '3333', '4444', '5555', '6666', '7777', '8888', '9999', '1234', '4321']);
+import { PIN_LENGTH, WEAK_PINS, setPin } from '../../src/lib/pin';
+import { useLockStore } from '../../src/store/lock.store';
 
 export default function PinSetupScreen() {
   const [pin, setPinValue] = useState('');
@@ -128,8 +57,10 @@ export default function PinSetupScreen() {
     setSaving(true);
     try {
       await setPin(pin);
+      useLockStore.getState().setHasPin(true);
+      useLockStore.getState().unlock();
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      router.replace('/(tabs)' as any);
+      router.replace('/(tabs)' as never);
     } catch {
       setError('Could not save your PIN. Please try again.');
     } finally {
@@ -143,6 +74,17 @@ export default function PinSetupScreen() {
     setError(null);
     hidden.current?.focus();
   };
+
+  // Creating a PIN is not optional for a signed-in session, so Back can't
+  // leave this screen (it landed on the society picker with the session still
+  // live). On the confirm step it steps back to choosing the PIN.
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (step === 'confirm') backToCreate();
+      return true;
+    });
+    return () => sub.remove();
+  });
 
   return (
     <SafeAreaView className="flex-1 bg-primary-500">

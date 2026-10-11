@@ -27,6 +27,10 @@ export type ChannelStatus = {
 type MarziNotificationsNative = {
   channelsReady?: boolean;
   defaultChannelId?: string;
+  manufacturer?: string;
+  isIgnoringBatteryOptimizations?(): Promise<boolean>;
+  openBatteryOptimizationSettings?(): Promise<boolean>;
+  openAutostartSettings?(): Promise<boolean>;
   areNotificationsEnabled(): Promise<boolean>;
   getChannelStatus(): Promise<ChannelStatus[]>;
   openChannelSettings(channelId: string): Promise<boolean>;
@@ -115,3 +119,46 @@ export const DIAGNOSTIC_CHANNELS: { id: string; label: string; why: string }[] =
   { id: 'payments', label: 'Payments & salary', why: 'Salary and payment updates' },
   { id: 'system', label: 'Account & system', why: 'Sign-in and app updates' },
 ];
+
+/** Phone maker, lower-cased ("xiaomi", "samsung", …), or '' when unknown. */
+export const deviceManufacturer = (native?.manufacturer ?? '').toLowerCase();
+
+/**
+ * Makers whose Android builds kill swiped-away apps and block their restart
+ * unless "auto-start" is allowed — FCM then cannot deliver anything.
+ */
+const AUTOSTART_MAKERS = ['xiaomi', 'redmi', 'poco', 'oppo', 'realme', 'oneplus', 'vivo', 'iqoo', 'huawei', 'honor', 'asus', 'letv'];
+
+export const needsAutostartStep = AUTOSTART_MAKERS.some((m) => deviceManufacturer.includes(m));
+
+/**
+ * Whether Android exempts the app from battery optimisation. null when it
+ * can't be told (iOS, or an older native build without the method).
+ * The methods below degrade the same way: older binaries just return false.
+ */
+export async function isIgnoringBatteryOptimizations(): Promise<boolean | null> {
+  if (!native?.isIgnoringBatteryOptimizations) return null;
+  try {
+    return await native.isIgnoringBatteryOptimizations();
+  } catch {
+    return null;
+  }
+}
+
+export async function openBatteryOptimizationSettings(): Promise<boolean> {
+  if (!native?.openBatteryOptimizationSettings) return false;
+  try {
+    return await native.openBatteryOptimizationSettings();
+  } catch {
+    return false;
+  }
+}
+
+export async function openAutostartSettings(): Promise<boolean> {
+  if (!native?.openAutostartSettings) return false;
+  try {
+    return await native.openAutostartSettings();
+  } catch {
+    return false;
+  }
+}

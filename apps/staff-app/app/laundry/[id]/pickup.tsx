@@ -48,8 +48,11 @@ export default function LaundryPickupScreen() {
       Alert.alert('Photo Required', 'Please take a photo of the received items.');
       return;
     }
-    if (!garmentCount || isNaN(Number(garmentCount))) {
-      Alert.alert('Count Required', 'Please confirm the garment count.');
+    // The server takes a whole number from 1 to 500 (MarkPickedUpDto); "0",
+    // "1.5" or "600" used to pass this check and then fail with a 400.
+    const count = Number(garmentCount);
+    if (!garmentCount || !Number.isInteger(count) || count < 1 || count > 500) {
+      Alert.alert('Count Required', 'Enter the garment count as a whole number from 1 to 500.');
       return;
     }
     if (request?.specialInstructions && !instructionsConfirmed) {
@@ -64,7 +67,7 @@ export default function LaundryPickupScreen() {
       });
       await api.patch(`/laundry/${id}/pickup`, {
         photoUrl: uploadedKey,
-        garmentCount: Number(garmentCount),
+        garmentCount: count,
       });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       qc.invalidateQueries({ queryKey: ['laundry'] });

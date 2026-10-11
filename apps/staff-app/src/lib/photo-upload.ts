@@ -17,6 +17,9 @@ import { api } from './api';
 
 export type MediaVisibility = 'public' | 'private';
 
+/** Per-file budget. Photos are compressed to ~200 KB first, so this is generous even on 2G. */
+const UPLOAD_TIMEOUT_MS = 90_000;
+
 export type MediaUploadResult = {
   assetId: string;
   publicUrl: string | null;
@@ -50,7 +53,10 @@ function extensionOf(value: string | undefined): string | undefined {
   return match ? match[1].toLowerCase() : undefined;
 }
 
-function resolveContentType(uri: string, opts: { contentType?: string; filename?: string }): string {
+function resolveContentType(
+  uri: string,
+  opts: { contentType?: string; filename?: string },
+): string {
   if (opts.contentType) return opts.contentType;
   return (
     CONTENT_TYPE_BY_EXT[extensionOf(opts.filename) ?? ''] ??
@@ -81,7 +87,26 @@ export async function uploadViaMedia(
     form.append(k, v);
   }
   form.append('file', { uri, name: filename, type: contentType } as any);
-  const res = await fetch(created.upload.url, { method: 'POST', body: form });
+  // React Native's fetch has no timeout of its own: on a 2G connection that
+  // stalls, the "Uploading…" spinner used to run forever with no way out.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(created.upload.url, {
+      method: 'POST',
+      body: form,
+      signal: controller.signal,
+    });
+  } catch (e) {
+    throw new Error(
+      controller.signal.aborted
+        ? 'The upload is taking too long. Check your connection and try again.'
+        : 'Could not upload. Check your connection and try again.',
+    );
+  } finally {
+    clearTimeout(timer);
+  }
   if (!res.ok && res.status !== 204) {
     throw new Error(`Upload failed (${res.status})`);
   }

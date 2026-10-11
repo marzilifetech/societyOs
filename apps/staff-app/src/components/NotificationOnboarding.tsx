@@ -1,13 +1,40 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
+import { Alert, AppState, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import {
   registerForPushNotifications,
   setupNotificationCategories,
   setupAndroidChannels,
+  subscribeToTokenRotation,
 } from '../lib/notifications';
+import {
+  isIgnoringBatteryOptimizations,
+  openBatteryOptimizationSettings,
+} from '../lib/native-notifications';
 
 const ASKED_KEY = 'notif_permission_asked_v1';
+const BATTERY_ASKED_KEY = 'battery_exemption_asked_v1';
+
+/**
+ * Once per install, after notifications are on: offer to exempt the app from
+ * battery optimisation. On the budget Android phones guards carry, an
+ * optimised idle app has its pushes held back — an SOS can arrive late.
+ */
+async function offerBatteryExemptionOnce(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  if (await AsyncStorage.getItem(BATTERY_ASKED_KEY)) return;
+  if ((await isIgnoringBatteryOptimizations()) !== false) return;
+  await AsyncStorage.setItem(BATTERY_ASKED_KEY, '1');
+  Alert.alert(
+    'Get alerts instantly',
+    'Your phone may delay SOS and visitor alerts to save battery. On the next screen, find Marzi Staff and choose "Don\'t optimise". You can change this later in Settings → Notifications.',
+    [
+      { text: 'Later', style: 'cancel' },
+      { text: 'Open settings', onPress: () => void openBatteryOptimizationSettings() },
+    ],
+  );
+}
 
 /**
  * Silent, native-first notification onboarding. Renders NOTHING.
@@ -48,31 +75,31 @@ const ASKED_KEY = 'notif_permission_asked_v1';
  * something and then do nothing at all. Once the user has been asked, the only
  * route back is the settings screen, which deep-links into the OS.
  */
-export function NotificationOnboarding({ active }: { active: boolean }) {
-  const started = useRef(false);
-
+export function NotificationOnboarding({ userId }: { userId: string | null }) {
   useEffect(() => {
-    if (!active || started.current) return;
-    started.current = true;
+    // One run per signed-in session (keyed on the user), not per process: a
+    // shared guard phone signs guards in and out without the app restarting,
+    // and each of them must get this device registered to THEM.
+    if (!userId) return undefined;
     let cancelled = false;
 
-    (async () => {
+    const register = async (mayPrompt: boolean) => {
       try {
-        await setupAndroidChannels();
-        await setupNotificationCategories();
-
         const { status } = await Notifications.getPermissionsAsync();
         if (cancelled) return;
 
-        // Already granted: skip straight to (re)registering the device token.
+        // Already granted: (re)register the device token. Deduplicated inside,
+        // so repeating this on every foreground costs no network once it has
+        // succeeded — and retries it if it has not.
         if (status === 'granted') {
           await registerForPushNotifications();
+          if (mayPrompt) await offerBatteryExemptionOnce();
           return;
         }
 
         // Explicitly denied earlier — re-asking does nothing on Android 13+.
         // The settings screen is the only way forward.
-        if (status !== 'undetermined') return;
+        if (!mayPrompt || status !== 'undetermined') return;
 
         const alreadyAsked = await AsyncStorage.getItem(ASKED_KEY);
         if (cancelled || alreadyAsked) return;
@@ -80,17 +107,37 @@ export function NotificationOnboarding({ active }: { active: boolean }) {
 
         // registerForPushNotifications() performs the OS request itself and
         // only proceeds to token registration when it is granted.
-        await registerForPushNotifications();
+        if (await registerForPushNotifications()) await offerBatteryExemptionOnce();
       } catch {
-        // Never let notification setup break app start. A failure here costs
-        // notifications; an unhandled rejection here costs the whole session.
+        // Never let notification setup break the app. A failure here costs
+        // notifications until the next foreground retry, not the session.
       }
+    };
+
+    void (async () => {
+      try {
+        await setupAndroidChannels();
+        await setupNotificationCategories();
+      } catch {
+        /* channels also exist natively; categories are iOS-only niceties */
+      }
+      await register(true);
     })();
+
+    // A failed registration (offline at sign-in, server blip) used to stay
+    // failed until the app was killed — for days on an always-on guard phone.
+    const appStateSub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') void register(false);
+    });
+    // FCM can rotate the token mid-session; follow it.
+    const rotationSub = subscribeToTokenRotation();
 
     return () => {
       cancelled = true;
+      appStateSub.remove();
+      rotationSub.remove();
     };
-  }, [active]);
+  }, [userId]);
 
   return null;
 }

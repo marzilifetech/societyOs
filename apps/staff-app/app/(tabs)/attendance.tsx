@@ -6,7 +6,6 @@ import {
   ScrollView,
   Alert,
   ActivityIndicator,
-  Linking,
 } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -67,14 +66,6 @@ export default function AttendanceScreen() {
     month: 'long',
     year: 'numeric',
   });
-
-  const downloadCsv = () => {
-    const base = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000/v1';
-    const url = `${base}/staff/attendance.csv?month=${month}&year=${year}`;
-    Linking.openURL(url).catch(() =>
-      Alert.alert(t('duty.csvDownloadFailTitle'), t('duty.csvDownloadFailBody')),
-    );
-  };
 
   const onTapDay = (date: string, record?: any) => {
     setSheetDay(date);
@@ -259,12 +250,9 @@ export default function AttendanceScreen() {
                 </View>
               )}
 
-              <TouchableOpacity
-                onPress={downloadCsv}
-                className="bg-white dark:bg-gray-900 rounded-2xl py-3 items-center mt-4 shadow-sm border border-transparent dark:border-gray-800"
-              >
-                <Text className="text-sm font-semibold text-primary-500 dark:text-primary-400">{t('duty.downloadCsv')}</Text>
-              </TouchableOpacity>
+              {/* No "Download CSV" button: it opened /staff/attendance.csv, a
+                  route the server doesn't have, in a browser that sends no
+                  bearer token. Comes back with a staff export endpoint. */}
             </>
           )}
         </View>

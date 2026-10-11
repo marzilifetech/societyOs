@@ -30,6 +30,10 @@ import {
   nativeNotificationsAvailable,
   openAppNotificationSettings,
   openChannelSettings,
+  isIgnoringBatteryOptimizations,
+  openBatteryOptimizationSettings,
+  openAutostartSettings,
+  needsAutostartStep,
   type ChannelStatus,
 } from '../../src/lib/native-notifications';
 
@@ -53,6 +57,7 @@ export default function NotificationsSettingsScreen() {
   const [permission, setPermission] = useState<Notifications.PermissionStatus | null>(null);
   const [channels, setChannels] = useState<ChannelStatus[]>([]);
   const [testing, setTesting] = useState(false);
+  const [batteryExempt, setBatteryExempt] = useState<boolean | null>(null);
 
   /**
    * Re-read the real OS state every time the screen regains focus. This is the
@@ -61,14 +66,16 @@ export default function NotificationsSettingsScreen() {
    * stale snapshot from mount.
    */
   const refreshOsState = useCallback(async () => {
-    const [perm, enabled, chans] = await Promise.all([
+    const [perm, enabled, chans, exempt] = await Promise.all([
       Notifications.getPermissionsAsync().then((r) => r.status).catch(() => null),
       areNotificationsEnabled(),
       getChannelStatus(),
+      isIgnoringBatteryOptimizations(),
     ]);
     setPermission(perm);
     setOsEnabled(enabled);
     setChannels(chans);
+    setBatteryExempt(exempt);
   }, []);
 
   useFocusEffect(
@@ -233,6 +240,47 @@ export default function NotificationsSettingsScreen() {
           </View>
         ) : null}
 
+        {/* ─── Background delivery (Android battery management) ─────────────
+            The phone's battery manager, not the app, is the usual reason a
+            guard's SOS or visitor alert arrives late or never on budget
+            Android phones. Both steps open the system's own screens. */}
+        {batteryExempt !== null ? (
+          <View>
+            <SectionLabel>Keep alerts arriving</SectionLabel>
+            <Card padding="none" className="overflow-hidden">
+              <StepRow
+                icon="battery-charging-outline"
+                label={batteryExempt ? 'Battery saver will not delay alerts' : 'Battery saver may delay alerts'}
+                detail={
+                  batteryExempt
+                    ? 'This phone lets Marzi Staff run in the background.'
+                    : 'Tap, find Marzi Staff and choose "Don\'t optimise" (or "Unrestricted").'
+                }
+                done={batteryExempt}
+                onPress={() => void openBatteryOptimizationSettings()}
+                last={!needsAutostartStep}
+              />
+              {needsAutostartStep ? (
+                <StepRow
+                  icon="rocket-outline"
+                  label="Allow auto-start"
+                  detail="Your phone stops apps that are swiped away. Turn on auto-start for Marzi Staff so alerts still reach you."
+                  onPress={async () => {
+                    const opened = await openAutostartSettings();
+                    if (!opened) {
+                      Alert.alert(
+                        'Allow auto-start',
+                        'Open Settings → Apps → Marzi Staff and turn on "Auto-start" or "Allow background activity".',
+                      );
+                    }
+                  }}
+                  last
+                />
+              ) : null}
+            </Card>
+          </View>
+        ) : null}
+
         {/* ─── Escape hatch ──────────────────────────────────────────────── */}
         <View>
           <SectionLabel>Still not arriving?</SectionLabel>
@@ -246,7 +294,7 @@ export default function NotificationsSettingsScreen() {
               icon="refresh-outline"
               label="Re-register this device for push"
               onPress={async () => {
-                const token = await registerForPushNotifications();
+                const token = await registerForPushNotifications({ force: true });
                 Alert.alert(
                   token ? 'Device registered' : 'Could not register',
                   token
@@ -424,6 +472,46 @@ function ChannelRow({
           </Text>
         </View>
       ) : null}
+      <Ionicons name="chevron-forward" size={16} color="#9CA3AF" />
+    </TouchableOpacity>
+  );
+}
+
+function StepRow({
+  icon,
+  label,
+  detail,
+  done,
+  onPress,
+  last,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  detail: string;
+  done?: boolean;
+  onPress: () => void;
+  last?: boolean;
+}) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityHint="Opens your phone's settings"
+      className={`px-5 py-4 flex-row items-center ${
+        !last ? 'border-b border-gray-100 dark:border-gray-800' : ''
+      }`}
+    >
+      <View
+        className={`w-8 h-8 rounded-full items-center justify-center mr-3 ${
+          done ? 'bg-green-50 dark:bg-green-950/50' : 'bg-amber-50 dark:bg-amber-950/50'
+        }`}
+      >
+        <Ionicons name={done ? 'checkmark' : icon} size={16} color={done ? '#15803D' : '#B45309'} />
+      </View>
+      <View className="flex-1">
+        <Text className="font-body text-sm text-gray-900 dark:text-gray-100">{label}</Text>
+        <Text className="font-body text-xs text-gray-500 dark:text-gray-400 mt-0.5">{detail}</Text>
+      </View>
       <Ionicons name="chevron-forward" size={16} color="#9CA3AF" />
     </TouchableOpacity>
   );

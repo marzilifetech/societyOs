@@ -1,179 +1,118 @@
-import { useState } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  ScrollView,
-  ActivityIndicator,
-  Alert,
-  Image,
-  TextInput,
-} from 'react-native';
-import { router, useLocalSearchParams, Stack } from 'expo-router';
+import { useRef, useState } from 'react';
+import { ActivityIndicator, Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import * as ImagePicker from 'expo-image-picker';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
+import { flatLabel } from '@societyos/api-client';
+import { swallow } from '@societyos/mobile-core';
 import { api } from '../../../src/lib/api';
-import { compressImage } from '../../../src/lib/upload';
-import { uploadMediaAndGetKey } from '../../../src/lib/photo-upload';
+import { AppHeader, Card } from '../../../src/components/ui';
+import { QueryScreen } from '../../../src/components/QueryScreen';
+import { PhotoPicker } from '../../../src/components/task/PhotoPicker';
+import { usePhotoAttachments } from '../../../src/hooks/usePhotoAttachments';
+import {
+  HOUSEKEEPING_KEY,
+  fetchHousekeepingJob,
+  housekeepingTypeLabel,
+} from '../../../src/lib/housekeeping';
 
+/** Finish a housekeeping job with before and after photos. */
 export default function HousekeepingCompleteScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const qc = useQueryClient();
-  const [beforePhoto, setBeforePhoto] = useState<string | null>(null);
-  const [afterPhoto, setAfterPhoto] = useState<string | null>(null);
-  const [notes, setNotes] = useState('');
-  const [uploading, setUploading] = useState(false);
-
-  const { data: task, isLoading } = useQuery({
+  const query = useQuery({
     queryKey: ['housekeeping', id],
-    queryFn: () => api.get<any>(`/housekeeping/${id}`),
+    queryFn: () => fetchHousekeepingJob(id),
     enabled: !!id,
   });
-
-  const pickPhoto = async (phase: 'before' | 'after') => {
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.85,
-    });
-    if (!result.canceled && result.assets[0]) {
-      const compressed = await compressImage(result.assets[0].uri, { maxWidth: 1200 });
-      if (phase === 'before') setBeforePhoto(compressed);
-      else setAfterPhoto(compressed);
-    }
-  };
+  const before = usePhotoAttachments({ draftKey: `hk:${id}:before`, max: 1, filenamePrefix: `hk-${id}-before` });
+  const after = usePhotoAttachments({ draftKey: `hk:${id}:after`, max: 1, filenamePrefix: `hk-${id}-after` });
+  const [notes, setNotes] = useState('');
+  const [busy, setBusy] = useState(false);
+  // `busy` disables the button only after a re-render; a fast double tap got
+  // in before it and submitted twice.
+  const submitting = useRef(false);
+  const ready = before.photos.length > 0 && after.photos.length > 0;
 
   const handleComplete = async () => {
-    if (!beforePhoto) {
-      Alert.alert('Before Photo Required', 'Please take a before photo.');
+    if (submitting.current) return;
+    if (!ready) {
+      Alert.alert('Photos required', 'Take a before and an after photo.');
       return;
     }
-    if (!afterPhoto) {
-      Alert.alert('After Photo Required', 'Please take an after photo.');
-      return;
-    }
-    setUploading(true);
+    submitting.current = true;
+    setBusy(true);
     try {
-      const uploadPhoto = async (uri: string, phase: string) => {
-        const uploadedKey = await uploadMediaAndGetKey(uri, {
-          contentType: 'image/jpeg',
-          filename: `upload-${Date.now()}.jpg`,
-        });
-        return uploadedKey;
-      };
-      const [beforeKey, afterKey] = await Promise.all([
-        uploadPhoto(beforePhoto, 'BEFORE'),
-        uploadPhoto(afterPhoto, 'AFTER'),
-      ]);
-      await api.patch(`/housekeeping/${id}/status`, {
+      const [[beforePhotoUrl], [afterPhotoUrl]] = await Promise.all([before.uploadAll(), after.uploadAll()]);
+      await api.patch(`/housekeeping/${encodeURIComponent(id)}/status`, {
         status: 'COMPLETED',
-        beforePhotoUrl: beforeKey,
-        afterPhotoUrl: afterKey,
-        notes,
+        beforePhotoUrl,
+        afterPhotoUrl,
+        ...(notes.trim() ? { notes: notes.trim() } : {}),
       });
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      qc.invalidateQueries({ queryKey: ['housekeeping'] });
-      Alert.alert('Done', 'Housekeeping task completed.', [
-        { text: 'OK', onPress: () => router.back() },
-      ]);
-    } catch (e: any) {
-      Alert.alert('Error', e.message);
+      await Promise.all([before.clearDraft(), after.clearDraft()]);
+      void swallow(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success));
+      void qc.invalidateQueries({ queryKey: HOUSEKEEPING_KEY });
+      Alert.alert('Done', 'Housekeeping job completed.', [{ text: 'OK', onPress: () => router.back() }]);
+    } catch (e: unknown) {
+      Alert.alert("Couldn't complete", e instanceof Error ? e.message : 'Please try again.');
     } finally {
-      setUploading(false);
+      submitting.current = false;
+      setBusy(false);
     }
   };
 
-  if (isLoading || !task) {
-    return (
-      <SafeAreaView className="flex-1 bg-gray-950 items-center justify-center">
-        <Stack.Screen options={{ title: 'Complete' }} />
-        <ActivityIndicator color="#fff" />
-      </SafeAreaView>
-    );
-  }
-
   return (
-    <SafeAreaView className="flex-1 bg-gray-950">
-      <Stack.Screen options={{ headerShown: false }} />
-      <View className="bg-gray-900 px-5 py-4 flex-row items-center">
-        <TouchableOpacity onPress={() => router.back()} className="w-10 h-10 items-center justify-center">
-          <Text className="text-white text-2xl">‹</Text>
-        </TouchableOpacity>
-        <Text className="text-white text-lg font-bold ml-2">Complete Housekeeping</Text>
-      </View>
-
-      <ScrollView className="flex-1" contentContainerClassName="p-5 gap-4" keyboardShouldPersistTaps="handled">
-        <View className="bg-gray-900 rounded-2xl p-5">
-          <Text className="text-xs text-gray-400 uppercase tracking-wider mb-1">Area</Text>
-          <Text className="text-white text-base font-semibold">{task.area ?? task.title ?? '—'}</Text>
-          {task.notes && <Text className="text-gray-300 text-sm mt-2">{task.notes}</Text>}
-        </View>
-
-        {/* Photo pair */}
-        {(['before', 'after'] as const).map((phase) => {
-          const uri = phase === 'before' ? beforePhoto : afterPhoto;
-          return (
-            <View key={phase} className="bg-gray-900 rounded-2xl p-5">
-              <Text className="text-white font-semibold mb-1 capitalize">{phase} Photo</Text>
-              <Text className="text-gray-400 text-xs mb-4">Required</Text>
-              {uri ? (
-                <View className="gap-3">
-                  <Image
-                    source={{ uri }}
-                    style={{ width: '100%', aspectRatio: 16 / 9, borderRadius: 12 }}
-                    resizeMode="cover"
-                  />
-                  <TouchableOpacity
-                    onPress={() => pickPhoto(phase)}
-                    disabled={uploading}
-                    className="bg-gray-800 rounded-xl py-3 items-center"
-                  >
-                    <Text className="text-gray-300 text-sm font-semibold">Retake</Text>
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                <TouchableOpacity
-                  onPress={() => pickPhoto(phase)}
-                  disabled={uploading}
-                  className="border-2 border-dashed border-gray-700 rounded-xl py-8 items-center gap-2"
-                >
-                  <Text className="text-3xl">📷</Text>
-                  <Text className="text-gray-400 text-sm font-semibold capitalize">Take {phase} photo</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          );
-        })}
-
-        <View className="bg-gray-900 rounded-2xl p-5">
-          <Text className="text-white font-semibold mb-3">Area Notes</Text>
-          <TextInput
-            value={notes}
-            onChangeText={setNotes}
-            placeholder="Any observations about the area…"
-            placeholderTextColor="#6b7280"
-            className="bg-gray-800 rounded-xl p-4 text-white text-sm"
-            style={{ minHeight: 80, textAlignVertical: 'top' }}
-            multiline
-          />
-        </View>
-      </ScrollView>
-
-      <View className="px-5 py-4 bg-gray-900 border-t border-gray-800">
-        <TouchableOpacity
-          onPress={handleComplete}
-          disabled={uploading || !beforePhoto || !afterPhoto}
-          className={`rounded-2xl items-center py-4 ${!beforePhoto || !afterPhoto ? 'bg-gray-700' : 'bg-green-600'}`}
-          style={{ minHeight: 56 }}
-        >
-          {uploading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text className="text-white font-bold text-base">Mark Complete</Text>
-          )}
-        </TouchableOpacity>
-      </View>
-    </SafeAreaView>
+    <QueryScreen query={query} title="Complete housekeeping">
+      {(job) => (
+        <SafeAreaView className="flex-1 bg-gray-50 dark:bg-gray-950" edges={['top']}>
+          <Stack.Screen options={{ headerShown: false }} />
+          <AppHeader title="Complete housekeeping" />
+          <ScrollView className="flex-1" contentContainerClassName="p-5 gap-4" keyboardShouldPersistTaps="handled">
+            <Card padding="lg">
+              <Text className="text-xs uppercase tracking-wider text-gray-400">{housekeepingTypeLabel(job.type)}</Text>
+              <Text className="mt-1 text-base font-semibold text-gray-900 dark:text-gray-100">
+                {job.resident?.user?.name ?? 'Resident'}
+                {flatLabel(job.resident?.flat) ? ` · Flat ${flatLabel(job.resident?.flat)}` : ''}
+              </Text>
+              {job.notes ? <Text className="mt-2 text-sm text-gray-600 dark:text-gray-300">{job.notes}</Text> : null}
+            </Card>
+            <Card padding="lg">
+              <Text className="mb-3 font-semibold text-gray-900 dark:text-gray-100">Before</Text>
+              <PhotoPicker attachments={before} label="Tap to take a before photo" disabled={busy} />
+            </Card>
+            <Card padding="lg">
+              <Text className="mb-3 font-semibold text-gray-900 dark:text-gray-100">After</Text>
+              <PhotoPicker attachments={after} label="Tap to take an after photo" disabled={busy} />
+            </Card>
+            <Card padding="lg">
+              <Text className="mb-3 font-semibold text-gray-900 dark:text-gray-100">Notes</Text>
+              <TextInput
+                value={notes}
+                onChangeText={setNotes}
+                placeholder="Anything the resident should know…"
+                placeholderTextColor="#9CA3AF"
+                maxLength={1000}
+                className="rounded-xl bg-gray-100 p-4 text-sm text-gray-900 dark:bg-gray-800 dark:text-gray-100"
+                style={{ minHeight: 80, textAlignVertical: 'top' }}
+                multiline
+              />
+            </Card>
+          </ScrollView>
+          <View className="border-t border-gray-200 bg-white px-5 py-4 dark:border-gray-800 dark:bg-gray-900">
+            <TouchableOpacity
+              onPress={() => void handleComplete()}
+              disabled={busy || !ready}
+              accessibilityRole="button"
+              className={`items-center rounded-2xl py-4 ${ready ? 'bg-green-600' : 'bg-gray-300 dark:bg-gray-700'}`}
+              style={{ minHeight: 56 }}
+            >
+              {busy ? <ActivityIndicator color="#fff" /> : <Text className="text-base font-bold text-white">Mark complete</Text>}
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      )}
+    </QueryScreen>
   );
 }

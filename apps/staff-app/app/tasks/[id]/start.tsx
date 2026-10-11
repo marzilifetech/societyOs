@@ -1,177 +1,147 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
-  View,
-  Text,
-  TouchableOpacity,
-  ScrollView,
   ActivityIndicator,
   Alert,
   Image,
+  ScrollView,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { router, useLocalSearchParams, Stack } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
-import { Ionicons } from '@expo/vector-icons';
-import { colors } from '@societyos/theme';
+import { swallow } from '@societyos/mobile-core';
 import { api } from '../../../src/lib/api';
-import { compressImage } from '../../../src/lib/upload';
-import { uploadMediaAndGetKey } from '../../../src/lib/photo-upload';
 import { AppHeader, Card } from '../../../src/components/ui';
+import { QueryScreen } from '../../../src/components/QueryScreen';
+import { PhotoPicker } from '../../../src/components/task/PhotoPicker';
+import { TaskSummaryCard } from '../../../src/components/task/TaskSummaryCard';
+import { usePhotoAttachments } from '../../../src/hooks/usePhotoAttachments';
+import { useRefreshTask, useTask } from '../../../src/hooks/useTask';
+import { useTimerStore } from '../../../src/store/timer.store';
 
+/** Start work: a before photo is required (BRD 4.5 proof of work). */
 export default function StartWorkScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const qc = useQueryClient();
-  const [beforePhoto, setBeforePhoto] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
-
-  const { data: task, isLoading } = useQuery({
-    queryKey: ['task', id],
-    queryFn: () => api.get<any>(`/service-requests/${id}`),
-    enabled: !!id,
+  const query = useTask(id);
+  const refresh = useRefreshTask(id);
+  const startTimer = useTimerStore((s) => s.start);
+  const before = usePhotoAttachments({
+    draftKey: `task:${id}:before`,
+    max: 3,
+    filenamePrefix: `task-${id}-before`,
   });
+  const [busy, setBusy] = useState(false);
+  // `busy` only disables the button after a re-render; a fast double tap got
+  // in before it and started the work (and posted every proof) twice.
+  const submitting = useRef(false);
+  /** Proofs the server already has, so a retry after a partial failure skips them. */
+  const postedProofs = useRef(new Set<string>());
 
-  const startWork = useMutation({
-    mutationFn: async (photoUrl: string) => {
-      await api.post(`/service-requests/${id}/proof`, {
-        phase: 'BEFORE',
-        photoUrl,
-      });
-      return api.patch(`/service-requests/${id}/status`, { status: 'IN_PROGRESS' });
-    },
-    onSuccess: () => {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      qc.invalidateQueries({ queryKey: ['task', id] });
-      qc.invalidateQueries({ queryKey: ['my-tasks'] });
-      Alert.alert('Work Started', 'Before photo saved. Work is now in progress.', [
-        { text: 'OK', onPress: () => router.back() },
-      ]);
-    },
-    onError: (e: any) => Alert.alert('Error', e.message),
-  });
-
-  const pickPhoto = async () => {
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.85,
-      allowsEditing: false,
-    });
-    if (!result.canceled && result.assets[0]) {
-      const compressed = await compressImage(result.assets[0].uri, { maxWidth: 1200 });
-      setBeforePhoto(compressed);
-    }
-  };
-
-  const handleStart = async () => {
-    if (!beforePhoto) {
-      Alert.alert('Photo Required', 'Please take a before photo before starting work.');
+  const handleStart = async (status: string) => {
+    if (submitting.current) return;
+    if (before.photos.length === 0) {
+      Alert.alert('Photo required', 'Take a before photo of the problem first.');
       return;
     }
-    setUploading(true);
+    submitting.current = true;
+    setBusy(true);
     try {
-      const uploadedKey = await uploadMediaAndGetKey(beforePhoto, {
-        contentType: 'image/jpeg',
-        filename: `upload-${Date.now()}.jpg`,
-      });
-      await startWork.mutateAsync(uploadedKey);
-    } catch (e: any) {
-      Alert.alert('Upload failed', e.message);
+      const keys = await before.uploadAll();
+      for (const photoUrl of keys) {
+        if (postedProofs.current.has(photoUrl)) continue;
+        await api.post(`/service-requests/${encodeURIComponent(id)}/proof`, { photoUrl });
+        postedProofs.current.add(photoUrl);
+      }
+      // A retry after a partial failure may find the task already started.
+      if (status !== 'IN_PROGRESS') {
+        await api.patch(`/service-requests/${encodeURIComponent(id)}/status`, {
+          status: 'IN_PROGRESS',
+        });
+      }
+      startTimer(id);
+      await before.clearDraft();
+      refresh();
+      void swallow(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success));
+      Alert.alert('Work started', 'Before photo saved. The task is now in progress.', [
+        { text: 'OK', onPress: () => router.back() },
+      ]);
+    } catch (e: unknown) {
+      Alert.alert("Couldn't start", e instanceof Error ? e.message : 'Please try again.');
     } finally {
-      setUploading(false);
+      submitting.current = false;
+      setBusy(false);
     }
   };
 
-  if (isLoading || !task) {
-    return (
-      <SafeAreaView className="flex-1 bg-gray-50 dark:bg-gray-950 items-center justify-center">
-        <Stack.Screen options={{ title: 'Start Work' }} />
-        <ActivityIndicator color={colors.primary[500]} />
-      </SafeAreaView>
-    );
-  }
-
-  const busy = uploading || startWork.isPending;
-
   return (
-    <SafeAreaView className="flex-1 bg-gray-50 dark:bg-gray-950">
-      <Stack.Screen options={{ headerShown: false }} />
-      <AppHeader title="Start Work" />
+    <QueryScreen query={query} title="Start work">
+      {(task) => (
+        <SafeAreaView edges={['top']} className="flex-1 bg-gray-50 dark:bg-gray-950">
+          <Stack.Screen options={{ headerShown: false }} />
+          <AppHeader title="Start work" />
 
-      <ScrollView className="flex-1" contentContainerClassName="p-5 gap-4">
-        {/* Task summary */}
-        <Card padding="lg">
-          <Text className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">{task.category}</Text>
-          <Text className="text-gray-900 dark:text-gray-100 text-base font-semibold">
-            {task.requestedBy?.name ?? 'Resident'} · Flat {task.unit?.flatNumber ?? '—'}
-          </Text>
-          <Text className="text-gray-600 dark:text-gray-300 text-sm mt-2">{task.description}</Text>
-        </Card>
+          <ScrollView className="flex-1" contentContainerClassName="p-5 gap-4">
+            <TaskSummaryCard task={task} />
 
-        {/* Before photo */}
-        <Card padding="lg">
-          <Text className="text-gray-900 dark:text-gray-100 font-semibold mb-1">Before Photo</Text>
-          <Text className="text-gray-500 dark:text-gray-400 text-xs mb-4">Required — capture current state before starting work</Text>
-
-          {beforePhoto ? (
-            <View className="gap-3">
-              <Image
-                source={{ uri: beforePhoto }}
-                style={{ width: '100%', aspectRatio: 16 / 9, borderRadius: 12 }}
-                resizeMode="cover"
-              />
-              <TouchableOpacity
-                onPress={pickPhoto}
+            <Card padding="lg">
+              <Text className="mb-1 font-semibold text-gray-900 dark:text-gray-100">
+                Before photo
+              </Text>
+              <Text className="mb-4 text-xs text-gray-500 dark:text-gray-400">
+                Required — show the problem before you start.
+              </Text>
+              <PhotoPicker
+                attachments={before}
+                label="Tap to take a before photo"
                 disabled={busy}
-                className="bg-gray-100 dark:bg-gray-800 rounded-full py-3 items-center"
-              >
-                <Text className="text-gray-700 dark:text-gray-300 text-sm font-semibold">Retake Photo</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
+              />
+            </Card>
+
+            {task.photos?.length ? (
+              <Card padding="lg">
+                <Text className="mb-3 font-semibold text-gray-900 dark:text-gray-100">
+                  Photos on this task
+                </Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ gap: 8 }}
+                >
+                  {task.photos.map((p) => (
+                    <Image
+                      key={p.id}
+                      source={{ uri: p.url }}
+                      style={{ width: 120, height: 90, borderRadius: 8 }}
+                      resizeMode="cover"
+                    />
+                  ))}
+                </ScrollView>
+              </Card>
+            ) : null}
+          </ScrollView>
+
+          <View className="border-t border-gray-200 bg-white px-5 py-4 dark:border-gray-800 dark:bg-gray-900">
             <TouchableOpacity
-              onPress={pickPhoto}
-              disabled={busy}
-              className="border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-xl py-10 items-center gap-2"
+              onPress={() => void handleStart(task.status)}
+              disabled={busy || before.photos.length === 0}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: busy || before.photos.length === 0, busy }}
+              className={`items-center rounded-full py-4 ${
+                before.photos.length === 0 ? 'bg-gray-300 dark:bg-gray-700' : 'bg-green-600'
+              }`}
+              style={{ minHeight: 56 }}
             >
-              <Ionicons name="camera-outline" size={36} color={colors.primary[500]} />
-              <Text className="text-gray-500 dark:text-gray-400 text-sm font-semibold">Tap to take Before photo</Text>
+              {busy ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text className="font-bold text-base text-white">Start work</Text>
+              )}
             </TouchableOpacity>
-          )}
-        </Card>
-
-        {/* Resident photos (if any) */}
-        {task.photos?.length > 0 && (
-          <Card padding="lg">
-            <Text className="text-gray-900 dark:text-gray-100 font-semibold mb-3">Resident's Photos</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              {task.photos.map((p: any, i: number) => (
-                <Image
-                  key={i}
-                  source={{ uri: p.url }}
-                  style={{ width: 120, height: 90, borderRadius: 8, marginRight: 8 }}
-                  resizeMode="cover"
-                />
-              ))}
-            </ScrollView>
-          </Card>
-        )}
-      </ScrollView>
-
-      <View className="px-5 py-4 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800">
-        <TouchableOpacity
-          onPress={handleStart}
-          disabled={busy || !beforePhoto}
-          className={`rounded-full items-center py-4 ${!beforePhoto ? 'bg-gray-300 dark:bg-gray-700' : 'bg-green-600'}`}
-          style={{ minHeight: 56 }}
-        >
-          {busy ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text className="text-white font-bold text-base">Start Work</Text>
-          )}
-        </TouchableOpacity>
-      </View>
-    </SafeAreaView>
+          </View>
+        </SafeAreaView>
+      )}
+    </QueryScreen>
   );
 }

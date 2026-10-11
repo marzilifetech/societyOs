@@ -18,7 +18,7 @@ export async function requestLocationPermission(): Promise<boolean> {
 export type PositionFailure = 'permission' | 'blocked' | 'unavailable' | 'timeout' | 'error';
 
 export type PositionResult =
-  | { ok: true; position: LatLng }
+  | { ok: true; position: LatLng; /** Android reports a mock-location provider. */ mocked: boolean }
   | { ok: false; reason: PositionFailure };
 
 /**
@@ -38,9 +38,7 @@ export async function getPosition(
 ): Promise<PositionResult> {
   const { prompt = true, timeoutMs = 10_000 } = opts;
 
-  const perm = prompt
-    ? await ensurePermission('location')
-    : await checkPermission('location');
+  const perm = prompt ? await ensurePermission('location') : await checkPermission('location');
   if (!perm.granted) {
     return {
       ok: false,
@@ -61,7 +59,11 @@ export async function getPosition(
       new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
     ]);
     if (!pos) return { ok: false, reason: 'timeout' };
-    return { ok: true, position: { lat: pos.coords.latitude, lng: pos.coords.longitude } };
+    return {
+      ok: true,
+      position: { lat: pos.coords.latitude, lng: pos.coords.longitude },
+      mocked: (pos as { mocked?: boolean }).mocked === true,
+    };
   } catch (e) {
     console.warn('[geo] getPosition failed', e);
     return { ok: false, reason: 'error' };
@@ -84,9 +86,7 @@ export function distanceMeters(a: LatLng, b: LatLng): number {
   const dLng = toRad(b.lng - a.lng);
   const lat1 = toRad(a.lat);
   const lat2 = toRad(b.lat);
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
@@ -112,4 +112,57 @@ export function distanceToPolygon(point: LatLng, polygon: LatLng[]): number {
   const cx = polygon.reduce((s, p) => s + p.lng, 0) / polygon.length;
   const cy = polygon.reduce((s, p) => s + p.lat, 0) / polygon.length;
   return distanceMeters(point, { lat: cy, lng: cx });
+}
+
+/** A society's geofence: a drawn polygon, or a circle. Either may be absent. */
+export type Geofence = {
+  geofence?: LatLng[] | null;
+  geofenceCenter?: LatLng | null;
+  geofenceRadius?: number | null;
+};
+
+export type GeofenceCheck = {
+  /** Whether the society configured a geofence at all. */
+  configured: boolean;
+  inside: boolean;
+  /** Metres outside the fence (0 inside); null when unknown or not configured. */
+  distance: number | null;
+};
+
+/**
+ * Is `position` inside the society's geofence?
+ *
+ * One function for the Duty tab's chip AND the check-in gate, so the gate can
+ * judge the fresh fix taken at check-in with the same geometry instead of
+ * trusting the one captured when the tab first mounted. The server re-checks
+ * and has the final word (OUTSIDE_GEOFENCE).
+ */
+export function checkGeofence(
+  position: LatLng | null,
+  fence: Geofence | null | undefined,
+): GeofenceCheck {
+  const polygon = fence?.geofence ?? undefined;
+  const center = fence?.geofenceCenter ?? null;
+  const radius = fence?.geofenceRadius ?? null;
+  const hasCircle = !!center && typeof radius === 'number' && radius > 0;
+
+  // No geofence configured for this society: presence cannot be checked, so
+  // allowing the check-in is correct rather than permissive.
+  if (!polygon?.length && !hasCircle) return { configured: false, inside: true, distance: null };
+
+  // A geofence IS configured but we have no fix. This used to fall into the
+  // same branch as "no geofence" — so a staff member who denied location could
+  // check in from anywhere and the geofence silently did not run.
+  if (!position) return { configured: true, inside: false, distance: null };
+
+  if (polygon?.length) {
+    const inside = pointInPolygon(position, polygon);
+    return { configured: true, inside, distance: inside ? 0 : distanceToPolygon(position, polygon) };
+  }
+  const fromCenter = distanceMeters(position, center!);
+  return {
+    configured: true,
+    inside: fromCenter <= radius!,
+    distance: Math.max(0, Math.round(fromCenter - radius!)),
+  };
 }

@@ -1,86 +1,70 @@
 import { useState } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  ActivityIndicator,
-  Alert,
-  ScrollView,
-} from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, Text, TextInput, TouchableOpacity } from 'react-native';
 import { router, Stack } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useMutation } from '@tanstack/react-query';
 import { api } from '../../src/lib/api';
-import { VoiceNoteRecorder } from '../../src/components/task/VoiceNoteRecorder';
-import { uploadMediaAndGetKey } from '../../src/lib/photo-upload';
+import { AppHeader } from '../../src/components/ui';
 
+const MIN_LENGTH = 5;
+
+/**
+ * Why the guard was late today, for their supervisor.
+ *
+ * The voice-note option is gone: it called an audio API that does not exist in
+ * expo-audio (so it never recorded), the media service accepts no audio, and
+ * the server discarded the recording anyway. A typed reason always worked.
+ */
 export default function LateReasonScreen() {
   const [reason, setReason] = useState('');
-  const [voiceUri, setVoiceUri] = useState<string | null>(null);
 
   const submit = useMutation({
-    mutationFn: async () => {
-      let voiceUrl: string | null = null;
-      if (voiceUri) {
-        try {
-          voiceUrl = await uploadMediaAndGetKey(voiceUri, {
-            contentType: 'audio/m4a',
-            filename: `late-reason-${Date.now()}.m4a`,
-            // A voice note about being late is personal; keep it off the CDN.
-            visibility: 'private',
-          });
-        } catch (e) {
-          // The reason itself still submits without the recording.
-          console.warn('voice upload failed', e);
-        }
-      }
-      return api.post('/staff/check-in/late-reason', { reason, voiceUrl });
-    },
+    mutationFn: () => api.post('/staff/check-in/late-reason', { reason: reason.trim() }),
     onSuccess: () => {
-      Alert.alert('Submitted', 'Your late reason has been recorded.', [
+      Alert.alert('Submitted', 'Your reason has been sent to your supervisor.', [
         { text: 'OK', onPress: () => router.back() },
       ]);
     },
-    onError: (err: any) => Alert.alert('Error', err.message),
+    onError: (err: unknown) =>
+      Alert.alert("Couldn't submit", err instanceof Error ? err.message : 'Please try again.'),
   });
 
+  const ready = reason.trim().length >= MIN_LENGTH;
+
   return (
-    <SafeAreaView className="flex-1 bg-gray-50">
-      <Stack.Screen options={{ title: 'Late Reason' }} />
-      <ScrollView contentContainerStyle={{ padding: 24 }}>
-        <Text className="text-2xl font-bold text-gray-900 mb-1">Late Arrival</Text>
-        <Text className="text-sm text-gray-500 mb-6">
-          Tell your supervisor why you're late today.
+    <SafeAreaView className="flex-1 bg-gray-50 dark:bg-gray-950" edges={['top']}>
+      <Stack.Screen options={{ headerShown: false }} />
+      <AppHeader title="Late arrival" />
+      <ScrollView contentContainerStyle={{ padding: 24 }} keyboardShouldPersistTaps="handled">
+        <Text className="mb-6 text-sm text-gray-500 dark:text-gray-400">
+          Tell your supervisor why you were late today.
         </Text>
 
-        <Text className="text-xs font-semibold text-gray-500 mb-2">Reason (required)</Text>
+        <Text className="mb-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Reason</Text>
         <TextInput
           multiline
           value={reason}
           onChangeText={setReason}
-          placeholder="e.g. Heavy traffic on main road"
-          className="bg-white rounded-2xl p-4 text-sm text-gray-900 shadow-sm"
+          maxLength={500}
+          placeholder="e.g. Heavy traffic on the main road"
+          placeholderTextColor="#9CA3AF"
+          accessibilityLabel="Reason for being late"
+          className="rounded-2xl bg-white p-4 text-sm text-gray-900 shadow-sm dark:bg-gray-900 dark:text-gray-100"
           style={{ textAlignVertical: 'top', minHeight: 120 }}
         />
 
-        <View className="mt-5">
-          <Text className="text-xs font-semibold text-gray-500 mb-2">Or record a voice note</Text>
-          <VoiceNoteRecorder onRecorded={setVoiceUri} />
-          {voiceUri && (
-            <Text className="text-xs text-green-700 mt-2">✓ Voice note attached</Text>
-          )}
-        </View>
-
         <TouchableOpacity
-          className={`rounded-2xl py-4 items-center mt-8 ${reason.trim().length < 5 ? 'bg-gray-300' : 'bg-primary-500'}`}
-          disabled={reason.trim().length < 5 || submit.isPending}
+          className={`mt-8 items-center rounded-2xl py-4 ${ready ? 'bg-primary-500' : 'bg-gray-300 dark:bg-gray-700'}`}
+          disabled={!ready || submit.isPending}
           onPress={() => submit.mutate()}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: !ready || submit.isPending, busy: submit.isPending }}
+          style={{ minHeight: 56 }}
         >
           {submit.isPending ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text className="text-white font-bold">Submit Reason</Text>
+            <Text className="font-bold text-white">Send reason</Text>
           )}
         </TouchableOpacity>
       </ScrollView>

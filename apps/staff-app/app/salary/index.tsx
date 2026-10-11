@@ -4,7 +4,7 @@ import { Stack } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import WebView from 'react-native-webview';
-import { api } from '../../src/lib/api';
+import { getUnwrappedArray } from '../../src/lib/unwrapped-get';
 import { ErrorCard } from '../../src/components/ErrorCard';
 import { AppHeader, Card, EmptyState } from '../../src/components/ui';
 
@@ -18,8 +18,8 @@ interface SalarySlip {
   generatedAt?: string;
 }
 
-function formatINR(n: number) {
-  return `₹${(n ?? 0).toLocaleString('en-IN')}`;
+function formatINR(n: number | string) {
+  return `₹${(Number(n) || 0).toLocaleString('en-IN')}`;
 }
 
 function periodLabel(p: string) {
@@ -34,7 +34,7 @@ export default function SalaryScreen() {
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['staff-salary', year],
-    queryFn: () => api.get<SalarySlip[]>(`/staff/salary?year=${year}`),
+    queryFn: () => getUnwrappedArray<SalarySlip>(`/staff/salary?year=${year}`),
   });
 
   const yearOptions = useMemo(() => {
@@ -42,7 +42,9 @@ export default function SalaryScreen() {
     return [cur, cur - 1, cur - 2];
   }, []);
 
-  const total = (data ?? []).reduce((sum, s) => sum + (s.netPay ?? 0), 0);
+  // Number(): older API builds sent these Decimal amounts as strings, which
+  // `+` concatenated.
+  const total = (data ?? []).reduce((sum, s) => sum + (Number(s.netPay) || 0), 0);
 
   return (
     <SafeAreaView className="flex-1 bg-gray-50" edges={['top']}>

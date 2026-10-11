@@ -9,22 +9,14 @@ import i18nInstance from '../../src/lib/i18n';
 import { api } from '../../src/lib/api';
 import { DateField } from '../../src/components/common/DateField';
 import { AppHeader } from '../../src/components/ui';
+import { LEAVE_TYPES, fetchLeaveBalance, leaveDays, todayIst } from '../../src/lib/leave';
 
-const LEAVE_TYPES = [
-  { value: 'CASUAL', label: 'Casual', balanceKey: 'casual' as const },
-  { value: 'MEDICAL', label: 'Medical', balanceKey: 'medical' as const },
-  { value: 'PRIVILEGE', label: 'Privilege', balanceKey: 'privilege' as const },
-];
-
-function formatDate(d: Date) {
-  return d.toISOString().split('T')[0];
-}
 
 export default function LeaveRequestScreen() {
   const { t } = useTranslation(undefined, { i18n: i18nInstance });
   const qc = useQueryClient();
   const params = useLocalSearchParams<{ type?: string }>();
-  const today = formatDate(new Date());
+  const today = todayIst();
 
   const [leaveType, setLeaveType] = useState<string>('');
   const [fromDate, setFromDate] = useState(today);
@@ -44,13 +36,7 @@ export default function LeaveRequestScreen() {
 
   const { data: balance } = useQuery({
     queryKey: ['leave-balance'],
-    queryFn: () =>
-      api
-        .get<any>('/staff/leave-balance')
-        .catch((e) => {
-          console.warn('[leave-balance] fetch failed', e?.message);
-          return null;
-        }),
+    queryFn: fetchLeaveBalance,
   });
 
   const mutation = useMutation({
@@ -84,13 +70,10 @@ export default function LeaveRequestScreen() {
     onError: (err: any) => Alert.alert('Error', err.message),
   });
 
-  const days = Math.max(
-    1,
-    Math.round((new Date(toDate).getTime() - new Date(fromDate).getTime()) / 86400000) + 1,
-  );
+  const days = leaveDays(fromDate, toDate);
 
   const selectedMeta = LEAVE_TYPES.find((t) => t.value === leaveType);
-  const selectedBal = selectedMeta && balance ? balance[selectedMeta.balanceKey] : null;
+  const selectedBal = selectedMeta && balance ? balance[selectedMeta.value] ?? null : null;
   const remainingAfter = selectedBal
     ? Math.max(0, (selectedBal.total ?? 0) - (selectedBal.used ?? 0) - days)
     : null;

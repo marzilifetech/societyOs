@@ -23,6 +23,7 @@ import { APP_VERSION_LABEL } from '../../src/lib/app-version';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../src/store/auth.store';
 import { api } from '../../src/lib/api';
+import { unregisterDeviceToken } from '../../src/lib/notifications';
 import { uploadViaMedia } from '../../src/lib/photo-upload';
 import { colors } from '@societyos/theme';
 
@@ -143,13 +144,23 @@ export default function StaffProfileScreen() {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
+            // Forget this phone's push token while the session still works.
+            await unregisterDeviceToken();
             try {
               await api.post('/auth/delete', {});
-            } catch (err: any) {
-              if (__DEV__) console.warn('[delete] failed', err?.message);
+            } catch (err: unknown) {
+              // This used to be swallowed: the user was signed out and told
+              // their account was deleted while it still existed (a DPDP and
+              // Play policy problem). Say so and keep them signed in.
+              Alert.alert(
+                'Account not deleted',
+                `${err instanceof Error ? err.message : 'Something went wrong.'} Your account still exists. Please try again, or ask your society office.`,
+              );
+              return;
             }
-            await clearAuth();
-            router.replace('/(auth)/society-select' as any);
+            // The server has ended the session along with the account.
+            await clearAuth({ revokeOnServer: false });
+            router.replace('/(auth)/society-select' as never);
           },
         },
       ],

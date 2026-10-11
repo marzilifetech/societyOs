@@ -1,83 +1,37 @@
-import React, { useEffect, useRef, useState } from 'react';
-import {
-  Animated,
-  Image,
-  PanResponder,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useNotificationBanner, BannerNotification, classifyBannerType, type BannerType } from '../contexts/NotificationContext';
-import { api } from '../lib/api';
+import { useNotificationBanner } from '../contexts/NotificationContext';
+import { useLockStore } from '../store/lock.store';
+import { appNavigator } from '../lib/navigation';
+import {
+  actionsForGroup,
+  hrefForNotification,
+  performNotificationAction,
+  visualForNotification,
+} from '../lib/notification-routes';
 
 const SUCCESS_INK = '#1F7A45';
 const DESTRUCTIVE = '#DC2626';
 
 /**
- * Per-category visual: leading tinted icon circle + top accent bar. Keyed off
- * the backend category registry (`data.type`), with legacy event names
- * normalised onto the same visuals. Unknown types fall back to the coarse
- * BannerType classifier shared with the auto-dismiss timing.
- */
-type BannerVisual = { icon: keyof typeof Ionicons.glyphMap; tint: string; bg: string };
-
-const CATEGORY_VISUALS: Record<string, BannerVisual> = {
-  visitor_approvals: { icon: 'person', tint: '#9A6B00', bg: '#FBF1D9' },
-  visitors_gate: { icon: 'person', tint: '#9A6B00', bg: '#FBF1D9' },
-  staff_tasks: { icon: 'checkbox', tint: '#2563EB', bg: '#DBEAFE' },
-  staff_help_requests: { icon: 'hand-left', tint: '#7C3AED', bg: '#EDE9FE' },
-  deliveries: { icon: 'cube', tint: '#0284C7', bg: '#E0F2FE' },
-  notices: { icon: 'megaphone', tint: '#9A6B00', bg: '#FBF1D9' },
-  notices_urgent: { icon: 'megaphone', tint: '#9A6B00', bg: '#FBF1D9' },
-  payments: { icon: 'card', tint: SUCCESS_INK, bg: '#E7F4EC' },
-  emergency_sos: { icon: 'alert', tint: '#C42847', bg: '#FCE9EE' },
-  complaints: { icon: 'chatbubble', tint: '#7C3AED', bg: '#EDE9FE' },
-  approval_results: { icon: 'checkmark-circle', tint: SUCCESS_INK, bg: '#E7F4EC' },
-  account_auth: { icon: 'shield-checkmark', tint: '#475569', bg: '#F1F5F9' },
-};
-
-const LEGACY_TO_CATEGORY: Record<string, string> = {
-  VISITOR_APPROVAL_REQUEST: 'visitor_approvals',
-  VISITOR_ARRIVAL: 'visitor_approvals',
-  TASK_ASSIGNED: 'staff_tasks',
-  task: 'staff_tasks',
-  HELP_REQUEST: 'staff_help_requests',
-  help: 'staff_help_requests',
-  NOTICE_PUBLISHED: 'notices',
-  notice: 'notices',
-  SOS_TRIGGERED: 'emergency_sos',
-  sos: 'emergency_sos',
-};
-
-const FALLBACK_VISUALS: Record<BannerType, BannerVisual> = {
-  MARKETING: { icon: 'megaphone', tint: '#16A34A', bg: '#DCFCE7' },
-  DELIVERY: { icon: 'cube', tint: '#D97706', bg: '#FEF3C7' },
-  EMERGENCY: { icon: 'warning', tint: DESTRUCTIVE, bg: '#FEE2E2' },
-};
-
-function visualFor(n: BannerNotification): BannerVisual {
-  const key = n.type ?? '';
-  return (
-    CATEGORY_VISUALS[key] ??
-    CATEGORY_VISUALS[LEGACY_TO_CATEGORY[key] ?? ''] ??
-    FALLBACK_VISUALS[classifyBannerType(n)]
-  );
-}
-
-/**
  * Foreground banner for staff push notifications. Overlays every screen so a
- * visitor / help-request approval never gets buried behind the current view.
- * Action buttons (Approve/Reject, Accept/Decline) call the backend directly
- * — same idempotent endpoints the lockscreen buttons hit.
+ * task, visitor or SOS alert never gets buried behind the current view. While
+ * signed in, the OS banner is suppressed in the foreground (see
+ * setupNotificationHandler), so this IS the notification.
+ *
+ * Rendered in place, with no entrance animation. It used to spring in from
+ * translateY -200; on this app (RN 0.81, old architecture, Android) an Animated
+ * value never reaches a view that mounts after its screen's first render, so
+ * the banner stayed off-screen and foreground pushes were simply invisible.
+ * Proven on device in the resident app, which shares the setup.
  */
 export function InAppBanner() {
   const { current, dismiss } = useNotificationBanner();
+  /** Never above the PIN lock: its actions would act without the PIN. */
+  const locked = useLockStore((s) => s.locked);
   const insets = useSafeAreaInsets();
-  const translateY = useRef(new Animated.Value(-200)).current;
   /** Which action is in flight, so its button can show progress. */
   const [acting, setActing] = useState<string | null>(null);
   /** Set when an action fails, so the banner says so instead of vanishing. */
@@ -86,114 +40,40 @@ export function InAppBanner() {
   useEffect(() => {
     setActing(null);
     setActionError(null);
-    if (current) {
-      translateY.setValue(-200);
-      Animated.spring(translateY, {
-        toValue: 0,
-        useNativeDriver: true,
-        bounciness: 6,
-        speed: 14,
-      }).start();
-    }
-  }, [current, translateY]);
+  }, [current]);
 
-  const pan = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_e, g) => g.dy < -8,
-      onPanResponderMove: (_e, g) => {
-        if (g.dy < 0) translateY.setValue(g.dy);
-      },
-      onPanResponderRelease: (_e, g) => {
-        if (g.dy < -50) {
-          Animated.timing(translateY, { toValue: -200, duration: 180, useNativeDriver: true }).start(
-            () => dismiss(),
-          );
-        } else {
-          Animated.spring(translateY, { toValue: 0, useNativeDriver: true }).start();
-        }
-      },
-    }),
-  ).current;
-
-  if (!current) return null;
+  // A banner already showing when the app locks waits underneath, and comes
+  // back on unlock.
+  if (!current || locked) return null;
 
   const handleTap = () => {
     dismiss();
-    routeFromBanner(current);
+    appNavigator.navigateWhenReady(hrefForNotification(current.type, current.data));
   };
 
-  const actionsForGroup = (group: string | undefined) => {
-    switch (group) {
-      case 'visitor_approval':
-        return [
-          { id: 'REJECT', label: 'Reject', destructive: true },
-          { id: 'APPROVE', label: 'Approve', destructive: false },
-        ];
-      case 'help_request':
-        return [
-          { id: 'DECLINE', label: 'Decline', destructive: true },
-          { id: 'ACCEPT', label: 'Accept', destructive: false },
-        ];
-      case 'task_assignment':
-        return [
-          { id: 'REJECT', label: 'Reject', destructive: true },
-          { id: 'ACCEPT', label: 'Accept', destructive: false },
-        ];
-      default:
-        return null;
-    }
-  };
-
-  const actions = actionsForGroup(current.actionGroup);
-  const visual = visualFor(current);
+  const actions = current.entityId ? actionsForGroup(current.actionGroup) : null;
+  const visual = visualForNotification(current.type);
 
   /**
-   * Act on the banner's buttons.
-   *
-   * Paths must stay identical to `handleActionButton` in lib/notifications.ts
-   * — the same logical action is reachable from the lockscreen and from this
-   * banner, and they previously drifted: both pointed at `/tasks/:id/accept`
-   * and `PATCH /help-requests/:id/accept|decline`, none of which are routes
-   * (there is no `/tasks` controller; help accept is a POST under
-   * `/staff/help-requests`; decline did not exist). All four 404'd, and the
-   * empty catch below meant the banner slid away as though it had worked.
-   *
    * The banner is dismissed only AFTER the call succeeds, so a failure leaves
    * it on screen with an error instead of pretending the action landed.
    */
   const handleAction = async (actionId: string) => {
-    if (!current.entityId) {
-      dismiss();
-      return;
-    }
+    if (!current.entityId || useLockStore.getState().locked) return;
     setActionError(null);
     setActing(actionId);
     try {
-      if (current.actionGroup === 'visitor_approval') {
-        await api.post(`/visitors/${current.entityId}/decision`, {
-          action: actionId === 'APPROVE' ? 'APPROVE' : 'REJECT',
-        });
-      } else if (current.actionGroup === 'help_request') {
-        if (actionId === 'ACCEPT') await api.post(`/staff/help-requests/${current.entityId}/accept`, {});
-        else await api.post(`/staff/help-requests/${current.entityId}/decline`, {});
-      } else if (current.actionGroup === 'task_assignment') {
-        if (actionId === 'ACCEPT') await api.post(`/service-requests/${current.entityId}/accept`, {});
-        else await api.post(`/service-requests/${current.entityId}/reject`, {});
-      }
+      await performNotificationAction(current.actionGroup, actionId, current.entityId);
       dismiss();
-    } catch (err: any) {
-      setActionError(err?.message ?? 'Could not save that. Tap to open.');
+    } catch (err: unknown) {
+      setActionError(err instanceof Error ? err.message : 'Could not save that. Tap to open.');
     } finally {
       setActing(null);
     }
   };
 
   return (
-    <Animated.View
-      pointerEvents="box-none"
-      style={[styles.wrap, { paddingTop: insets.top + 4, transform: [{ translateY }] }]}
-      {...pan.panHandlers}
-    >
+    <View pointerEvents="box-none" style={[styles.wrap, { paddingTop: insets.top + 4 }]}>
       <TouchableOpacity
         activeOpacity={0.92}
         onPress={handleTap}
@@ -218,6 +98,15 @@ export function InAppBanner() {
               {current.body}
             </Text>
           </View>
+          <TouchableOpacity
+            onPress={dismiss}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss notification"
+            style={styles.close}
+          >
+            <Ionicons name="close" size={20} color="#6B7280" />
+          </TouchableOpacity>
         </View>
 
         {actionError ? (
@@ -250,63 +139,8 @@ export function InAppBanner() {
           </View>
         ) : null}
       </TouchableOpacity>
-    </Animated.View>
+    </View>
   );
-}
-
-function routeFromBanner(n: BannerNotification) {
-  const id = n.entityId ?? (n.data?.id as string | undefined) ?? (n.data?.visitId as string | undefined);
-  switch (n.type) {
-    // ── Category registry keys — the backend always sets these now ─────────
-    case 'visitor_approvals':
-    case 'visitors_gate':
-    case 'deliveries':
-    case 'approval_results':
-      router.push('/visitors' as any);
-      return;
-    case 'staff_tasks':
-      if (id) router.push(`/tasks/${id}` as any);
-      else router.push('/(tabs)/tasks' as any);
-      return;
-    case 'staff_help_requests':
-      if (id) router.push(`/help-requests/${id}` as any);
-      else router.push('/help-requests' as any);
-      return;
-    case 'notices':
-    case 'notices_urgent':
-    case 'community':
-      router.push('/community/notices' as any);
-      return;
-    case 'emergency_sos':
-      if (id) router.push(`/help-requests/${id}` as any);
-      else router.push('/help-requests' as any);
-      return;
-    // ── Legacy aliases — payloads from older backend builds ────────────────
-    case 'VISITOR_APPROVAL_REQUEST':
-    case 'VISITOR_ARRIVAL':
-      router.push('/visitors' as any);
-      return;
-    case 'TASK_ASSIGNED':
-    case 'task':
-      if (id) router.push(`/tasks/${id}` as any);
-      else router.push('/(tabs)/tasks' as any);
-      return;
-    case 'HELP_REQUEST':
-    case 'help':
-      if (id) router.push(`/help-requests/${id}` as any);
-      else router.push('/help-requests' as any);
-      return;
-    case 'NOTICE_PUBLISHED':
-    case 'notice':
-      router.push('/community/notices' as any);
-      return;
-    case 'SOS_TRIGGERED':
-    case 'sos':
-      router.push('/help-requests' as any);
-      return;
-    default:
-      router.push('/notifications' as any);
-  }
 }
 
 const styles = StyleSheet.create({
@@ -350,6 +184,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   body: { flex: 1 },
+  close: { padding: 4, alignSelf: 'flex-start' },
   title: { fontSize: 17, fontWeight: '700', color: '#141414', marginBottom: 2 },
   text: { fontSize: 15, color: '#4B5563', lineHeight: 20 },
   actions: { flexDirection: 'row', gap: 10, marginTop: 12 },
