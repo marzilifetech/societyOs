@@ -49,6 +49,35 @@ platform :ios do
     end
   end
 
+  desc "Read-only: review submissions, their state and items — for 'stuck in review' questions"
+  lane :review_status do
+    app = connect!
+    client = Spaceship::ConnectAPI.client.tunes_request_client
+    client.get("v1/apps/#{app.id}/appStoreVersions", { "limit" => 20 }).body["data"].each do |v|
+      a = v["attributes"]
+      UI.message("Version #{a['versionString']} — state #{a['appStoreState']} / #{a['appVersionState']} · release #{a['releaseType']} · created #{a['createdDate']}")
+      bid = client.get("v1/appStoreVersions/#{v['id']}/build").body.dig("data", "id")
+      next UI.message("   attached build: none") unless bid
+      b = client.get("v1/builds/#{bid}", { "include" => "preReleaseVersion" }).body
+      pv = (b["included"] || []).find { |x| x["type"] == "preReleaseVersions" }
+      ba = b.dig("data", "attributes") || {}
+      UI.message("   attached build #{pv && pv.dig('attributes', 'version')} (#{ba['version']}) · uploaded #{ba['uploadedDate']} · expired=#{ba['expired']} · encryption=#{ba['usesNonExemptEncryption'].inspect}")
+    end
+    client.get("v1/apps/#{app.id}/appInfos").body["data"].each do |i|
+      ia = i["attributes"]
+      UI.message("App info — state #{ia['state']} · age rating #{ia['appStoreAgeRating']}")
+    end
+    subs = client.get("v1/reviewSubmissions", { "filter[app]" => app.id, "limit" => 20 }).body["data"]
+    UI.message("Review submissions: #{subs.length}")
+    subs.each do |s|
+      a = s["attributes"]
+      UI.message("Submission #{s['id'][0, 8]}… — #{a['state']} · platform #{a['platform']} · submitted #{a['submittedDate'] || 'never'}")
+      client.get("v1/reviewSubmissions/#{s['id']}/items").body["data"].each do |i|
+        UI.message("   item #{i['id'][0, 8]}… — #{i.dig('attributes', 'state')}")
+      end
+    end
+  end
+
   desc "Read-only: print back what App Store Connect holds for the version"
   lane :verify do
     app = connect!
