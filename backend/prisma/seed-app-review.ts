@@ -16,8 +16,9 @@
  * Safety:
  *   - Touches ONLY rows in the demo society (fixed ids below). It never reads
  *     or modifies another society's data.
- *   - The society has no staff or admins, so an SOS raised by the reviewer
- *     alerts nobody real (SOS fans out to the raising society only).
+ *   - The society's only staff is a demo gate guard that nobody can sign in
+ *     as, and it has no admins, so an SOS raised by the reviewer alerts nobody
+ *     real (SOS fans out to the raising society only).
  *   - It is listed in the pre-login society directory, because the reviewer
  *     must pick it. Real residents will see it there too; hide it after
  *     approval with the super-admin "Show in directory" toggle, and turn it
@@ -201,20 +202,35 @@ async function main(): Promise<void> {
     }
   }
 
+  // ─── Demo gate guard ────────────────────────────────────────────────────
+  // Only a visitor logged by a guard (`createdByStaffId`) waits on the
+  // resident; anything else is reported as already approved. So the demo
+  // visitor needs a guard to have logged it. Nobody signs in as this user:
+  // +91 1000000001 is not a valid Indian mobile, so it can never receive an
+  // OTP, and with no device token, pushes to it go nowhere.
+  const guardPhone = normalizeIndianPhone('1000000001');
+  const guard = await prisma.user.upsert({
+    where: { phone_societyId: { phone: guardPhone, societyId: society.id } },
+    update: { role: 'STAFF', status: 'ACTIVE' },
+    create: { phone: guardPhone, name: 'Demo Gate Security', role: 'STAFF', status: 'ACTIVE', societyId: society.id },
+  });
+
   // ─── Visitors: history, an expected guest, and one waiting at the gate ───
   const visitors = [
     { n: 50, name: 'Courier Delivery', phone: '+910000000051', purpose: 'Package delivery', status: 'CHECKED_OUT' as const,
       approvalStatus: 'APPROVED', entry: -26 * 60 * 60 * 1000, exit: -25.5 * 60 * 60 * 1000 },
     { n: 51, name: 'Guest – Family Visit', phone: '+910000000052', purpose: 'Family visit', status: 'EXPECTED' as const,
       approvalStatus: 'APPROVED' },
-    // Shows the approve / reject card on launch — the app's core feature.
+    // Logged by the demo guard, so it shows the approve / reject card on
+    // launch — the app's core feature. Each run resets it to pending.
     { n: 52, name: 'Demo Visitor at Gate', phone: '+910000000053', purpose: 'Guest', status: 'EXPECTED' as const,
-      approvalStatus: 'PENDING' },
+      approvalStatus: 'PENDING', loggedByGuard: true },
   ];
   for (const v of visitors) {
     const data = {
       residentId: resident.id, name: v.name, phone: v.phone, purpose: v.purpose, status: v.status,
-      approvalStatus: v.approvalStatus, qrToken: id(v.n),
+      approvalStatus: v.approvalStatus, approvedById: null, approvedAt: null,
+      createdByStaffId: v.loggedByGuard ? guard.id : null, qrToken: id(v.n),
       validFrom: fromNow(-DAY * 2), validUntil: fromNow(DAY * 14),
       entryAt: v.entry !== undefined ? fromNow(v.entry) : null,
       exitAt: v.exit !== undefined ? fromNow(v.exit) : null,
