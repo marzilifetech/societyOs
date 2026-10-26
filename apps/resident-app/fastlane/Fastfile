@@ -13,7 +13,7 @@ require "json"
 require "tmpdir"
 
 APP_ID = "com.societyos.resident"
-VERSION = "1.0.16"
+VERSION = "1.0.17"
 STORE_DIR = File.expand_path("../store/ios", __dir__)
 
 # Returns the api_key hash fastlane actions accept, and sets the Spaceship token.
