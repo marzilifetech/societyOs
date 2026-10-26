@@ -125,15 +125,17 @@ async function main(): Promise<void> {
 
   // ─── Events ─────────────────────────────────────────────────────────────
   const events = [
-    { n: 20, title: 'Weekend Yoga Camp', category: 'SPORTS', days: 4, venue: 'Terrace Garden', capacity: 30,
+    { n: 20, title: 'Weekend Yoga Camp', category: 'SPORTS', days: 4, istHour: 7, venue: 'Terrace Garden', capacity: 30,
       description: 'Start your weekend with energy. All levels welcome — mats provided.' },
-    { n: 21, title: 'Kids Painting Workshop', category: 'WORKSHOP', days: 9, venue: 'Community Hall', capacity: 20,
+    { n: 21, title: 'Kids Painting Workshop', category: 'WORKSHOP', days: 9, istHour: 16, venue: 'Community Hall', capacity: 20,
       description: 'A creative painting afternoon for children aged 5 to 12.' },
   ];
   for (const x of events) {
     const data = {
       societyId: society.id, title: x.title, description: x.description, category: x.category,
-      date: fromNow(x.days * DAY), venue: x.venue, capacity: x.capacity, status: 'PUBLISHED' as const,
+      // A sensible clock time (IST = UTC+5:30) rather than whenever the script ran.
+      date: new Date(istDay(x.days).getTime() + (x.istHour * 60 - 330) * 60 * 1000),
+      venue: x.venue, capacity: x.capacity, status: 'PUBLISHED' as const,
     };
     await prisma.event.upsert({ where: { id: id(x.n) }, update: data, create: { id: id(x.n), ...data } });
   }
