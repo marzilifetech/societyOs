@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Alert, KeyboardAvoidingView, Linking, Platform, Pressable, TextInput, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, TextInput, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as SecureStore from 'expo-secure-store';
@@ -136,7 +136,16 @@ export default function PhoneEntryScreen() {
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-      <View style={{ flex: 1, paddingHorizontal: t.screenPadding, paddingTop: t.sectionGap }}>
+      {/* Scrolls when the keyboard leaves too little room. A plain View let the
+          bottom "Need help" spacer shrink below its content and spill upward
+          over "Send code" (seen in App Review's iPad compatibility window and on
+          small iPhones). */}
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ flexGrow: 1, paddingHorizontal: t.screenPadding, paddingTop: t.sectionGap }}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         {/* Back — icon-only button, left-edge aligned with the heading. Using
             an icon avoids the glyph-metric drift that comes with a leading
             arrow + word, which made the text look indented. */}
@@ -251,8 +260,8 @@ export default function PhoneEntryScreen() {
           accessibilityHint="Sends a 4-digit code to your mobile number"
         />
 
-        {/* Need help — bottom anchor, clearly visible */}
-        <View style={{ flex: 1, justifyContent: 'flex-end', paddingBottom: t.sectionGap }}>
+        {/* Need help — bottom anchor when there is room; never overlaps the CTA */}
+        <View style={{ flexGrow: 1, justifyContent: 'flex-end', paddingTop: t.sectionGap, paddingBottom: t.sectionGap }}>
           <Pressable
             onPress={handleNeedHelp}
             accessibilityRole="button"
@@ -274,7 +283,7 @@ export default function PhoneEntryScreen() {
             </ThemedText>
           </Pressable>
         </View>
-      </View>
+      </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );

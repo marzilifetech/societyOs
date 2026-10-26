@@ -17,3 +17,13 @@ society office, and the app has no payment feature.
 Location is requested only to attach the resident's position to an
 Emergency SOS; it is never used in the background. The demo society has no
 security staff, so pressing SOS alerts no one.
+
+Tracking: One Community does not track users. It has no advertising, no
+third-party advertising or analytics SDKs, does not use the advertising
+identifier (IDFA), and does not share any data with data brokers. Data is
+used only to provide the app's features to the resident's own society, so
+the app does not use App Tracking Transparency. The App Privacy information
+has been corrected: no data type is marked as used for tracking.
+
+Devices: this is an iPhone app (portrait only). On iPad it runs in iPhone
+compatibility mode.

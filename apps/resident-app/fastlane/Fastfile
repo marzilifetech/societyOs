@@ -13,7 +13,7 @@ require "json"
 require "tmpdir"
 
 APP_ID = "com.societyos.resident"
-VERSION = "1.0.14"
+VERSION = "1.0.16"
 STORE_DIR = File.expand_path("../store/ios", __dir__)
 
 # Returns the api_key hash fastlane actions accept, and sets the Spaceship token.
@@ -251,6 +251,34 @@ platform :ios do
       data: { type: "apps", id: app.id, attributes: { contentRightsDeclaration: "DOES_NOT_USE_THIRD_PARTY_CONTENT" } }
     })
     UI.success("Content rights: does not use third-party content")
+  end
+
+  desc "Update only the App Review notes/contact (from deliver/metadata/review_information) and the version label"
+  lane :review_info do
+    app = connect!
+    client = Spaceship::ConnectAPI.client.tunes_request_client
+    v = app.get_edit_app_store_version(platform: Spaceship::ConnectAPI::Platform::IOS)
+    UI.user_error!("No editable iOS version") unless v
+    if v.version_string != VERSION
+      v.update(attributes: { version_string: VERSION })
+      UI.success("Version label #{v.version_string} → #{VERSION}")
+    end
+    dir = File.join(STORE_DIR, "deliver/metadata/review_information")
+    read = ->(f) { File.read(File.join(dir, "#{f}.txt")).strip }
+    attrs = {
+      contactFirstName: read.("first_name"), contactLastName: read.("last_name"),
+      contactPhone: read.("phone_number"), contactEmail: read.("email_address"),
+      demoAccountName: read.("demo_user"), demoAccountPassword: read.("demo_password"),
+      demoAccountRequired: true, notes: read.("notes")
+    }
+    rd = client.get("v1/appStoreVersions/#{v.id}/appStoreReviewDetail").body["data"]
+    if rd
+      client.patch("v1/appStoreReviewDetails/#{rd['id']}", { data: { type: "appStoreReviewDetails", id: rd["id"], attributes: attrs } })
+    else
+      client.post("v1/appStoreReviewDetails", { data: { type: "appStoreReviewDetails", attributes: attrs,
+        relationships: { appStoreVersion: { data: { type: "appStoreVersions", id: v.id } } } } })
+    end
+    UI.success("App Review info updated (notes #{attrs[:notes].length} chars)")
   end
 
   desc "Read-only: dump the app's attributes (content rights, kids flag, etc.)"
