@@ -9,7 +9,7 @@
  *
  *   Society   Marzi Demo Residency (App Review) — Bengaluru
  *   Resident  9999999001 / OTP 0000 — "App Reviewer", flat A-101
- *   Data      notices, events, a poll, maintenance bills, 21 days of canteen
+ *   Data      notices, events, a poll, maintenance bills, 45 days of canteen
  *             menus, visitor history, one visitor waiting at the gate, and a
  *             service request in progress.
  *
@@ -29,6 +29,10 @@
  *
  * Idempotent: safe to re-run. Re-running before a new review refreshes the
  * canteen menus, bill due dates and event dates so nothing looks stale.
+ *
+ * Every date is set far enough ahead to survive a long review queue: App
+ * Review has taken 10+ days to pick up a submission, and events seeded 4 and
+ * 9 days out had already passed when the reviewer opened the app.
  */
 import { PrismaClient } from '@prisma/client';
 import { normalizeIndianPhone } from '../src/common/utils/phone';
@@ -118,16 +122,16 @@ async function main(): Promise<void> {
   for (const x of notices) {
     const data = {
       societyId: society.id, title: x.title, body: x.body, category: x.category, isPinned: x.isPinned,
-      publishedAt: fromNow(-x.ago), createdAt: fromNow(-x.ago), expiresAt: fromNow(30 * DAY),
+      publishedAt: fromNow(-x.ago), createdAt: fromNow(-x.ago), expiresAt: fromNow(60 * DAY),
     };
     await prisma.notice.upsert({ where: { id: id(x.n) }, update: data, create: { id: id(x.n), ...data } });
   }
 
   // ─── Events ─────────────────────────────────────────────────────────────
   const events = [
-    { n: 20, title: 'Weekend Yoga Camp', category: 'SPORTS', days: 4, istHour: 7, venue: 'Terrace Garden', capacity: 30,
+    { n: 20, title: 'Weekend Yoga Camp', category: 'SPORTS', days: 12, istHour: 7, venue: 'Terrace Garden', capacity: 30,
       description: 'Start your weekend with energy. All levels welcome — mats provided.' },
-    { n: 21, title: 'Kids Painting Workshop', category: 'WORKSHOP', days: 9, istHour: 16, venue: 'Community Hall', capacity: 20,
+    { n: 21, title: 'Kids Painting Workshop', category: 'WORKSHOP', days: 20, istHour: 16, venue: 'Community Hall', capacity: 20,
       description: 'A creative painting afternoon for children aged 5 to 12.' },
   ];
   for (const x of events) {
@@ -145,7 +149,7 @@ async function main(): Promise<void> {
     societyId: society.id,
     question: 'Which day works best for the community clean-up drive?',
     options: ['Saturday morning', 'Sunday morning', 'Sunday evening'],
-    deadline: fromNow(10 * DAY),
+    deadline: fromNow(30 * DAY),
     isAnonymous: false,
   };
   await prisma.poll.upsert({ where: { id: id(30) }, update: poll, create: { id: id(30), ...poll } });
@@ -163,15 +167,16 @@ async function main(): Promise<void> {
     { n: 41, p: period(0), status: 'PENDING' as const },
   ];
   for (const b of bills) {
-    // The current bill's due date is kept in the future so it never shows as overdue during review.
-    const due = b.status === 'PENDING' && b.p.due < new Date() ? fromNow(10 * DAY) : b.p.due;
+    // The current bill's due date is kept well in the future so it never turns
+    // overdue while the submission waits in the review queue.
+    const due = b.status === 'PENDING' ? fromNow(25 * DAY) : b.p.due;
     const data = {
       flatId: flat.id, residentId: resident.id, period: b.p.key, breakdown, total: 4500, dueDate: due, status: b.status,
     };
     await prisma.maintenanceBill.upsert({ where: { id: id(b.n) }, update: data, create: { id: id(b.n), ...data } });
   }
 
-  // ─── Canteen: breakfast + lunch for the next 21 days ─────────────────────
+  // ─── Canteen: breakfast + lunch for the next 45 days ─────────────────────
   const dishes: Record<string, { name: string; calories: number; price: number; allergens?: string[] }[]> = {
     BREAKFAST: [
       { name: 'Idli Sambar', calories: 250, price: 50 },
@@ -185,7 +190,7 @@ async function main(): Promise<void> {
       { name: 'Curd Rice', calories: 320, price: 60, allergens: ['Milk'] },
     ],
   };
-  for (let day = 0; day < 21; day++) {
+  for (let day = 0; day < 45; day++) {
     for (const mealType of Object.keys(dishes)) {
       const menu = await prisma.canteenMenu.upsert({
         where: { societyId_date_mealType: { societyId: society.id, date: istDay(day), mealType } },
@@ -233,7 +238,7 @@ async function main(): Promise<void> {
       residentId: resident.id, name: v.name, phone: v.phone, purpose: v.purpose, status: v.status,
       approvalStatus: v.approvalStatus, approvedById: null, approvedAt: null,
       createdByStaffId: v.loggedByGuard ? guard.id : null, qrToken: id(v.n),
-      validFrom: fromNow(-DAY * 2), validUntil: fromNow(DAY * 14),
+      validFrom: fromNow(-DAY * 2), validUntil: fromNow(DAY * 30),
       entryAt: v.entry !== undefined ? fromNow(v.entry) : null,
       exitAt: v.exit !== undefined ? fromNow(v.exit) : null,
     };
