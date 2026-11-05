@@ -16,7 +16,7 @@ advertising and no cross-app tracking. So:
 - Do NOT add the AppTrackingTransparency prompt.
 - Every data type below is "Not used for tracking".
 
-## Data collected — tick exactly these (verified against build 1.0.14 (1))
+## Data collected — tick exactly these (re-verified against build 1.0.17 (2), 2026-11-06)
 
 For EVERY type below: **Linked to the user: Yes · Used for tracking: No ·
 Purpose: App Functionality only.**
@@ -43,14 +43,20 @@ not what Apple sees.
 | User Content | Other User Content      | Service-request text, vehicle numbers                              |
 | Identifiers  | User ID                 | Account id                                                         |
 | Identifiers  | Device ID               | Push-notification token                                            |
+| Financial    | Other Financial Info    | Salary amounts a resident records as paid to their domestic help   |
+| Purchases    | Purchase History        | Canteen pre-orders (dishes, quantities, pickup time)               |
 | Other Data   | Other Data Types        | Government ID numbers (Aadhaar, PAN) for residency verification    |
 
 ## Not collected — leave unticked
 
-Health & Fitness · Financial Info · Sensitive Info (Apple's definition covers
+Health & Fitness (health screens are off on iOS) · Payment Info / Credit Info (no payments) · Sensitive Info (Apple's definition covers
 race, religion, biometrics etc., not ID numbers) · Contacts · Emails or Text
-Messages · Audio · Gameplay · Browsing/Search History · Purchases · Usage Data ·
+Messages · Audio · Gameplay · Browsing/Search History · Usage Data · Coarse Location ·
 **Diagnostics** · Surroundings · Body.
+
+Not collected because the app only _displays_ it: maintenance bills (raised by
+the society office) and other residents' birthdays on the Notices tab (entered
+in the admin portal, not in this app).
 
 Diagnostics is correct only while Sentry is off: `EXPO_PUBLIC_SENTRY_DSN_RESIDENT`
 is unset for production, so no crash or performance data leaves the device.
