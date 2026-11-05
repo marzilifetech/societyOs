@@ -281,6 +281,21 @@ platform :ios do
     UI.success("App Review info updated (notes #{attrs[:notes].length} chars)")
   end
 
+  desc "Read-only: every Age Rating answer App Store Connect holds, per app info, plus the review notes"
+  lane :age_rating do
+    app = connect!
+    client = Spaceship::ConnectAPI.client.tunes_request_client
+    client.get("v1/apps/#{app.id}/appInfos").body["data"].each do |i|
+      UI.message("App info #{i['id'][0, 8]}… — state #{i.dig('attributes', 'state')} · rating #{i.dig('attributes', 'appStoreAgeRating')}")
+      age = client.get("v1/appInfos/#{i['id']}/ageRatingDeclaration").body["data"]
+      next UI.message("   no age rating declaration") unless age
+      age["attributes"].sort.each { |k, val| UI.message("   #{k} = #{val.inspect}") }
+    end
+    v = app.get_edit_app_store_version(platform: Spaceship::ConnectAPI::Platform::IOS)
+    rd = v && client.get("v1/appStoreVersions/#{v.id}/appStoreReviewDetail").body["data"]
+    UI.message(rd ? "Review notes on #{v.version_string}:\n#{rd.dig('attributes', 'notes')}" : "Review notes: none")
+  end
+
   desc "Read-only: dump the app's attributes (content rights, kids flag, etc.)"
   lane :app_attributes do
     app = connect!

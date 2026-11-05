@@ -1,3 +1,16 @@
+Advertising: One Community contains NO advertising of any kind. It shows no
+ads, banners, sponsored or promoted content, and no promotions for other apps
+or products. It includes no advertising SDK or ad network and does not use the
+advertising identifier (IDFA), SKAdNetwork or AdServices. The Age Rating
+answer "Advertising: No" is therefore correct. Every screen shows only the
+resident's own society information (visitors, bills, notices, events, menus).
+
+Tracking: One Community does not track users. It has no third-party analytics
+SDKs and does not share any data with data brokers or for advertising. Data is
+used only to provide the app's features to the resident's own society, so the
+app does not use App Tracking Transparency. In App Privacy, no data type is
+marked as used for tracking or for advertising.
+
 One Community is used by residents of a registered residential society.
 Sign-in is by mobile number and one-time password (OTP), so a self-service
 account cannot be created. We have set up a demo society for review:
@@ -8,22 +21,18 @@ account cannot be created. We have set up a demo society for review:
    is fixed.)
 
 After sign-in you will see a visitor waiting at the gate with Approve /
-Reject buttons — this is the app's core feature: security logs a guest at
+Reject buttons. This is the app's core feature: security logs a guest at
 the gate and the resident decides from their phone.
 
 Maintenance bills are shown for information only. Residents pay at their
-society office, and the app has no payment feature.
+society office, and the app has no payment feature. Canteen pre-orders are
+paid at the society canteen; the app takes no payment.
 
 Location is requested only to attach the resident's position to an
 Emergency SOS; it is never used in the background. The demo society has no
 security staff, so pressing SOS alerts no one.
 
-Tracking: One Community does not track users. It has no advertising, no
-third-party advertising or analytics SDKs, does not use the advertising
-identifier (IDFA), and does not share any data with data brokers. Data is
-used only to provide the app's features to the resident's own society, so
-the app does not use App Tracking Transparency. The App Privacy information
-has been corrected: no data type is marked as used for tracking.
+Account deletion: Profile > Settings > Delete account.
 
 Devices: this is an iPhone app (portrait only). On iPad it runs in iPhone
 compatibility mode.
