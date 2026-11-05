@@ -21,6 +21,15 @@ advertising and no cross-app tracking. So:
 For EVERY type below: **Linked to the user: Yes · Used for tracking: No ·
 Purpose: App Functionality only.**
 
+Never tick **Third-Party Advertising**, **Developer's Advertising or
+Marketing**, **Analytics**, **Product Personalization** or **Other Purposes**
+on any type. The app has no ads and no analytics. Apple's automated check reads
+an advertising purpose here as "the app shows ads". On 2026-11-05 it blocked
+review because that disagreed with the Age Rating answer "Advertising: No".
+Turning tracking off does not clear the purposes: open each type and untick
+them, then press **Publish** (top right of App Privacy). Unpublished edits are
+not what Apple sees.
+
 | Category     | Data type               | What it is in this app                                             |
 | ------------ | ----------------------- | ------------------------------------------------------------------ |
 | Contact Info | Name                    | Resident's name (profile)                                          |

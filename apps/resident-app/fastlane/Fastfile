@@ -281,6 +281,24 @@ platform :ios do
     UI.success("App Review info updated (notes #{attrs[:notes].length} chars)")
   end
 
+  desc "Update only the version's listing text and URLs (from deliver/metadata/LOCALE) — no screenshots"
+  lane :listing_text do
+    app = connect!
+    v = app.get_edit_app_store_version(platform: Spaceship::ConnectAPI::Platform::IOS)
+    UI.user_error!("No editable iOS version") unless v
+    dir = File.join(STORE_DIR, "deliver/metadata/LOCALE")
+    read = ->(f) { (File.read(File.join(dir, "#{f}.txt")).strip rescue "") }
+    attrs = {
+      description: read.("description"), keywords: read.("keywords"),
+      promotional_text: read.("promotional_text"), support_url: read.("support_url"),
+      marketing_url: read.("marketing_url")
+    }.reject { |_, val| val.empty? }
+    loc = v.get_app_store_version_localizations.find { |l| l.locale == app.primary_locale }
+    UI.user_error!("No #{app.primary_locale} localization on #{v.version_string}") unless loc
+    loc.update(attributes: attrs)
+    UI.success("Updated #{attrs.keys.join(', ')} on #{v.version_string} [#{loc.locale}] · support=#{attrs[:support_url]}")
+  end
+
   desc "Read-only: every Age Rating answer App Store Connect holds, per app info, plus the review notes"
   lane :age_rating do
     app = connect!

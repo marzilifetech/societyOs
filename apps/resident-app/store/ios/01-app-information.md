@@ -47,10 +47,12 @@ want permanently: it cannot be changed after the first submission.
 | Field              | Value                                                   |
 | ------------------ | ------------------------------------------------------- |
 | Privacy Policy URL | `https://society-admin-dev.marzitech.in/privacy-policy` |
-| Support URL        | `https://society-admin-dev.marzitech.in/privacy-policy` |
+| Support URL        | `https://society-admin-dev.marzitech.in/support`        |
 | Marketing URL      | _(leave blank)_                                         |
 | Copyright          | `2026 Marzi Agetech Private Limited`                    |
 
-The listing uses `https://society-admin-dev.marzitech.in/privacy-policy` for both
-URLs (200, with a Contact us section). `https://marzitech.in/privacy-policy`
-still returns 404, so don't use that one.
+The Support URL is a dedicated, login-free help page
+(apps/admin-web/src/app/support/page.tsx) with the support email, sign-in help
+and account deletion. Guideline 1.5 wants the Support URL to lead to a way to
+get help, so it no longer points at the privacy policy.
+`https://marzitech.in/privacy-policy` still returns 404, so don't use that one.
