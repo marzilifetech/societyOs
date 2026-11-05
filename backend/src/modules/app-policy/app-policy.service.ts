@@ -157,7 +157,9 @@ export class AppPolicyService {
 
   private defaultStoreUrl(app: AppKey, platform: 'android' | 'ios'): string {
     if (platform === 'ios') {
-      return 'https://apps.apple.com/'; // overridden once iOS shipping starts
+      // One Community by Marzi's App Store listing (App Store Connect app id
+      // 6816896667). The staff app has no iOS listing yet.
+      return app === 'resident' ? 'https://apps.apple.com/in/app/id6816896667' : 'https://apps.apple.com/';
     }
     // The Android application IDs, NOT the iOS bundle IDs (com.societyos.*).
     // The old com.societyos.* listing is a Play 404, so a forced update sent

@@ -9,6 +9,7 @@ import { useAuthStore } from '../../src/store/auth.store';
 import { api } from '../../src/lib/api';
 import { UNFINISHED_ROUTES, UNFINISHED_SCREENS_ENABLED } from '../../src/lib/features';
 import { APP_NAME, APP_VERSION_LABEL } from '../../src/lib/app-version';
+import { PRIVACY_POLICY_URL, SUPPORT_EMAIL, SUPPORT_URL, openWebPage } from '../../src/lib/links';
 import { Display, rd } from '../../src/components/ui/redesign';
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
@@ -16,6 +17,7 @@ type IoniconName = keyof typeof Ionicons.glyphMap;
 type Item = {
   icon: IoniconName;
   label: string;
+  /** An app route, or an https:// page opened in the in-app browser. */
   route: string;
   tint: string;
   description?: string;
@@ -117,16 +119,30 @@ const ALL_SECTIONS: Section[] = [
       },
       {
         icon: 'repeat-outline',
-        label: 'Subscriptions',
+        label: 'Milk & newspaper',
         route: '/subscriptions',
         tint: '#D97706',
-        description: 'Recurring services you have joined',
+        description: 'Daily deliveries you have set up',
       },
     ],
   },
   {
     title: 'Help & support',
     items: [
+      {
+        icon: 'help-buoy-outline',
+        label: 'Help & contact',
+        route: SUPPORT_URL,
+        tint: '#0EA5E9',
+        description: `Answers to common questions, or email ${SUPPORT_EMAIL}`,
+      },
+      {
+        icon: 'shield-checkmark-outline',
+        label: 'Privacy policy',
+        route: PRIVACY_POLICY_URL,
+        tint: '#16A34A',
+        description: 'What we collect and how we protect it',
+      },
       {
         icon: 'chatbubble-ellipses-outline',
         label: 'Send feedback',
@@ -157,8 +173,6 @@ const SECTIONS = ALL_SECTIONS.map((section) => ({
   items: section.items.filter((item) => UNFINISHED_SCREENS_ENABLED || !UNFINISHED_ROUTES.has(item.route)),
 })).filter((section) => section.items.length > 0);
 
-const SUPPORT_EMAIL = 'support@marzitech.in';
-
 export default function SettingsScreen() {
   const clearAuth = useAuthStore((s) => s.clearAuth);
   const user = useAuthStore((s) => s.user);
@@ -172,6 +186,10 @@ export default function SettingsScreen() {
 
   const go = (route: string) => {
     Haptics.selectionAsync().catch(() => {});
+    if (route.startsWith('https://')) {
+      openWebPage(route);
+      return;
+    }
     router.push(route as any);
   };
 

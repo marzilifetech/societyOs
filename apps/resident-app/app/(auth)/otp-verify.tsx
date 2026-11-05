@@ -26,6 +26,7 @@ import { useAuthStore } from '../../src/store/auth.store';
 import { Display, rd } from '../../src/components/ui/redesign';
 import { Tappable } from '../../src/components/ui/Tappable';
 import { useSmsOtpAutoRead } from '../../src/hooks/useSmsOtpAutoRead';
+import { BIOMETRIC_LOGIN_ENABLED } from '../../src/lib/features';
 
 // requires: npx expo install expo-local-authentication
 let LocalAuthentication: typeof import('expo-local-authentication') | null = null;
@@ -157,7 +158,7 @@ export default function OtpVerifyScreen() {
       await setAuth(token, res.refreshToken ?? null, res.user, societyId);
 
       try {
-        if (LocalAuthentication) {
+        if (BIOMETRIC_LOGIN_ENABLED && LocalAuthentication) {
           const hasHardware = await LocalAuthentication.hasHardwareAsync();
           const isEnrolled = await LocalAuthentication.isEnrolledAsync();
           const alreadyEnabled = await SecureStore.getItemAsync('biometricEnabled');

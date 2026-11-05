@@ -327,6 +327,10 @@ function NewOrderView({
             <Text style={{ fontSize: t.fontBase, fontWeight: '700', color: t.textPrimary }}>Total</Text>
             <Text style={{ fontSize: t.fontLg, fontWeight: '700', color: t.textPrimary }}>₹{cartTotal}</Text>
           </View>
+          {/* The app takes no payment; say where it happens. */}
+          <Text style={{ fontSize: t.fontSm, color: t.textSecondary, marginTop: 8 }}>
+            Pay at the canteen counter when you collect your order.
+          </Text>
         </RoundCard>
 
         {/* Pickup time */}

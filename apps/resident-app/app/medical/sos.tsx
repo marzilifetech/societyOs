@@ -9,7 +9,6 @@ import {
   Platform,
   Modal,
   Alert,
-  Linking,
   Vibration,
   Animated,
   Easing,
@@ -38,6 +37,7 @@ import {
   rd,
 } from '../../src/components/ui';
 import { ErrorBoundary } from '../../src/components/ErrorBoundary';
+import { callNumber } from '../../src/lib/links';
 
 // Public Figma reference (Emergency SOS): node-id=22-1418.
 // Full redesign of the SOS flow per the 2026 Figma: Emergency Alert form →
@@ -147,7 +147,7 @@ function SosScreenInner() {
       buttons.push({
         text: `Call ${security.label}`,
         onPress: () => {
-          Linking.openURL(`tel:${security.phone.replace(/\s/g, '')}`).catch(() => {});
+          callNumber(security.phone.replace(/\s/g, ''), `Call ${security.label}`);
         },
       });
     }

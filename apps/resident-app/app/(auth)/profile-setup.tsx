@@ -19,6 +19,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
 import { useAuthStore } from '../../src/store/auth.store';
 import * as Location from 'expo-location';
+import { ONBOARDING_LOCATION_PROMPT } from '../../src/lib/features';
+import { PRIVACY_POLICY_URL, openWebPage } from '../../src/lib/links';
 
 type Flat = {
   id: string;
@@ -53,7 +55,9 @@ export default function ProfileSetupScreen() {
   const [residentType, setResidentType] = useState<'OWNER' | 'TENANT'>('OWNER');
   const [emergencyContactName, setEmergencyContactName] = useState('');
   const [emergencyContactPhone, setEmergencyContactPhone] = useState('');
-  const [consentAccepted, setConsentAccepted] = useState(true);
+  // Off until the resident turns it on: consent has to be their own choice
+  // (DPDP Act 2023), not a pre-ticked default.
+  const [consentAccepted, setConsentAccepted] = useState(false);
   // Flat picker bottom-sheet state. The picker used to render every flat as a
   // long stacked list (200+ rows in larger societies, scroll-hell), so we
   // moved it into a search-filtered modal that opens on demand.
@@ -64,6 +68,7 @@ export default function ProfileSetupScreen() {
   // during an SOS — far better than first-prompting in the middle of a crisis.
   // Denial never blocks onboarding; we just explain why it matters.
   useEffect(() => {
+    if (!ONBOARDING_LOCATION_PROMPT) return;
     (async () => {
       try {
         const existing = await Location.getForegroundPermissionsAsync();
@@ -418,6 +423,17 @@ export default function ProfileSetupScreen() {
               <Text className="text-gray-500 text-sm leading-5">
                 Marzi uses this information only for resident verification, notices, billing, and emergency support.
               </Text>
+              <Pressable
+                onPress={() => openWebPage(PRIVACY_POLICY_URL)}
+                accessibilityRole="link"
+                accessibilityLabel="Read our privacy policy"
+                hitSlop={8}
+                style={{ marginTop: 8, alignSelf: 'flex-start' }}
+              >
+                <Text className="text-sm font-semibold" style={{ color: '#821A52' }}>
+                  Read our privacy policy
+                </Text>
+              </Pressable>
             </View>
             <Switch
               value={consentAccepted}

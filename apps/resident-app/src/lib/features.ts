@@ -69,3 +69,19 @@ export const UNFINISHED_SCREENS_ENABLED = Platform.OS !== 'ios';
 
 /** Routes gated by UNFINISHED_SCREENS_ENABLED, for filtering menu rows. */
 export const UNFINISHED_ROUTES = new Set(['/travel', '/property', '/settings/language', '/settings/notification-test']);
+
+/**
+ * "Enable biometric login" after the OTP, and the Face ID prompt on the phone
+ * screen. Off on iOS: a signed-in resident goes straight to Home and signing
+ * out deletes the session, so the prompt never has a session to unlock. App
+ * Review would find an offer that does nothing (Guideline 2.1). Turn it back on
+ * with a real cold-start lock.
+ */
+export const BIOMETRIC_LOGIN_ENABLED = Platform.OS !== 'ios';
+
+/**
+ * Ask for location while the resident sets up their profile, ahead of any SOS.
+ * Off on iOS, where it is asked only when SOS is used: the permission prompt
+ * then has an obvious reason, as App Review expects (Guideline 5.1.1).
+ */
+export const ONBOARDING_LOCATION_PROMPT = Platform.OS !== 'ios';

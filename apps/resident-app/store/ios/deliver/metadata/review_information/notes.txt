@@ -32,7 +32,10 @@ Location is requested only to attach the resident's position to an
 Emergency SOS; it is never used in the background. The demo society has no
 security staff, so pressing SOS alerts no one.
 
-Account deletion: Profile > Settings > Delete account.
+Account deletion: Profile > Settings > Delete account. Deletion is real and
+immediate, so it also removes the demo account; please try it last.
+
+Privacy policy and support: Profile > Settings > Help & support.
 
 Devices: this is an iPhone app (portrait only). On iPad it runs in iPhone
 compatibility mode.

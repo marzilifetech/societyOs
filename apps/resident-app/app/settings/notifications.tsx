@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../src/lib/api';
+import { UNFINISHED_SCREENS_ENABLED } from '../../src/lib/features';
 import { openNotificationSettings } from '../../src/lib/push';
 import { useNotificationPermission } from '../../src/hooks/useNotificationPermission';
 import { Display, rd } from '../../src/components/ui/redesign';
@@ -280,16 +281,19 @@ export default function NotificationSettingsScreen() {
         {/* Escape hatches — the two things a user wants when alerts misbehave. */}
         <View style={styles.section}>
           <View style={styles.card}>
-            <Tappable
-              onPress={() => router.push('/settings/notification-test' as any)}
-              style={[styles.linkRow, styles.rowDivider]} pressedStyle={styles.pressed}
-              accessibilityRole="button"
-              accessibilityLabel="Send a test notification"
-            >
-              <Ionicons name="flask-outline" size={18} color="#821A52" />
-              <Text style={styles.linkText}>Send a test notification</Text>
-              <Ionicons name="chevron-forward" size={16} color="#9CA3AF" />
-            </Tappable>
+            {/* The test screen is off on iOS (it redirects home), so its row is too. */}
+            {UNFINISHED_SCREENS_ENABLED ? (
+              <Tappable
+                onPress={() => router.push('/settings/notification-test' as any)}
+                style={[styles.linkRow, styles.rowDivider]} pressedStyle={styles.pressed}
+                accessibilityRole="button"
+                accessibilityLabel="Send a test notification"
+              >
+                <Ionicons name="flask-outline" size={18} color="#821A52" />
+                <Text style={styles.linkText}>Send a test notification</Text>
+                <Ionicons name="chevron-forward" size={16} color="#9CA3AF" />
+              </Tappable>
+            ) : null}
             <Tappable
               onPress={() => router.push('/profile/notification-troubleshoot' as any)}
               style={[styles.linkRow, styles.rowDivider]} pressedStyle={styles.pressed}

@@ -15,7 +15,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.societyos.resident",
-      "buildNumber": "1",
+      "buildNumber": "2",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -55,7 +55,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "One Community uses the camera to photograph a visitor you are pre-approving, to scan visitor QR passes, and to capture your ID documents for society verification.",
+          "cameraPermission": "One Community uses the camera to photograph a visitor you are pre-approving, or your ID documents for society verification.",
           "microphonePermission": false,
           "recordAudioAndroid": false
         }
@@ -63,7 +63,7 @@
       [
         "expo-image-picker",
         {
-          "cameraPermission": "One Community uses the camera to photograph a visitor you are pre-approving, to scan visitor QR passes, and to capture your ID documents for society verification.",
+          "cameraPermission": "One Community uses the camera to photograph a visitor you are pre-approving, or your ID documents for society verification.",
           "photosPermission": "One Community lets you choose photos from your library to attach to a complaint, a visitor pass or your ID documents.",
           "microphonePermission": false
         }

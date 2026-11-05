@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Alert, KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, TextInput, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, TextInput, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as SecureStore from 'expo-secure-store';
@@ -8,6 +8,8 @@ import { useAuthStore } from '../../src/store/auth.store';
 import { requestPhoneNumberHint } from '../../src/hooks/useSmsOtpAutoRead';
 import { useTheme } from '../../src/hooks/useTheme';
 import { ThemedText, ThemedButton } from '../../src/components/ui';
+import { BIOMETRIC_LOGIN_ENABLED } from '../../src/lib/features';
+import { callNumber } from '../../src/lib/links';
 
 // requires: npx expo install expo-local-authentication
 let LocalAuthentication: typeof import('expo-local-authentication') | null = null;
@@ -65,7 +67,7 @@ export default function PhoneEntryScreen() {
     // On app open: if biometric login is enabled and a token exists, offer biometric auth
     const tryBiometric = async () => {
       try {
-        if (!LocalAuthentication) return;
+        if (!BIOMETRIC_LOGIN_ENABLED || !LocalAuthentication) return;
         const biometricEnabled = await SecureStore.getItemAsync('biometricEnabled');
         const token = await SecureStore.getItemAsync('auth_token');
         if (biometricEnabled !== 'true' || !token) return;
@@ -124,11 +126,7 @@ export default function PhoneEntryScreen() {
     }
   };
 
-  const handleNeedHelp = () => {
-    Linking.openURL(`tel:${SUPPORT_PHONE}`).catch(() => {
-      Alert.alert('Support', `Please call ${SUPPORT_PHONE} for help.`);
-    });
-  };
+  const handleNeedHelp = () => callNumber(SUPPORT_PHONE, 'Support');
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bgPrimary }}>
