@@ -141,13 +141,14 @@ platform :ios do
     end
   end
 
-  desc "Attach the processed build matching VERSION to the editable App Store version"
-  lane :attach_build do
+  desc "Attach the processed build matching VERSION (optionally build:<number>) to the editable App Store version"
+  lane :attach_build do |options|
     app = connect!
     v = app.get_edit_app_store_version(platform: Spaceship::ConnectAPI::Platform::IOS)
+    want = options[:build]&.to_s
     build = Spaceship::ConnectAPI::Build.all(app_id: app.id, version: VERSION, sort: "-uploadedDate", limit: 10)
-                                      .find { |b| b.processing_state == "VALID" }
-    UI.user_error!("No processed (VALID) build #{VERSION} yet") unless build
+                                      .find { |b| b.processing_state == "VALID" && (want.nil? || b.version == want) }
+    UI.user_error!("No processed (VALID) build #{VERSION}#{want ? " (#{want})" : ''} yet") unless build
     v.select_build(build_id: build.id)
     UI.success("Attached build #{build.app_version} (#{build.version}) to version #{v.version_string}")
   end
