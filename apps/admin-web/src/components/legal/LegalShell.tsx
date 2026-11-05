@@ -50,6 +50,9 @@ export function LegalShell({
             .
           </p>
           <p className="mt-3 flex gap-5">
+            <Link href="/support" className="hover:underline">
+              Support
+            </Link>
             <Link href="/privacy-policy" className="hover:underline">
               Privacy Policy
             </Link>
