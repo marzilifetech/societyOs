@@ -300,6 +300,47 @@ platform :ios do
     UI.success("Updated #{attrs.keys.join(', ')} on #{v.version_string} [#{loc.locale}] · support=#{attrs[:support_url]}")
   end
 
+  # App Privacy cannot be written with the API key: Apple allows it only from an
+  # Apple ID session, so this lane asks for the Apple ID, its password and the
+  # 2FA code. Run it in Terminal (it is interactive), as an Account Holder or
+  # Admin of the Marzi team:
+  #   fastlane ios privacy_labels apple_id:you@example.com
+  # It deletes every existing App Privacy answer, writes the ones in
+  # store/ios/deliver/app_privacy_details.json (App Functionality only, linked
+  # to the user, no tracking), then publishes them.
+  desc "Replace and publish App Privacy answers from store/ios/deliver/app_privacy_details.json (Apple ID login)"
+  lane :privacy_labels do |options|
+    apple_id = options[:apple_id] || UI.input("Apple ID (Account Holder or Admin of the Marzi team):")
+    json = File.join(STORE_DIR, "deliver/app_privacy_details.json")
+    usages = JSON.parse(File.read(json))
+    bad = usages.flat_map { |u| u["purposes"] || [] } - ["APP_FUNCTIONALITY"]
+    UI.user_error!("Only APP_FUNCTIONALITY is allowed as a purpose; found #{bad.uniq.join(', ')}") unless bad.empty?
+    tracked = usages.select { |u| (u["data_protections"] || []).include?("DATA_USED_TO_TRACK_YOU") }
+    UI.user_error!("No data type may be marked as tracking") unless tracked.empty?
+    upload_app_privacy_details_to_app_store(
+      username: apple_id,
+      team_id: ENV["ASC_TEAM_ID"],
+      app_identifier: APP_ID,
+      json_path: json
+    )
+    UI.success("App Privacy published: #{usages.length} data types, App Functionality only, linked to user, no tracking")
+  end
+
+  desc "Read-only: every build uploaded for the app (all versions), newest first"
+  lane :builds do
+    app = connect!
+    client = Spaceship::ConnectAPI.client.tunes_request_client
+    res = client.get("v1/builds", { "filter[app]" => app.id, "sort" => "-uploadedDate", "limit" => 50, "include" => "preReleaseVersion,buildBundles" }).body
+    vers = (res["included"] || []).select { |x| x["type"] == "preReleaseVersions" }.to_h { |x| [x["id"], x.dig("attributes", "version")] }
+    bundles = (res["included"] || []).select { |x| x["type"] == "buildBundles" }.to_h { |x| [x["id"], x["attributes"]] }
+    res["data"].each do |b|
+      a = b["attributes"]
+      v = vers[b.dig("relationships", "preReleaseVersion", "data", "id")]
+      bb = (b.dig("relationships", "buildBundles", "data") || []).map { |r| bundles[r["id"]] }.compact.first || {}
+      UI.message("#{v} (#{a['version']}) · uploaded #{a['uploadedDate']} · #{a['processingState']} · expired=#{a['expired']} · sdk #{bb['sdkBuild']} · location=#{bb['usesLocationServices'].inspect}")
+    end
+  end
+
   desc "Read-only: every Age Rating answer App Store Connect holds, per app info, plus the review notes"
   lane :age_rating do
     app = connect!
