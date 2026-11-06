@@ -326,6 +326,28 @@ platform :ios do
     UI.success("App Privacy published: #{usages.length} data types, App Functionality only, linked to user, no tracking")
   end
 
+  # Apple's App Privacy page reads NSUserTrackingUsageDescription from any
+  # unexpired build, so an old one can keep "requires tracking" alive after the
+  # current build drops the key. Expiring is permanent: run it yourself.
+  desc "Expire every build except the one attached to the editable version (irreversible)"
+  lane :expire_old_builds do
+    app = connect!
+    client = Spaceship::ConnectAPI.client.tunes_request_client
+    v = app.get_edit_app_store_version(platform: Spaceship::ConnectAPI::Platform::IOS)
+    keep = v && client.get("v1/appStoreVersions/#{v.id}/build").body.dig("data", "id")
+    UI.user_error!("No build attached to the editable version; refusing to expire anything") unless keep
+    res = client.get("v1/builds", { "filter[app]" => app.id, "filter[expired]" => "false", "limit" => 50, "include" => "preReleaseVersion" }).body
+    vers = (res["included"] || []).select { |x| x["type"] == "preReleaseVersions" }.to_h { |x| [x["id"], x.dig("attributes", "version")] }
+    old = res["data"].reject { |b| b["id"] == keep }
+    next UI.success("Nothing to expire") if old.empty?
+    labels = old.map { |b| "#{vers[b.dig('relationships', 'preReleaseVersion', 'data', 'id')]} (#{b.dig('attributes', 'version')})" }
+    UI.user_error!("Not confirmed") unless UI.confirm("Expire #{labels.join(', ')}? This cannot be undone.")
+    old.zip(labels).each do |b, label|
+      client.patch("v1/builds/#{b['id']}", { data: { type: "builds", id: b["id"], attributes: { expired: true } } })
+      UI.success("Expired #{label}")
+    end
+  end
+
   desc "Read-only: every build uploaded for the app (all versions), newest first"
   lane :builds do
     app = connect!
